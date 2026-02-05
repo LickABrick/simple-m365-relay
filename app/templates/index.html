@@ -120,6 +120,60 @@
 
   <style>
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    /*
+      Tailwind CDN config isn't reliably applied in some setups (tailwind.config ends up {}).
+      So we implement dark/light via CSS variables + a few class overrides.
+      This keeps the layout utilities from Tailwind, but makes colors follow html.dark.
+    */
+    :root {
+      --bg: #f8fafc;            /* slate-50 */
+      --fg: #0f172a;            /* slate-900 */
+      --muted: #475569;         /* slate-600 */
+      --muted2: #64748b;        /* slate-500 */
+      --card: #ffffff;
+      --card2: #f1f5f9;         /* slate-100 */
+      --border: #e2e8f0;        /* slate-200 */
+      --border2: #cbd5e1;       /* slate-300 */
+      --shadow: rgba(2,6,23,0.06);
+    }
+    html.dark {
+      --bg: #020617;            /* slate-950 */
+      --fg: #e2e8f0;            /* slate-200 */
+      --muted: #94a3b8;         /* slate-400 */
+      --muted2: #94a3b8;
+      --card: #0b1220;          /* slightly above slate-950 */
+      --card2: #0f172a;         /* slate-900 */
+      --border: #1f2937;        /* gray-800-ish */
+      --border2: #334155;       /* slate-700 */
+      --shadow: rgba(0,0,0,0.35);
+    }
+
+    body { background: var(--bg) !important; color: var(--fg) !important; }
+
+    /* common Tailwind color classes used in this template */
+    .bg-white { background-color: var(--card) !important; }
+    .bg-slate-50 { background-color: var(--bg) !important; }
+    .bg-slate-900 { background-color: var(--card2) !important; }
+    .bg-slate-950 { background-color: var(--bg) !important; }
+
+    .text-slate-900 { color: var(--fg) !important; }
+    .text-slate-700 { color: var(--fg) !important; opacity: 0.92; }
+    .text-slate-600 { color: var(--muted) !important; }
+    .text-slate-500 { color: var(--muted2) !important; }
+    .text-slate-200 { color: var(--fg) !important; }
+
+    .border-slate-200 { border-color: var(--border) !important; }
+    .border-slate-800 { border-color: var(--border) !important; }
+
+    /* subtle hover for nav items */
+    a[data-nav]:hover { background-color: var(--card2) !important; }
+
+    /* topbar translucent background */
+    header { background-color: color-mix(in oklab, var(--card) 82%, transparent) !important; }
+
+    /* pre blocks */
+    pre { background: color-mix(in oklab, var(--card2) 80%, var(--card) 20%) !important; }
   </style>
 </head>
 
