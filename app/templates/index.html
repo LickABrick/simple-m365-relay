@@ -288,6 +288,9 @@
         const r = await fetch('/api/status', { cache: 'no-store' });
         const j = await r.json();
 
+        // pending
+        if (typeof j.pending !== 'undefined') syncPendingFromApi(!!j.pending);
+
         // health
         const dot = document.getElementById('healthDot');
         const lbl = document.getElementById('healthLabel');
@@ -378,6 +381,12 @@
       if (btn) btn.addEventListener('click', () => refreshStatus());
 
       if (cb.checked) { refreshStatus(); start(); }
+    }
+
+    function syncPendingFromApi(pending){
+      const btn = document.getElementById('applyBtn');
+      if (!btn) return;
+      btn.disabled = !pending;
     }
 
     window.addEventListener('DOMContentLoaded', () => {
@@ -474,6 +483,7 @@
   <div class="min-h-full">
 
     <!-- Top bar -->
+
     <!-- Toast -->
     <div id="toast" class="hidden fixed right-4 top-20 z-50 max-w-xl rounded-2xl px-4 py-3 text-sm">
       <div class="flex items-start gap-3">
@@ -481,7 +491,7 @@
           <i data-lucide="info" class="h-4 w-4"></i>
         </div>
         <div class="flex-1">
-          <div class="font-semibold">Test mail</div>
+          <div class="font-semibold">Notice</div>
           <div id="toastText" class="mt-0.5 whitespace-pre-wrap text-xs opacity-90"></div>
         </div>
         <button type="button" onclick="document.getElementById('toast').classList.add('hidden')" class="rounded-lg px-2 py-1 opacity-70 hover:opacity-100">
@@ -489,6 +499,35 @@
         </button>
       </div>
     </div>
+
+    <!-- Pending changes banner -->
+    {% if pending %}
+    <div id="pendingBanner" class="fixed inset-x-0 bottom-4 z-40 mx-auto max-w-4xl px-4">
+      <div class="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-lg dark:border-amber-900/40 dark:bg-amber-950/25 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex items-start gap-3">
+          <div class="mt-0.5 text-amber-700 dark:text-amber-300">
+            <i data-lucide="triangle-alert" class="h-5 w-5"></i>
+          </div>
+          <div>
+            <div class="text-sm font-semibold text-amber-900 dark:text-amber-200">Changes saved, not applied</div>
+            <div class="mt-0.5 text-xs text-amber-800 dark:text-amber-300">Postfix is still running with the old config. Click <span class="font-semibold">Apply Changes</span> to regenerate config + reload Postfix.</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <form method="post" action="/apply">
+            <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Applies saved settings: regenerate Postfix config + reload Postfix">
+              <i data-lucide="check-circle" class="h-4 w-4"></i>
+              Apply Changes
+            </button>
+          </form>
+          <button type="button" onclick="document.getElementById('pendingBanner')?.remove()" class="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-amber-100 dark:border-amber-900/40 dark:bg-slate-950 dark:hover:bg-amber-950/30" title="Dismiss">
+            <i data-lucide="x" class="h-4 w-4"></i>
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
 
     <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
       <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
@@ -594,10 +633,10 @@
                 Auto refresh
               </label>
 
-              <form method="post" action="/postfix/render_reload">
-                <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Regenerates Postfix config from the UI settings + reloads Postfix">
-                  <i data-lucide="sparkles" class="h-4 w-4"></i>
-                  Render + reload
+              <form method="post" action="/apply">
+                <button type="submit" id="applyBtn" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50" title="Applies saved settings: regenerate Postfix config + reload Postfix" {% if not pending %}disabled{% endif %}>
+                  <i data-lucide="check-circle" class="h-4 w-4"></i>
+                  Apply Changes
                 </button>
               </form>
               <form method="post" action="/postfix/reload">

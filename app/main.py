@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import re
@@ -30,9 +31,32 @@ def load_cfg() -> Dict[str, Any]:
     return json.loads(CFG_JSON.read_text(encoding="utf-8"))
 
 
+APPLIED_HASH_PATH = DATA_DIR / "state" / "applied.hash"
+
+
 def save_cfg(cfg: Dict[str, Any]) -> None:
     CFG_JSON.parent.mkdir(parents=True, exist_ok=True)
     CFG_JSON.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def cfg_hash(cfg: Dict[str, Any]) -> str:
+    # stable hash of config for pending/applied tracking
+    raw = json.dumps(cfg, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def get_applied_hash() -> Optional[str]:
+    try:
+        if APPLIED_HASH_PATH.exists():
+            return APPLIED_HASH_PATH.read_text(encoding="utf-8").strip() or None
+    except Exception:
+        return None
+    return None
+
+
+def set_applied_hash(h: str) -> None:
+    APPLIED_HASH_PATH.parent.mkdir(parents=True, exist_ok=True)
+    APPLIED_HASH_PATH.write_text((h or "") + "\n", encoding="utf-8")
 
 
 def sh(cmd, check=True) -> subprocess.CompletedProcess:
@@ -243,6 +267,14 @@ def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     cfg = load_cfg()
+    current_hash = cfg_hash(cfg)
+    applied_hash = get_applied_hash()
+    if not applied_hash:
+        # On first run, assume current config was already applied by the container entrypoint.
+        set_applied_hash(current_hash)
+        applied_hash = current_hash
+    pending = (current_hash != applied_hash)
+
     mailq_out = (_control_get("/mailq").get("mailq") or "")
     qsize = parse_queue_size(mailq_out)
     mail_log = (_control_get("/maillog").get("maillog") or "")
@@ -265,6 +297,7 @@ def index(request: Request):
             "users": list_users(),
             "device_flow_log": device_flow_log(),
             "token_exp_ts": token_exp_ts,
+            "pending": pending,
             "from_identities": from_identities(cfg, ms365_user),
             "env": {
                 "MS365_SMTP_USER": ms365_user,
@@ -286,10 +319,11 @@ def update_settings(
     cfg["hostname"] = hostname.strip()
     cfg["domain"] = domain.strip()
     nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
+    from urllib.parse import quote
+
     cfg["mynetworks"] = nets
     save_cfg(cfg)
-    render_and_reload()
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#settings", status_code=303)
 
 
 @app.post("/users/add")
@@ -311,11 +345,12 @@ def allow_from(login: str = Form(...), from_addr: str = Form(...)):
     addr = from_addr.strip().lower()
     cfg.setdefault("allowed_from", {})
     cfg["allowed_from"].setdefault(login, [])
+    from urllib.parse import quote
+
     if addr and addr not in cfg["allowed_from"][login]:
         cfg["allowed_from"][login].append(addr)
     save_cfg(cfg)
-    render_and_reload()
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#senders", status_code=303)
 
 
 @app.post("/from/disallow")
@@ -323,20 +358,23 @@ def disallow_from(login: str = Form(...), from_addr: str = Form(...)):
     cfg = load_cfg()
     login = login.strip()
     addr = from_addr.strip().lower()
+    from urllib.parse import quote
+
     if login in (cfg.get("allowed_from") or {}):
         cfg["allowed_from"][login] = [a for a in cfg["allowed_from"][login] if a != addr]
     save_cfg(cfg)
-    render_and_reload()
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#senders", status_code=303)
 
 
 @app.post("/from/default")
 def set_default_from(login: str = Form(...), from_addr: str = Form(...)):
     cfg = load_cfg()
     cfg.setdefault("default_from", {})
+    from urllib.parse import quote
+
     cfg["default_from"][login.strip()] = from_addr.strip()
     save_cfg(cfg)
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#senders", status_code=303)
 
 
 @app.post("/postfix/reload")
@@ -345,10 +383,24 @@ def btn_reload():
     return PlainTextResponse(out)
 
 
-@app.post("/postfix/render_reload")
-def btn_render_reload():
+@app.post("/apply")
+def apply_changes():
+    # Apply saved config.json to postfix by re-rendering + reloading.
     out = render_and_reload()
-    return PlainTextResponse(out)
+
+    # Mark current config as applied.
+    cfg = load_cfg()
+    set_applied_hash(cfg_hash(cfg))
+
+    # Return to dashboard with a toast.
+    from urllib.parse import quote
+
+    msg = (out or "ok").strip() or "ok"
+    if len(msg) > 600:
+        msg = msg[:600] + "…"
+    level = "error" if "fatal" in msg.lower() or "error" in msg.lower() else "ok"
+
+    return RedirectResponse(url=f"/?toast={quote('Applied changes.')}&toastLevel={level}#status", status_code=303)
 
 
 @app.post("/token/start")
@@ -390,8 +442,13 @@ def api_status():
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
+    current_hash = cfg_hash(cfg)
+    applied_hash = get_applied_hash()
+    pending = bool(applied_hash) and (current_hash != applied_hash)
+
     return {
         "ok": _best_effort_health(),
+        "pending": pending,
         "queue_size": qsize,
         "mailq": mailq_out,
         "mail_log": mail_log,
