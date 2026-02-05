@@ -54,10 +54,7 @@
       const hash = '#' + id;
       for (const a of document.querySelectorAll('a[data-nav]')) {
         const active = a.getAttribute('href') === hash;
-        a.classList.toggle('bg-slate-100', active);
-        a.classList.toggle('text-slate-900', active);
-        a.classList.toggle('dark:bg-slate-800', active);
-        a.classList.toggle('dark:text-white', active);
+        a.classList.toggle('is-active', active);
       }
     }
 
@@ -168,6 +165,13 @@
 
     /* subtle hover for nav items */
     a[data-nav]:hover { background-color: var(--card2) !important; }
+
+    /* active nav item styling */
+    a[data-nav].is-active {
+      background: color-mix(in oklab, #2563eb 14%, var(--card)) !important; /* blue tint */
+      border: 1px solid color-mix(in oklab, #2563eb 28%, var(--border)) !important;
+      color: var(--fg) !important;
+    }
 
     /* topbar translucent background */
     header { background-color: color-mix(in oklab, var(--card) 82%, transparent) !important; }
