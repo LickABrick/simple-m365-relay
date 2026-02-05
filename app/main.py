@@ -215,11 +215,32 @@ def _sasldb_path() -> str:
     return str(DATA_DIR / "sasl" / "sasldb2")
 
 
-def list_users() -> str:
+def list_users_raw() -> str:
     try:
         return (_control_get("/users").get("users") or "")
     except Exception:
         return ""
+
+
+def parse_sasl_users(text: str) -> list[str]:
+    # sasldblistusers2 output looks like:
+    #   user@example.internal: userPassword
+    out = []
+    for ln in (text or "").splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        name = ln.split(":", 1)[0].strip()
+        if name:
+            out.append(name)
+    # stable unique
+    seen = set()
+    uniq = []
+    for u in out:
+        if u not in seen:
+            seen.add(u)
+            uniq.append(u)
+    return uniq
 
 
 def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str:
@@ -342,7 +363,8 @@ def index(request: Request):
             "mail_log": mail_log,
             "mail_log_warn": warn_tail,
             "postfix_ok": _best_effort_health(),
-            "users": list_users(),
+            "users": list_users_raw(),
+            "users_list": parse_sasl_users(list_users_raw()),
             "device_flow_log": device_flow_log(),
             "token_refresh_log": get_token_refresh_log(),
             "token_exp_ts": token_exp_ts,
@@ -414,19 +436,22 @@ def users_del(login: str = Form(...)):
 
 @app.get("/api/users")
 def api_users_list():
-    return {"ok": True, "users": list_users()}
+    raw = list_users_raw()
+    return {"ok": True, "users": raw, "users_list": parse_sasl_users(raw)}
 
 
 @app.post("/api/users/add")
 def api_users_add(login: str = Form(...), password: str = Form(...)):
     ensure_user(login.strip(), password)
-    return {"ok": True, "users": list_users()}
+    raw = list_users_raw()
+    return {"ok": True, "users": raw, "users_list": parse_sasl_users(raw)}
 
 
 @app.post("/api/users/delete")
 def api_users_delete(login: str = Form(...)):
     delete_user(login.strip())
-    return {"ok": True, "users": list_users()}
+    raw = list_users_raw()
+    return {"ok": True, "users": raw, "users_list": parse_sasl_users(raw)}
 
 
 @app.post("/from/allow")
