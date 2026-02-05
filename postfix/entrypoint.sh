@@ -7,7 +7,10 @@ CERT_PATH="${RELAY_TLS_CERT_PATH:-/data/certs/tls.crt}"
 KEY_PATH="${RELAY_TLS_KEY_PATH:-/data/certs/tls.key}"
 CN="${RELAY_TLS_SELF_SIGNED_CN:-${RELAY_HOSTNAME:-relay.local}}"
 
-mkdir -p "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/certs" "$DATA_DIR/tokens" "$DATA_DIR/sasl" "$DATA_DIR/log"
+# Enable core dumps for debugging segfaults (best-effort; host kernel settings may still limit this)
+ulimit -c unlimited 2>/dev/null || true
+
+mkdir -p "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/certs" "$DATA_DIR/tokens" "$DATA_DIR/sasl" "$DATA_DIR/log" "$DATA_DIR/cores"
 
 # Create default config if missing
 if [ ! -f "$CFG_JSON" ]; then
