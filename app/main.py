@@ -13,6 +13,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import Response
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -20,7 +21,34 @@ CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
 templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
-app = FastAPI(title="Simple M365 Relay")
+app = FastAPI(
+    title="Simple M365 Relay",
+    # Basic hardening: lock down where scripts can load from.
+    # Note: we still allow inline scripts (template uses inline JS).
+    # If you run behind a reverse proxy, you may want to add/override headers there too.
+    default_response_class=Response,
+)
+app.mount("/static", StaticFiles(directory="/opt/ms365-relay/app/static"), name="static")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    # Minimal CSP (still allows inline JS due to current template).
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
+        "script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; "
+        "connect-src 'self'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'",
+    )
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    return resp
 
 from . import auth  # noqa: E402
 from . import lockout  # noqa: E402
