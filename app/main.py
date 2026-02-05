@@ -182,12 +182,44 @@ def token_expiry_best_effort(token_path: Path) -> Optional[str]:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
 
 
+def _control_token() -> str:
+    """Read the shared control token used to authenticate to the postfix control API.
+
+    Priority:
+      1) CONTROL_TOKEN env
+      2) /data/state/control.token (shared volume)
+
+    We keep this in the shared /data volume so UI can talk to postfix without exposing
+    the control API unauthenticated.
+    """
+    tok = (os.environ.get("CONTROL_TOKEN") or "").strip()
+    if tok:
+        return tok
+    try:
+        p = DATA_DIR / "state" / "control.token"
+        if p.exists():
+            return (p.read_text(encoding="utf-8", errors="ignore") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _control_headers(extra: Optional[dict] = None) -> dict:
+    h = {"User-Agent": "simple-m365-relay-ui"}
+    tok = _control_token()
+    if tok:
+        h["X-Control-Token"] = tok
+    if extra:
+        h.update(extra)
+    return h
+
+
 def _control_get(path: str) -> dict:
     import urllib.request
     import ssl
 
     url = POSTFIX_CONTROL_URL + path
-    req = urllib.request.Request(url, headers={"User-Agent": "simple-m365-relay-ui"})
+    req = urllib.request.Request(url, headers=_control_headers())
     with urllib.request.urlopen(req, timeout=10, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -197,7 +229,7 @@ def _control_post(path: str) -> dict:
     import ssl
 
     url = POSTFIX_CONTROL_URL + path
-    req = urllib.request.Request(url, method="POST", data=b"", headers={"User-Agent": "simple-m365-relay-ui"})
+    req = urllib.request.Request(url, method="POST", data=b"", headers=_control_headers())
     with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -218,7 +250,7 @@ def ensure_user(login: str, password: str) -> str:
         POSTFIX_CONTROL_URL + "/users/add",
         method="POST",
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
+        headers=_control_headers({"Content-Type": "application/json"}),
     )
     with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"
@@ -232,7 +264,7 @@ def delete_user(login: str) -> str:
         POSTFIX_CONTROL_URL + "/users/delete",
         method="POST",
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
+        headers=_control_headers({"Content-Type": "application/json"}),
     )
     with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"
@@ -285,7 +317,7 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         POSTFIX_CONTROL_URL + "/testmail",
         method="POST",
         data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
+        headers=_control_headers({"Content-Type": "application/json"}),
     )
     with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"

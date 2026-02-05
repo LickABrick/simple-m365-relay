@@ -40,9 +40,59 @@ def get_auto_refresh_minutes() -> int:
 
 BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
 PORT = int(os.environ.get("CONTROL_PORT", "18080"))
+CONTROL_TOKEN_ENV = os.environ.get("CONTROL_TOKEN", "")
+CONTROL_TOKEN_FILE = DATA_DIR / "state" / "control.token"
 
 _device_lock = threading.Lock()
 _device_running = False
+
+
+def _get_control_token() -> str:
+    """Return the shared control token.
+
+    Priority:
+      1) CONTROL_TOKEN env
+      2) /data/state/control.token (generated once if missing)
+
+    This token is used by the UI container to authenticate to this control API.
+    """
+    if CONTROL_TOKEN_ENV:
+        return CONTROL_TOKEN_ENV
+
+    try:
+        if CONTROL_TOKEN_FILE.exists():
+            v = (CONTROL_TOKEN_FILE.read_text(encoding="utf-8", errors="ignore") or "").strip()
+            if v:
+                return v
+    except Exception:
+        pass
+
+    # generate and persist a token
+    import secrets
+
+    tok = secrets.token_urlsafe(32)
+    try:
+        CONTROL_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # best effort: avoid changing existing token
+        if not CONTROL_TOKEN_FILE.exists():
+            CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+        else:
+            v = (CONTROL_TOKEN_FILE.read_text(encoding="utf-8", errors="ignore") or "").strip()
+            if v:
+                return v
+            CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return tok
+
+
+def _timing_safe_eq(a: str, b: str) -> bool:
+    try:
+        import hmac
+
+        return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+    except Exception:
+        return a == b
 
 
 def sh(cmd, check=False):
@@ -224,6 +274,22 @@ def start_device_flow_background() -> None:
 
 
 class H(BaseHTTPRequestHandler):
+    def _require_auth(self) -> bool:
+        # /health is intentionally unauthenticated for basic liveness checks.
+        if self.path == "/health":
+            return True
+
+        tok = _get_control_token()
+        hdr = (self.headers.get("X-Control-Token") or "").strip()
+        if not tok:
+            # Should never happen, but fail closed.
+            self._json(503, {"error": "control_token_unavailable"})
+            return False
+        if not hdr or not _timing_safe_eq(hdr, tok):
+            self._json(403, {"error": "forbidden"})
+            return False
+        return True
+
     def _json(self, code, obj):
         data = json.dumps(obj).encode("utf-8")
         self.send_response(code)
@@ -248,6 +314,8 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self._json(200, {"ok": True})
+        if not self._require_auth():
+            return
         if self.path == "/mailq":
             out = sh(["mailq"], check=False)
             return self._json(200, {"mailq": out})
@@ -267,6 +335,8 @@ class H(BaseHTTPRequestHandler):
         self._json(404, {"error": "not_found"})
 
     def do_POST(self):
+        if not self._require_auth():
+            return
         if self.path == "/render-reload":
             out = render_and_reload()
             return self._json(200, {"output": out})
