@@ -93,6 +93,9 @@ error     unix  -       -       n       -       -       error
 retry     unix  -       -       n       -       -       error
 discard   unix  -       -       n       -       -       discard
 
+# Outbound SMTP client transport (required for relayhost delivery)
+smtp      unix  -       -       n       -       -       smtp
+
 local     unix  -       n       n       -       -       local
 virtual   unix  -       n       n       -       -       virtual
 lmtp      unix  -       -       n       -       -       lmtp
