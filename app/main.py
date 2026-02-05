@@ -306,6 +306,23 @@ def _extract_recent_warnings(mail_log: str, limit: int = 6) -> str:
     return "\n".join(reversed(interesting))
 
 
+def parse_addr_list(text: str) -> list[str]:
+    # accepts comma/space/newline separated
+    raw = (text or "").replace(",", " ")
+    parts = []
+    for ln in raw.splitlines():
+        parts.extend([p.strip() for p in ln.split() if p.strip()])
+    # normalize + unique
+    seen = set()
+    out = []
+    for a in parts:
+        aa = a.strip().lower()
+        if aa and aa not in seen:
+            seen.add(aa)
+            out.append(aa)
+    return out
+
+
 def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
     addrs = []
 
@@ -459,15 +476,23 @@ def allow_from(login: str = Form(...), from_addr: str = Form(...)):
     # HTML fallback
     cfg = load_cfg()
     login = login.strip()
-    addr = from_addr.strip().lower()
+    addrs = parse_addr_list(from_addr)
     cfg.setdefault("allowed_from", {})
     cfg["allowed_from"].setdefault(login, [])
     from urllib.parse import quote
 
-    if addr and addr not in cfg["allowed_from"][login]:
-        cfg["allowed_from"][login].append(addr)
+    added = 0
+    for addr in addrs:
+        if addr and addr not in cfg["allowed_from"][login]:
+            cfg["allowed_from"][login].append(addr)
+            added += 1
     save_cfg(cfg)
-    return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#senders", status_code=303)
+
+    msg = "Saved (not applied). Click Apply Changes."
+    if added == 0 and addrs:
+        msg = "No changes (addresses already allowed). Saved (not applied)."
+
+    return RedirectResponse(url=f"/?toast={quote(msg)}&toastLevel=ok#senders", status_code=303)
 
 
 @app.post("/from/disallow")
@@ -518,18 +543,28 @@ def api_senders_get():
 def api_from_allow(login: str = Form(...), from_addr: str = Form(...)):
     cfg = load_cfg()
     login = login.strip()
-    addr = from_addr.strip().lower()
+    addrs = parse_addr_list(from_addr)
     cfg.setdefault("allowed_from", {})
     cfg["allowed_from"].setdefault(login, [])
-    if addr and addr not in cfg["allowed_from"][login]:
+
+    added = 0
+    skipped = 0
+    for addr in addrs:
+        if not addr:
+            continue
+        if addr in cfg["allowed_from"][login]:
+            skipped += 1
+            continue
         cfg["allowed_from"][login].append(addr)
+        added += 1
+
     save_cfg(cfg)
 
     current_hash = cfg_hash(cfg)
     applied_hash = get_applied_hash()
     pending = bool(applied_hash) and (current_hash != applied_hash)
 
-    return {"ok": True, "pending": pending}
+    return {"ok": True, "pending": pending, "added": added, "skipped": skipped}
 
 
 @app.post("/api/from/disallow")
@@ -690,7 +725,7 @@ def api_status():
     cfg = load_cfg()
     mailq_out = (_control_get("/mailq").get("mailq") or "")
     qsize = parse_queue_size(mailq_out)
-    mail_log = (_control_get("/maillog").get("maillog") or "")
+    mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
     token_refresh_log = get_token_refresh_log()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")

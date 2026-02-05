@@ -535,6 +535,22 @@
       }
     }
 
+    function filterUsersTable(){
+      const q = (document.getElementById('usersSearch')?.value || '').toLowerCase().trim();
+      const body = document.getElementById('usersTableBody');
+      if (!body) return;
+      for (const row of body.querySelectorAll('[data-user-row]')) {
+        const hay = (row.getAttribute('data-hay') || '').toLowerCase();
+        row.classList.toggle('hidden', !!q && !hay.includes(q));
+      }
+    }
+
+    function clearUsersFilter(){
+      const s = document.getElementById('usersSearch');
+      if (s) s.value = '';
+      filterUsersTable();
+    }
+
     function _renderUsersTable(list){
       const body = document.getElementById('usersTableBody');
       if (!body) return;
@@ -546,7 +562,7 @@
       const rows = users.map(u => {
         const uu = _escapeHtml(u);
         return `
-          <div class="grid grid-cols-12 items-center gap-2 px-3 py-3">
+          <div class="grid grid-cols-12 items-center gap-2 px-3 py-3" data-user-row data-hay="${uu}">
             <div class="col-span-12 sm:col-span-8">
               <div class="text-sm font-semibold mono">${uu}</div>
             </div>
@@ -561,6 +577,7 @@
       }).join('');
       body.innerHTML = rows;
       try { lucide.createIcons(); } catch(e) {}
+      filterUsersTable();
     }
 
     async function refreshUsersSection(){
@@ -611,6 +628,22 @@
       return String(s || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
+    function filterSendersTable(){
+      const q = (document.getElementById('sendersSearch')?.value || '').toLowerCase().trim();
+      const body = document.getElementById('sendersTableBody');
+      if (!body) return;
+      for (const row of body.querySelectorAll('[data-sender-row]')) {
+        const hay = (row.getAttribute('data-hay') || '').toLowerCase();
+        row.classList.toggle('hidden', !!q && !hay.includes(q));
+      }
+    }
+
+    function clearSendersFilter(){
+      const s = document.getElementById('sendersSearch');
+      if (s) s.value = '';
+      filterSendersTable();
+    }
+
     async function refreshSendersSection(){
       try {
         const r = await fetch('/api/senders', { cache: 'no-store' });
@@ -634,9 +667,10 @@
         for (const login of logins) {
           const addrs = allowed[login] || [];
           const df = defFrom[login] || '';
+          const count = (addrs || []).length;
 
           let rhs = '';
-          if (!addrs.length) {
+          if (!count) {
             rhs = '<div class="text-sm text-slate-500 dark:text-slate-400">(none)</div>';
           } else {
             const chips = addrs.map(a => {
@@ -651,11 +685,16 @@
             rhs = `<div class="flex flex-wrap gap-2">${chips}</div>`;
           }
 
+          const hay = `${login} ${(addrs||[]).join(' ')} ${df}`;
+
           rows.push(`
-            <div class="grid grid-cols-12 gap-2 px-3 py-3">
+            <div class="grid grid-cols-12 gap-2 px-3 py-3" data-sender-row data-hay="${_escapeHtml(hay)}">
               <div class="col-span-12 sm:col-span-4">
-                <div class="text-sm font-semibold">${_escapeHtml(login)}</div>
-                ${df ? `<div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Default From: <span class="mono">${_escapeHtml(df)}</span></div>` : ''}
+                <div class="flex items-center gap-2">
+                  <div class="text-sm font-semibold">${_escapeHtml(login)}</div>
+                  <span class="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200" title="Allowed From count">${count}</span>
+                </div>
+                ${df ? `<div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Fallback From: <span class="mono">${_escapeHtml(df)}</span></div>` : ''}
               </div>
               <div class="col-span-12 sm:col-span-8">${rhs}</div>
             </div>
@@ -664,6 +703,7 @@
 
         body.innerHTML = rows.join('');
         try { lucide.createIcons(); } catch(e) {}
+        filterSendersTable();
       } catch (e) {}
     }
 
@@ -675,7 +715,11 @@
         const r = await fetch('/api/from/allow', { method: 'POST', body: data });
         const j = await r.json();
         if (j && j.ok) {
-          showToast('Saved (not applied). Click Apply Changes.', 'ok');
+          let msg = 'Saved (not applied). Click Apply Changes.';
+          if ((j.added === 0) && (j.skipped > 0)) msg = 'No changes (addresses already allowed).';
+          if (j.added > 0 && j.skipped > 0) msg = `Saved (not applied). Added ${j.added}, skipped ${j.skipped}.`;
+          if (j.added > 0 && j.skipped === 0) msg = `Saved (not applied). Added ${j.added}.`;
+          showToast(msg, 'ok');
           if (typeof j.pending !== 'undefined') syncPendingFromApi(!!j.pending);
           form.reset();
           await refreshSendersSection();
@@ -1221,11 +1265,20 @@
             <h2 class="text-lg font-semibold">SMTP AUTH users</h2>
           </div>
 
-          <div class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-            <div class="grid grid-cols-12 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
-              <div class="col-span-8">User</div>
-              <div class="col-span-4 text-right">Actions</div>
+          <div class="mt-3">
+            <div class="mb-2 flex items-center gap-2">
+              <input id="usersSearch" placeholder="Search users…" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" oninput="filterUsersTable()" />
+              <button type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="clearUsersFilter()">
+                <i data-lucide="eraser" class="h-4 w-4"></i>
+                Clear
+              </button>
             </div>
+
+            <div class="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+              <div class="grid grid-cols-12 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                <div class="col-span-8">User</div>
+                <div class="col-span-4 text-right">Actions</div>
+              </div>
             <div id="usersTableBody" class="divide-y divide-slate-200 dark:divide-slate-800">
               {% if (users_list or [])|length == 0 %}
                 <div class="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">No SMTP AUTH users configured yet.</div>
@@ -1247,6 +1300,7 @@
                   </div>
                 {% endfor %}
               {% endif %}
+            </div>
             </div>
           </div>
 
@@ -1280,21 +1334,30 @@
             <h2 class="text-lg font-semibold">Allowed From addresses</h2>
           </div>
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
-            Enforced via <span class="mono">smtpd_sender_login_maps</span> + <span class="mono">reject_sender_login_mismatch</span>.
+            Anti-spoofing: enforced via <span class="mono">smtpd_sender_login_maps</span> + <span class="mono">reject_sender_login_mismatch</span>.
           </p>
 
-          <div class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-            <div class="grid grid-cols-12 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
-              <div class="col-span-4">SMTP user</div>
-              <div class="col-span-8">Allowed From addresses</div>
+          <div class="mt-3">
+            <div class="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <input id="sendersSearch" placeholder="Search… (user or address)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" oninput="filterSendersTable()" />
+              <button type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="clearSendersFilter()">
+                <i data-lucide="eraser" class="h-4 w-4"></i>
+                Clear
+              </button>
             </div>
+
+            <div class="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+              <div class="grid grid-cols-12 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                <div class="col-span-4">SMTP user</div>
+                <div class="col-span-8">Allowed From addresses</div>
+              </div>
             <div id="sendersTableBody" class="divide-y divide-slate-200 dark:divide-slate-800">
               {% for login, addrs in (cfg.allowed_from or {}).items() %}
                 <div class="grid grid-cols-12 gap-2 px-3 py-3">
                   <div class="col-span-12 sm:col-span-4">
                     <div class="text-sm font-semibold">{{ login }}</div>
                     {% if (cfg.default_from or {}).get(login) %}
-                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Default From: <span class="mono">{{ (cfg.default_from or {}).get(login) }}</span></div>
+                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Fallback From: <span class="mono">{{ (cfg.default_from or {}).get(login) }}</span></div>
                     {% endif %}
                   </div>
                   <div class="col-span-12 sm:col-span-8">
@@ -1322,14 +1385,16 @@
                 <div class="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">No sender rules configured yet.</div>
               {% endif %}
             </div>
+            </div>
           </div>
 
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <form id="fromAllowForm" method="post" action="/from/allow" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
               <div class="text-sm font-semibold">Add allowed From</div>
-              <div class="text-xs text-slate-500 dark:text-slate-400">This applies to authenticated clients (SMTP AUTH).</div>
+              <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same login again to add more From addresses.</div>
               <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-              <input name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <textarea name="from_addr" rows="3" placeholder="from1@example.com\nfrom2@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900"></textarea>
+              <div class="text-xs text-slate-500 dark:text-slate-400">Enter one address per line (or comma/space separated).</div>
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="plus" class="h-4 w-4"></i>
                 Add
@@ -1337,10 +1402,10 @@
             </form>
 
             <form id="defaultFromForm" method="post" action="/from/default" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
-              <div class="text-sm font-semibold">Set default From</div>
+              <div class="text-sm font-semibold">Set fallback From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Used when clients don’t specify a From address.</div>
               <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-              <input name="from_addr" placeholder="default-from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <input name="from_addr" placeholder="fallback-from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="pin" class="h-4 w-4"></i>
                 Save default
