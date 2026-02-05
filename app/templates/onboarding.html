@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="en" class="h-full scroll-smooth">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title or 'Onboarding' }} · Simple M365 Relay</title>
+  <meta name="csrf-token" content="{{ csrf_token or '' }}" />
+
+  <script>
+    // Tailwind CDN config
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = window.tailwind.config || {};
+    window.tailwind.config.darkMode = 'class';
+    // Some Tailwind CDN builds read tailwind.config directly.
+    window.tailwind.config = Object.assign({}, window.tailwind.config, { darkMode: 'class' });
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    #toast.toast-error { border-color: rgb(254 202 202); background: rgb(254 242 242); color: rgb(127 29 29); }
+    .dark #toast.toast-error { border-color: rgb(127 29 29 / 0.35); background: rgb(69 10 10 / 0.4); color: rgb(254 226 226); }
+    .dot-done { background: rgb(16 185 129) !important; }
+    .dot-active { background: rgb(37 99 235) !important; }
+  </style>
+
+  <script>
+    // server-provided defaults
+    window.SM365R = window.SM365R || {};
+    window.SM365R.ms365User = {{ (ms365_user or '') | tojson }};
+
+    // theme (persisted)
+    const themeKey = 'simple-m365-relay-theme';
+    const legacyThemeKeys = ['simple-ms365-relay-theme', 'ms365-relay-theme'];
+
+    // migrate legacy keys (read first one we find)
+    let saved = localStorage.getItem(themeKey);
+    if (!saved) {
+      for (const k of legacyThemeKeys) {
+        const v = localStorage.getItem(k);
+        if (v) { saved = v; break; }
+      }
+    }
+    if (saved) {
+      try {
+        localStorage.setItem(themeKey, saved);
+        for (const k of legacyThemeKeys) localStorage.removeItem(k);
+      } catch(e) {}
+    }
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if ((saved === 'dark') || (!saved && prefersDark)) {
+      document.documentElement.classList.add('dark');
+    }
+
+    function setTheme(mode){
+      const isDark = (mode === 'dark');
+      // Be explicit (some environments behave oddly with classList.toggle + force)
+      if (isDark) document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
+
+      // also toggle on body in case of any CSS that targets body.dark
+      if (document.body) {
+        if (isDark) document.body.classList.add('dark');
+        else document.body.classList.remove('dark');
+      }
+
+      localStorage.setItem(themeKey, mode);
+      syncThemeButton();
+    }
+
+    function toggleTheme(){
+      const isDark = document.documentElement.classList.contains('dark');
+      setTheme(isDark ? 'light' : 'dark');
+    }
+
+    function syncThemeButton(){
+      const btn = document.getElementById('themeBtn');
+      const label = document.getElementById('themeBtnLabel');
+      if (!btn || !label) return;
+      const isDark = document.documentElement.classList.contains('dark');
+      label.textContent = isDark ? 'Light' : 'Dark';
+      btn.setAttribute('title', isDark ? 'Switch to light mode' : 'Switch to dark mode');
+    }
+
+    function showToast(msg, level){
+      const box = document.getElementById('toast');
+      const text = document.getElementById('toastText');
+      if (!box || !text) return;
+
+      text.textContent = msg;
+      box.classList.remove('hidden');
+      box.classList.toggle('toast-error', (level === 'error'));
+
+      window.setTimeout(() => {
+        box.classList.add('hidden');
+      }, 8000);
+    }
+
+    function getCsrf(){
+      return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    }
+
+    async function apiFetch(url, opts){
+      const o = Object.assign({}, (opts || {}));
+      const method = String(o.method || 'GET').toUpperCase();
+      o.headers = Object.assign({}, (o.headers || {}));
+      if (method !== 'GET') {
+        o.headers['x-csrf-token'] = o.headers['x-csrf-token'] || getCsrf();
+      }
+
+      const r = await fetch(url, o);
+      if (r.status === 403) {
+        showToast('Session expired or invalid. Please refresh and sign in again.', 'error');
+        window.setTimeout(() => { window.location.href = '/login'; }, 1200);
+        throw new Error('forbidden');
+      }
+      return r;
+    }
+
+    function _fieldOk(v){
+      return String(v || '').trim().length > 0;
+    }
+
+    function _setProgress(step){
+      const total = 7;
+      const stepNum = document.getElementById('stepNum');
+      const stepTotal = document.getElementById('stepTotal');
+      if (stepNum) stepNum.textContent = String(step);
+      if (stepTotal) stepTotal.textContent = String(total);
+
+      for (let i=1;i<=total;i++){
+        const d = document.getElementById('p'+i+'Dot');
+        if (!d) continue;
+        d.classList.remove('dot-done','dot-active');
+        d.classList.remove('bg-slate-300','dark:bg-slate-700');
+
+        if (i < step) d.classList.add('dot-done');
+        else if (i === step) d.classList.add('dot-active');
+        else d.classList.add('bg-slate-300','dark:bg-slate-700');
+      }
+
+      for (let i=1;i<=total-1;i++){
+        const b = document.getElementById('p'+i+'Bar');
+        if (!b) continue;
+        b.style.width = (step > i+0.5) ? '100%' : '0%';
+      }
+    }
+
+    function showStep(step){
+      const total = 7;
+      for (let i=1;i<=total;i++){
+        const el = document.getElementById('step'+i);
+        if (el) el.classList.toggle('hidden', i !== step);
+      }
+      _setProgress(step);
+      try {
+        localStorage.setItem('simple-m365-relay-onboarding-step', String(step));
+        // remove legacy key
+        localStorage.removeItem('sm365r_onboarding_step');
+      } catch(e) {}
+    }
+
+    function _getCoreFields(){
+      const relayhost = document.querySelector('input[name="relayhost"]')?.value || '';
+      const tls25 = document.querySelector('select[name="tls_25"]')?.value || 'may';
+      const tls587 = document.querySelector('select[name="tls_587"]')?.value || 'encrypt';
+      return { relayhost, tls_25: tls25, tls_587: tls587 };
+    }
+
+    function _getOauthFields(){
+      const tenant_id = document.querySelector('input[name="tenant_id"]')?.value || '';
+      const client_id = document.querySelector('input[name="client_id"]')?.value || '';
+      const auto_refresh_minutes = document.querySelector('input[name="auto_refresh_minutes"]')?.value || '30';
+      return { tenant_id, client_id, auto_refresh_minutes };
+    }
+
+    function refreshCompletionChips(){
+      const core = _getCoreFields();
+      const oauth = _getOauthFields();
+
+      const okCore = _fieldOk(core.relayhost);
+      const okOAuth = _fieldOk(oauth.tenant_id) && _fieldOk(oauth.client_id);
+
+      const chip = document.getElementById('coreReadyChip');
+      if (chip) {
+        chip.textContent = (okCore && okOAuth) ? 'Core settings complete' : 'Core settings incomplete';
+        chip.classList.toggle('bg-emerald-100', (okCore && okOAuth));
+        chip.classList.toggle('text-emerald-900', (okCore && okOAuth));
+        chip.classList.toggle('bg-amber-100', !(okCore && okOAuth));
+        chip.classList.toggle('text-amber-900', !(okCore && okOAuth));
+        chip.classList.toggle('dark:bg-emerald-950/40', (okCore && okOAuth));
+        chip.classList.toggle('dark:text-emerald-200', (okCore && okOAuth));
+        chip.classList.toggle('dark:bg-amber-950/30', !(okCore && okOAuth));
+        chip.classList.toggle('dark:text-amber-200', !(okCore && okOAuth));
+      }
+
+      const doneBanner = document.getElementById('doneBanner');
+      if (doneBanner) doneBanner.classList.toggle('hidden', !(okCore && okOAuth));
+    }
+
+    async function saveCoreStep(){
+      const core = _getCoreFields();
+      if (!_fieldOk(core.relayhost)) throw new Error('Relayhost is required.');
+
+      const data = new FormData();
+      data.append('relayhost', core.relayhost);
+      data.append('tls_25', core.tls_25);
+      data.append('tls_587', core.tls_587);
+
+      const r = await apiFetch('/api/settings', { method: 'POST', body: data });
+      let j = null;
+      try { j = await r.json(); } catch(e) {}
+      if (!r.ok || !j || !j.ok) {
+        const detail = (j && (j.detail || j.error)) ? (j.detail || j.error) : (await r.text().catch(()=>''));
+        throw new Error(detail || `Save failed (HTTP ${r.status}).`);
+      }
+    }
+
+    async function saveOauthStep(){
+      const oauth = _getOauthFields();
+      if (!_fieldOk(oauth.tenant_id)) throw new Error('Tenant ID is required.');
+      if (!_fieldOk(oauth.client_id)) throw new Error('Client ID is required.');
+
+      const data = new FormData();
+      data.append('tenant_id', oauth.tenant_id);
+      data.append('client_id', oauth.client_id);
+      data.append('auto_refresh_minutes', oauth.auto_refresh_minutes);
+
+      const r = await apiFetch('/api/settings', { method: 'POST', body: data });
+      let j = null;
+      try { j = await r.json(); } catch(e) {}
+      if (!r.ok || !j || !j.ok) {
+        const detail = (j && (j.detail || j.error)) ? (j.detail || j.error) : (await r.text().catch(()=>''));
+        throw new Error(detail || `Save failed (HTTP ${r.status}).`);
+      }
+    }
+
+    let _tokenValid = false;
+    let _tokenVerified = false;
+
+    function _fmtTsLocal(ts){
+      let t = Number(ts || 0);
+      if (!t) return { text: 'Missing/unknown', valid: false };
+      // Defensive: if someone feeds ms, normalize.
+      if (t > 1e12) t = Math.floor(t / 1000);
+
+      const now = Math.floor(Date.now() / 1000);
+      const valid = (t > (now + 60));
+      const dt = new Date(t * 1000);
+      const text = dt.toLocaleString();
+      return { text, valid, ts: t };
+    }
+
+    async function refreshTokenBits(){
+      const tokenChip = document.getElementById('tokenChip');
+      const tokenText = document.getElementById('tokenText');
+      const tokenExp = document.getElementById('tokenExp');
+      const hint = document.getElementById('tokenVerifyHint');
+      const sendBtn = document.getElementById('sendTestBtn');
+      const sendHint = document.getElementById('testDisabledHint');
+
+      try {
+        const r = await fetch('/api/status', { cache: 'no-store' });
+        const j = await r.json();
+        const info = _fmtTsLocal(j.token_exp_ts);
+        if (tokenExp) tokenExp.textContent = info.text;
+
+        _tokenValid = !!info.valid;
+
+        if (!_tokenValid) {
+          _tokenVerified = false;
+        }
+
+        // chip colors
+        if (tokenChip) {
+          tokenChip.classList.toggle('bg-emerald-100', _tokenValid);
+          tokenChip.classList.toggle('text-emerald-900', _tokenValid);
+          tokenChip.classList.toggle('bg-amber-100', !_tokenValid);
+          tokenChip.classList.toggle('text-amber-900', !_tokenValid);
+          tokenChip.classList.toggle('dark:bg-emerald-950/40', _tokenValid);
+          tokenChip.classList.toggle('dark:text-emerald-200', _tokenValid);
+          tokenChip.classList.toggle('dark:bg-amber-950/30', !_tokenValid);
+          tokenChip.classList.toggle('dark:text-amber-200', !_tokenValid);
+        }
+        if (tokenText) tokenText.textContent = _tokenValid ? 'Token valid' : 'Token missing/expired';
+
+        if (hint) hint.textContent = _tokenVerified ? 'Verified' : 'Not verified';
+
+        // disable test mail send unless token valid
+        if (sendBtn) {
+          sendBtn.toggleAttribute('disabled', !_tokenValid);
+          sendBtn.classList.toggle('opacity-60', !_tokenValid);
+          sendBtn.classList.toggle('cursor-not-allowed', !_tokenValid);
+        }
+        if (sendHint) {
+          sendHint.classList.toggle('hidden', _tokenValid);
+        }
+      } catch (e) {}
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      try { lucide.createIcons(); } catch(e) {}
+      syncThemeButton();
+
+      // theme toggle handled via inline onclick on the button
+
+      // initial step
+      const savedStep = parseInt(
+        localStorage.getItem('simple-m365-relay-onboarding-step') ||
+        localStorage.getItem('sm365r_onboarding_step') ||
+        '1',
+        10,
+      ) || 1;
+      showStep(Math.min(7, Math.max(1, savedStep)));
+
+      // live validation chips
+      for (const el of document.querySelectorAll('input[name="relayhost"],input[name="tenant_id"],input[name="client_id"]')) {
+        el.addEventListener('input', refreshCompletionChips);
+      }
+      refreshCompletionChips();
+
+      // show initial token expiry from server-rendered data-ts immediately
+      const te = document.getElementById('tokenExp');
+      if (te) {
+        const info = _fmtTsLocal(te.getAttribute('data-ts'));
+        te.textContent = info.text;
+      }
+
+      refreshTokenBits();
+
+      // Step navigation handlers
+      document.getElementById('getStartedBtn')?.addEventListener('click', () => showStep(2));
+
+      document.getElementById('s1Prev')?.addEventListener('click', () => showStep(1));
+
+      document.getElementById('s1Next')?.addEventListener('click', async () => {
+        try {
+          await saveCoreStep();
+          showToast('Saved relay settings.', 'ok');
+          refreshCompletionChips();
+          showStep(3);
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        }
+      });
+
+      document.getElementById('s2Prev')?.addEventListener('click', () => showStep(2));
+      document.getElementById('s2Next')?.addEventListener('click', async () => {
+        try {
+          await saveOauthStep();
+          showToast('Saved OAuth app IDs.', 'ok');
+          refreshCompletionChips();
+          showStep(4);
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        }
+      });
+
+      document.getElementById('s3Prev')?.addEventListener('click', () => showStep(3));
+      document.getElementById('s3Skip')?.addEventListener('click', () => showStep(5));
+      document.getElementById('s3Next')?.addEventListener('click', async () => {
+        // optional step; still allow proceeding if not verified
+        await refreshTokenBits();
+        if (!_tokenVerified) {
+          showToast('OAuth token not verified yet. You can skip and do this later.', 'ok');
+        }
+        showStep(5);
+      });
+
+      document.getElementById('s4Prev')?.addEventListener('click', () => showStep(4));
+      document.getElementById('s4Skip')?.addEventListener('click', () => showStep(6));
+
+      document.getElementById('s5Prev')?.addEventListener('click', () => showStep(5));
+      document.getElementById('s5Skip')?.addEventListener('click', () => showStep(7));
+
+      document.getElementById('s6Prev')?.addEventListener('click', () => showStep(6));
+      document.getElementById('s6Skip')?.addEventListener('click', () => showStep(7));
+
+      document.getElementById('s7Prev')?.addEventListener('click', () => showStep(6));
+
+      // Step 3: device flow
+      const start = document.getElementById('startDeviceFlowBtn');
+      const log = document.getElementById('deviceFlowLog');
+      const refreshLog = async () => {
+        if (!log) return;
+        const r = await fetch('/api/device-flow-log', { cache: 'no-store' });
+        const j = await r.json();
+        log.textContent = j.log || '';
+      };
+      if (start) {
+        start.addEventListener('click', async () => {
+          try {
+            await apiFetch('/api/token/start', { method: 'POST' });
+            showToast('Device flow started. Follow the instructions below.', 'ok');
+            await refreshLog();
+            await refreshTokenBits();
+          } catch(e) {
+            showToast('Could not start device flow.', 'error');
+          }
+        });
+      }
+      document.getElementById('refreshDeviceFlowBtn')?.addEventListener('click', async () => { await refreshLog(); await refreshTokenBits(); });
+
+      document.getElementById('verifyTokenBtn')?.addEventListener('click', async () => {
+        await refreshTokenBits();
+        if (_tokenValid) {
+          _tokenVerified = true;
+          const hint = document.getElementById('tokenVerifyHint');
+          if (hint) hint.textContent = 'Verified';
+          showToast('Token verified.', 'ok');
+        } else {
+          _tokenVerified = false;
+          const hint = document.getElementById('tokenVerifyHint');
+          if (hint) hint.textContent = 'Not verified';
+          showToast('No valid token found (missing or expired).', 'error');
+        }
+      });
+
+      refreshLog();
+
+      // Step 4: test mail (optional)
+      document.getElementById('sendTestBtn')?.addEventListener('click', async () => {
+        await refreshTokenBits();
+        if (!_tokenValid) {
+          showToast('OAuth token missing/expired. Complete Step 3 first.', 'error');
+          return;
+        }
+        const to = document.getElementById('testTo')?.value || '';
+        if (!_fieldOk(to)) { showToast('Recipient (To) is required.', 'error'); return; }
+        let from = document.getElementById('testFrom')?.value || '';
+        // Postfix control requires a from_addr. When left blank, use the relay M365 user as fallback.
+        if (!_fieldOk(from)) from = (window.SM365R?.ms365User || '').trim();
+        const subject = document.getElementById('testSubject')?.value || 'Simple M365 Relay test';
+        const body = document.getElementById('testBody')?.value || 'Hello from Simple M365 Relay.';
+
+        const btn = document.getElementById('sendTestBtn');
+        btn?.setAttribute('disabled','disabled');
+        btn?.classList.add('opacity-60');
+        try {
+          const data = new FormData();
+          data.append('from_addr', from);
+          data.append('to_addr', to);
+          data.append('subject', subject);
+          data.append('body', body);
+          const r = await apiFetch('/api/testmail', { method: 'POST', body: data });
+          const j = await r.json().catch(()=>({}));
+          const out = document.getElementById('testOut');
+          if (out) out.textContent = j.output || '';
+          if (r.ok && j.ok) showToast('Test mail sent (check output below).', 'ok');
+          else showToast(j.detail || j.output || 'Test mail failed.', 'error');
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        } finally {
+          btn?.removeAttribute('disabled');
+          btn?.classList.remove('opacity-60');
+        }
+      });
+      document.getElementById('s4Next')?.addEventListener('click', () => showStep(6));
+      document.getElementById('goToOauthBtn')?.addEventListener('click', () => showStep(4));
+
+      // Step 5: add user (optional)
+      document.getElementById('addUserBtn')?.addEventListener('click', async () => {
+        const login = document.getElementById('userLogin')?.value || '';
+        const pw = document.getElementById('userPw')?.value || '';
+        if (!_fieldOk(login)) { showToast('Login is required.', 'error'); return; }
+        if (!_fieldOk(pw) || String(pw).length < 8) { showToast('Password is required (min 8 chars).', 'error'); return; }
+
+        const btn = document.getElementById('addUserBtn');
+        btn?.setAttribute('disabled','disabled');
+        btn?.classList.add('opacity-60');
+        try {
+          const data = new FormData();
+          data.append('login', login);
+          data.append('password', pw);
+          const r = await apiFetch('/api/users/add', { method: 'POST', body: data });
+          const j = await r.json().catch(()=>({}));
+          if (r.ok && j.ok) showToast('User created.', 'ok');
+          else showToast(j.detail || 'Create user failed.', 'error');
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        } finally {
+          btn?.removeAttribute('disabled');
+          btn?.classList.remove('opacity-60');
+        }
+      });
+      document.getElementById('s5Next')?.addEventListener('click', () => showStep(7));
+
+      // Finish
+      document.getElementById('finishBtn')?.addEventListener('click', async () => {
+        try {
+          // ensure core steps are persisted and valid
+          await saveCoreStep();
+          await saveOauthStep();
+
+          // Apply so dashboard doesn't immediately show the pending/apply banner.
+          const ar = await apiFetch('/api/apply', { method: 'POST' });
+          const aj = await ar.json().catch(()=>({}));
+          if (!ar.ok || !aj.ok) {
+            showToast(aj.detail || 'Saved, but apply failed. You can apply later on the dashboard.', 'error');
+          } else {
+            showToast('Saved & applied. Redirecting…', 'ok');
+          }
+
+          window.setTimeout(() => { window.location.href = '/'; }, 800);
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        }
+      });
+
+      // (handler attached earlier; keep single binding)
+
+    });
+  </script>
+</head>
+
+<body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+
+  <div id="toast" class="fixed right-4 top-4 z-50 hidden max-w-md rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-lg dark:border-slate-800 dark:bg-slate-900">
+    <div class="flex items-start gap-2">
+      <i data-lucide="sparkles" class="mt-0.5 h-4 w-4 text-slate-500"></i>
+      <div id="toastText" class="leading-5">Toast</div>
+    </div>
+  </div>
+
+  <div class="mx-auto max-w-5xl px-4 py-8">
+
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
+          <i data-lucide="mail" class="h-6 w-6"></i>
+        </div>
+        <div>
+          <div class="text-sm font-semibold leading-5">Simple M365 Relay</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">Onboarding</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <span id="coreReadyChip" class="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Core settings incomplete</span>
+
+        <button id="themeBtn" type="button" onclick="toggleTheme()"
+          class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+          <i data-lucide="moon" class="h-4 w-4"></i>
+          <span id="themeBtnLabel" class="sr-only">Dark</span>
+        </button>
+
+        <form method="post" action="/logout" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+            <i data-lucide="log-out" class="h-4 w-4"></i>
+            Logout
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Progress stepper -->
+    <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm font-semibold">Setup wizard</div>
+          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Step <span id="stepNum">1</span> of <span id="stepTotal">6</span></div>
+        </div>
+
+        <div id="doneBanner" class="hidden rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
+          Core settings complete
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <!-- full-width stepper line -->
+        <div class="flex items-center">
+          <div id="p1Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p1Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p2Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p2Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p3Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p3Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p4Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p4Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p5Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p5Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p6Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p6Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p7Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+        </div>
+
+        <div class="mt-3 grid grid-cols-7 gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+          <div class="text-left">Welcome</div>
+          <div class="text-center">Relay</div>
+          <div class="text-center">OAuth IDs</div>
+          <div class="text-center">OAuth login<br/><span class="font-normal">(optional)</span></div>
+          <div class="text-center">Test mail<br/><span class="font-normal">(optional)</span></div>
+          <div class="text-center">Add user<br/><span class="font-normal">(optional)</span></div>
+          <div class="text-center">Finish</div>
+          <div class="text-right">Done</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Steps -->
+    <div class="mt-6 space-y-6">
+
+      <!-- Step 1 (Welcome) -->
+      <section id="step1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-3">
+          <div class="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
+            <i data-lucide="sparkles" class="h-5 w-5"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold">Welcome to Simple M365 Relay</h2>
+            <div class="mt-0.5 text-sm text-slate-600 dark:text-slate-300">A minimal Postfix relay for Microsoft 365 (OAuth2 / XOAUTH2), with a clean web UI.</div>
+          </div>
+        </div>
+
+        <div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div class="flex items-start gap-2">
+              <i data-lucide="shield-check" class="mt-0.5 h-4 w-4 text-emerald-600 dark:text-emerald-300"></i>
+              <div>
+                <div class="text-sm font-semibold">What problem it solves</div>
+                <div class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  Send mail via Microsoft 365 without storing an SMTP password — using OAuth device flow and refresh tokens.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div class="flex items-start gap-2">
+              <i data-lucide="mail" class="mt-0.5 h-4 w-4 text-blue-600 dark:text-blue-300"></i>
+              <div>
+                <div class="text-sm font-semibold">What you’ll configure</div>
+                <ul class="mt-2 list-disc pl-5 text-sm text-slate-600 dark:text-slate-300">
+                  <li>Relayhost + TLS policy</li>
+                  <li>OAuth tenant/client IDs</li>
+                  <li>Optional: device flow login</li>
+                  <li>Optional: test mail + add SMTP AUTH users</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-5 rounded-2xl border border-blue-200/70 bg-blue-50/60 p-4 text-sm text-slate-800 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/25 dark:text-blue-100">
+          <div class="flex items-start gap-2">
+            <i data-lucide="info" class="mt-0.5 h-4 w-4 text-blue-600 dark:text-blue-300"></i>
+            <div>
+              Tip: you can skip the optional steps and finish quickly — you can always come back later.
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-end">
+          <button type="button" id="getStartedBtn" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            Let's get started
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 2 -->
+      <section id="step2" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="settings" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">Relay settings</h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Set where Postfix delivers outbound mail.</p>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
+            <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Example: <span class="mono">[smtp.office365.com]:587</span></div>
+          </div>
+
+          <div class="sm:col-span-2">
+            <div class="text-sm font-semibold">Inbound TLS</div>
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Encryption requirements for clients connecting to port 25 and 587.</div>
+          </div>
+
+          <div>
+            <label class="text-sm font-medium">Port 25 (smtp)</label>
+            <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+              {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
+              <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+              <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+              <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-sm font-medium">Port 587 (submission)</label>
+            <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+              {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
+              <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+              <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+              <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s1Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <button type="button" id="s1Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            Next
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 2 -->
+      <section id="step3" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="key-round" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">OAuth application IDs</h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Configure the Azure AD app IDs. No client secret needed.</p>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="text-sm font-medium">Tenant ID <span class="text-xs text-slate-500">(required)</span></label>
+            <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label class="text-sm font-medium">Client ID <span class="text-xs text-slate-500">(required)</span></label>
+            <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label class="text-sm font-medium">Auto refresh (minutes)</label>
+            <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s2Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <button type="button" id="s2Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            Next
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 3 -->
+      <section id="step4" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <i data-lucide="shield" class="h-5 w-5 text-slate-500"></i>
+            <h2 class="text-lg font-semibold">OAuth device flow <span class="text-xs font-semibold text-slate-400">(optional)</span></h2>
+          </div>
+          <span id="tokenChip" class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            <span id="tokenText">Token not set (optional)</span>
+          </span>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Acquire an OAuth token using device flow.</p>
+
+        <div class="mt-3 rounded-2xl border border-amber-200/70 bg-amber-50/60 p-4 text-sm text-slate-800 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-100">
+          <div class="flex items-start gap-2">
+            <i data-lucide="shield-alert" class="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-300"></i>
+            <div>
+              You can skip this step, but until a token exists, <span class="font-semibold">mail delivery will not work</span>.
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button id="startDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="play" class="h-4 w-4"></i>
+            Start device flow
+          </button>
+          <button id="refreshDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+            Refresh
+          </button>
+          <button id="verifyTokenBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/50">
+            <i data-lucide="badge-check" class="h-4 w-4"></i>
+            Verify token
+          </button>
+          <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp" data-ts="{{ token_exp_ts or '' }}"></span> · <span id="tokenVerifyHint">Not verified</span></div>
+        </div>
+
+        <pre id="deviceFlowLog" class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ device_flow_log or '' }}</pre>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s3Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" id="s3Skip" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+              Skip
+            </button>
+            <button type="button" id="s3Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              Next
+              <i data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 4 -->
+      <section id="step5" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="send" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">Test mail <span class="text-xs font-semibold text-slate-400">(optional)</span></h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Send a quick test mail through the relay.</p>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">To</label>
+            <input id="testTo" placeholder="you@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">From (optional)</label>
+            <input id="testFrom" placeholder="(leave blank to use default/fallback)" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">Subject</label>
+            <input id="testSubject" value="Simple M365 Relay test" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">Body</label>
+            <textarea id="testBody" rows="4" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">Hello from Simple M365 Relay.</textarea>
+          </div>
+        </div>
+
+        <div class="mt-4 flex items-center justify-between">
+          <div>
+            <button id="sendTestBtn" type="button" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              <i data-lucide="send" class="h-4 w-4"></i>
+              Send test mail
+            </button>
+            <div id="testDisabledHint" class="mt-2 hidden text-xs text-amber-700 dark:text-amber-200">
+              Test mail is disabled until a valid OAuth token exists (Step 3).
+              <button type="button" id="goToOauthBtn" class="ml-2 underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100">Go to OAuth step</button>
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">Output below</div>
+        </div>
+
+        <pre id="testOut" class="mono mt-3 max-h-60 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950"></pre>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s4Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" id="s4Skip" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">Skip</button>
+            <button type="button" id="s4Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              Next
+              <i data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 5 -->
+      <section id="step6" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="users" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">Add SMTP AUTH user <span class="text-xs font-semibold text-slate-400">(optional)</span></h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Create a username/password for clients authenticating to this relay.</p>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="text-sm font-medium">Login</label>
+            <input id="userLogin" placeholder="example" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label class="text-sm font-medium">Password</label>
+            <input id="userPw" type="password" placeholder="********" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Min 8 characters.</div>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <button id="addUserBtn" type="button" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            <i data-lucide="user-plus" class="h-4 w-4"></i>
+            Create user
+          </button>
+        </div>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s5Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" id="s5Skip" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">Skip</button>
+            <button type="button" id="s5Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              Next
+              <i data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 6 -->
+      <section id="step7" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-3">
+          <div class="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm">
+            <span class="text-lg">🎉</span>
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold">You're all set!</h2>
+            <div class="mt-0.5 text-sm text-slate-600 dark:text-slate-300">Simple M365 Relay is ready to send mail. Party time.</div>
+          </div>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">We’ll save your settings and take you to the dashboard.</p>
+
+        <div class="mt-4 rounded-2xl border border-slate-200/80 bg-white p-4 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div class="flex items-start gap-2">
+            <i data-lucide="info" class="mt-0.5 h-4 w-4 text-blue-600 dark:text-blue-300"></i>
+            <div>
+              <div class="font-semibold">What’s next?</div>
+              <ul class="mt-2 list-disc pl-5 text-sm text-slate-600 dark:text-slate-300">
+                <li>Apply changes on the dashboard when you’re ready.</li>
+                <li>If you skipped OAuth login, you can run device flow later.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s6Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <button type="button" id="finishBtn" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            <i data-lucide="layout-dashboard" class="h-4 w-4"></i>
+            Go to dashboard
+          </button>
+        </div>
+      </section>
+
+    </div>
+
+  </div>
+</body>
+</html>

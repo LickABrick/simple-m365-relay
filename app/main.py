@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import threading
 import time
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Form, Request
+from fastapi.responses import Response
+from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
@@ -18,6 +21,10 @@ DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
 templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
 app = FastAPI(title="Simple M365 Relay")
+
+from . import auth  # noqa: E402
+from . import lockout  # noqa: E402
+from .security import get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
 
@@ -371,6 +378,217 @@ def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
     return out
 
 
+def _is_public_path(path: str) -> bool:
+    if path in ("/login", "/logout", "/setup"):
+        return True
+    if path.startswith("/static"):
+        return True
+    return False
+
+
+def onboarding_complete(cfg: Dict[str, Any]) -> bool:
+    relayhost = str((cfg or {}).get("relayhost") or "").strip()
+    oauth = (cfg or {}).get("oauth") or {}
+    tenant_id = str((oauth or {}).get("tenant_id") or "").strip()
+    client_id = str((oauth or {}).get("client_id") or "").strip()
+    return bool(relayhost and tenant_id and client_id)
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+
+    # Setup required first
+    if not auth.admin_exists() and path not in ("/setup", "/login"):
+        return RedirectResponse(url="/setup", status_code=303)
+
+    # If admin exists, require login for everything except login/setup/logout
+    if auth.admin_exists() and (not _is_public_path(path)):
+        tok = request.cookies.get(auth.SESSION_COOKIE, "")
+        sess = auth.read_session(tok)
+        if not sess:
+            return RedirectResponse(url="/login", status_code=303)
+        request.state.user = sess.get("u")
+        request.state.csrf = sess.get("c")
+
+        # CSRF protection for API POSTs (AJAX)
+        if path.startswith("/api/") and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            provided = get_csrf_from_request(request)
+            if not provided or provided != request.state.csrf:
+                return Response(content="Forbidden", status_code=403)
+
+        # Onboarding gate (core settings only; OAuth device flow optional)
+        if (not path.startswith("/api/")) and (path != "/onboarding"):
+            try:
+                if not onboarding_complete(load_cfg()):
+                    return RedirectResponse(url="/onboarding", status_code=303)
+            except Exception:
+                pass
+
+    return await call_next(request)
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_get(request: Request):
+    if auth.admin_exists():
+        return RedirectResponse(url="/", status_code=303)
+
+    # First-run CSRF for setup screen
+    tok = secrets.token_urlsafe(24)
+    resp = templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": None, "csrf_token": tok})
+    resp.set_cookie("sm365r_setup_csrf", tok, httponly=True, samesite="lax", secure=is_https_request(request), max_age=3600, path="/")
+    return resp
+
+
+@app.post("/setup")
+def setup_post(
+    request: Request,
+    username: str = Form(""),
+    password: str = Form(""),
+    password2: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    if auth.admin_exists():
+        return RedirectResponse(url="/", status_code=303)
+
+    expected = request.cookies.get("sm365r_setup_csrf", "")
+    if expected and csrf_token != expected:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Invalid CSRF token.", "csrf_token": expected})
+
+    username = (username or "").strip()
+    if not username:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Username is required."})
+    if len(username) < 3:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Username must be at least 3 characters."})
+    if password != password2:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Passwords do not match."})
+    ok, msg = auth.validate_new_password(password)
+    if not ok:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": msg})
+
+    pw_hash = auth.hash_password(password)
+    auth.save_admin(username, pw_hash)
+
+    resp = RedirectResponse(url="/", status_code=303)
+    csrf = auth.new_csrf_token()
+    resp.set_cookie(
+        auth.SESSION_COOKIE,
+        auth.make_session(username, csrf),
+        httponly=True,
+        samesite="lax",
+        secure=is_https_request(request),
+        max_age=auth.SESSION_MAX_AGE_SECONDS,
+        path="/",
+    )
+    return resp
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_get(request: Request):
+    if not auth.admin_exists():
+        return RedirectResponse(url="/setup", status_code=303)
+
+    # If already signed in, go to dashboard.
+    if auth.session_user(request.cookies.get(auth.SESSION_COOKIE, "")):
+        return RedirectResponse(url="/", status_code=303)
+
+    tok = secrets.token_urlsafe(24)
+    resp = templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": None, "csrf_token": tok})
+    resp.set_cookie("sm365r_login_csrf", tok, httponly=True, samesite="lax", secure=is_https_request(request), max_age=3600, path="/")
+    return resp
+
+
+@app.post("/login")
+def login_post(
+    request: Request,
+    username: str = Form(""),
+    password: str = Form(""),
+    csrf_token: str = Form(""),
+):
+    if not auth.admin_exists():
+        return RedirectResponse(url="/setup", status_code=303)
+
+    expected = request.cookies.get("sm365r_login_csrf", "")
+    if expected and csrf_token != expected:
+        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid CSRF token.", "csrf_token": expected})
+
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "")
+    rem = lockout.get_lock_remaining(ip)
+    if rem > 0:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "title": "Sign in", "error": f"Too many failed attempts. Try again in {rem} seconds.", "csrf_token": expected},
+        )
+
+    admin = auth.load_admin()
+    if not admin:
+        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin.", "csrf_token": expected})
+
+    username = (username or "").strip()
+    if username != admin.username or (not auth.verify_password(password, admin.password_hash)):
+        count, lock_for = lockout.record_failure(ip)
+        if lock_for:
+            return templates.TemplateResponse(
+                "login.html",
+                {"request": request, "title": "Sign in", "error": f"Too many failed attempts. Locked for {lock_for//60} minutes.", "csrf_token": expected},
+            )
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "title": "Sign in", "error": "Invalid username or password.", "csrf_token": expected},
+        )
+
+    lockout.clear(ip)
+
+    resp = RedirectResponse(url="/", status_code=303)
+    csrf = auth.new_csrf_token()
+    resp.set_cookie(
+        auth.SESSION_COOKIE,
+        auth.make_session(username, csrf),
+        httponly=True,
+        samesite="lax",
+        secure=is_https_request(request),
+        max_age=auth.SESSION_MAX_AGE_SECONDS,
+        path="/",
+    )
+    return resp
+
+
+@app.post("/logout")
+def logout_post(request: Request, csrf_token: str = Form("")):
+    # CSRF-protected logout
+    try:
+        require_csrf(request, csrf_token)
+    except HTTPException:
+        # if token missing, still clear cookie but redirect to login
+        pass
+    resp = RedirectResponse(url="/login", status_code=303)
+    resp.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.get("/onboarding", response_class=HTMLResponse)
+def onboarding_get(request: Request):
+    cfg = load_cfg()
+
+    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+
+    return templates.TemplateResponse(
+        "onboarding.html",
+        {
+            "request": request,
+            "title": "Onboarding",
+            "cfg": cfg,
+            "csrf_token": getattr(request.state, "csrf", ""),
+            "token_exp_ts": token_exp_ts,
+            "device_flow_log": tail(DEVICE_FLOW_LOG, 400),
+            "onboarding_ok": onboarding_complete(cfg),
+            "ms365_user": ms365_user,
+        },
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     cfg = load_cfg()
@@ -391,10 +609,15 @@ def index(request: Request):
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
+    user = getattr(request.state, "user", "")
+    csrf_token = getattr(request.state, "csrf", "")
+
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
+            "user": user,
+            "csrf_token": csrf_token,
             "cfg": cfg,
             "queue_size": qsize,
             "mailq": mailq_out,
@@ -476,8 +699,8 @@ def _validate_int(v: str, default: int, lo: int = 0, hi: int = 1440) -> int:
 
 @app.post("/api/settings")
 def api_settings_save(
-    hostname: str = Form(...),
-    domain: str = Form(...),
+    hostname: str = Form(""),
+    domain: str = Form(""),
     mynetworks: str = Form(""),
     relayhost: str = Form(""),
     tls_25: str = Form("may"),
@@ -486,12 +709,19 @@ def api_settings_save(
     client_id: str = Form(""),
     auto_refresh_minutes: str = Form("30"),
 ):
-    """AJAX endpoint: save settings without reload."""
+    """AJAX endpoint: save settings without reload.
+
+    Note: fields are optional so onboarding can save partial configuration.
+    """
     cfg = load_cfg()
-    cfg["hostname"] = hostname.strip()
-    cfg["domain"] = domain.strip()
-    nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
-    cfg["mynetworks"] = nets
+
+    if hostname.strip():
+        cfg["hostname"] = hostname.strip()
+    if domain.strip():
+        cfg["domain"] = domain.strip()
+    if mynetworks.strip():
+        nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
+        cfg["mynetworks"] = nets
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
     cfg.setdefault("tls", {})

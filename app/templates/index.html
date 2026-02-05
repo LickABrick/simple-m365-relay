@@ -18,6 +18,8 @@
   <!-- Lucide icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
+  <meta name="csrf-token" content="{{ csrf_token }}" />
+
   <script>
     // Theme (persisted)
     const themeKey = 'simple-m365-relay-theme';
@@ -133,6 +135,27 @@
       url.searchParams.delete('toast');
       url.searchParams.delete('toastLevel');
       window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    }
+
+    function getCsrf(){
+      return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    }
+
+    async function apiFetch(url, opts){
+      const o = Object.assign({}, (opts || {}));
+      const method = String(o.method || 'GET').toUpperCase();
+      o.headers = Object.assign({}, (o.headers || {}));
+      if (method !== 'GET') {
+        o.headers['x-csrf-token'] = o.headers['x-csrf-token'] || getCsrf();
+      }
+
+      const r = await fetch(url, o);
+      if (r.status === 403) {
+        showToast('Session expired or invalid. Please refresh and sign in again.', 'error');
+        window.setTimeout(() => { window.location.href = '/login'; }, 1200);
+        throw new Error('forbidden');
+      }
+      return r;
     }
 
     function copyText(elId){
@@ -449,7 +472,8 @@
       if (!form) return;
       try {
         const data = new FormData(form);
-        const r = await fetch('/api/settings', { method: 'POST', body: data });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/settings', { method: 'POST', body: data });
         let j = null;
         try { j = await r.json(); } catch(e) {}
 
@@ -475,7 +499,8 @@
       // hide previous callout
       document.getElementById('deviceFlowCallout')?.classList.add('hidden');
       try {
-        await fetch('/api/token/start', { method: 'POST' });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        await apiFetch('/api/token/start', { method: 'POST' });
       } catch (e) {
         showToast('Failed to start device flow.', 'error');
         return;
@@ -510,7 +535,8 @@
 
     async function refreshTokenNoReload(){
       try {
-        const r = await fetch('/api/token/refresh', { method: 'POST' });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/token/refresh', { method: 'POST' });
         const j = await r.json();
         const out = (j.output || '').trim();
         const ok = !(out && out.toLowerCase().includes('failed'));
@@ -603,7 +629,8 @@
       if (!form) return;
       try {
         const data = new FormData(form);
-        const r = await fetch('/api/users/add', { method: 'POST', body: data });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/users/add', { method: 'POST', body: data });
         const j = await r.json();
         if (j && j.ok) {
           showToast('User saved.', 'ok');
@@ -621,7 +648,8 @@
       try {
         const data = new FormData();
         data.set('login', login);
-        const r = await fetch('/api/users/delete', { method: 'POST', body: data });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/users/delete', { method: 'POST', body: data });
         const j = await r.json();
         if (j && j.ok) {
           showToast('User deleted.', 'ok');
@@ -722,7 +750,8 @@
       if (!form) return;
       try {
         const data = new FormData(form);
-        const r = await fetch('/api/from/allow', { method: 'POST', body: data });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/from/allow', { method: 'POST', body: data });
         const j = await r.json();
         if (j && j.ok) {
           let msg = 'Saved (not applied). Click Apply Changes.';
@@ -747,7 +776,8 @@
       if (!form) return;
       try {
         const data = new FormData(form);
-        const r = await fetch('/api/from/default', { method: 'POST', body: data });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/from/default', { method: 'POST', body: data });
         const j = await r.json();
         if (j && j.ok) {
           showToast('Saved (not applied). Click Apply Changes.', 'ok');
@@ -769,7 +799,8 @@
       if (btn) btn.disabled = true;
       try {
         const data = new FormData(form);
-        const r = await fetch('/api/testmail', { method: 'POST', body: data });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/testmail', { method: 'POST', body: data });
         const j = await r.json();
         const out = (j.output || '').trim() || 'ok';
         const pre = document.getElementById('testmailOut');
@@ -788,7 +819,8 @@
         const data = new FormData();
         data.set('login', login);
         data.set('from_addr', fromAddr);
-        const r = await fetch('/api/from/disallow', { method: 'POST', body: data });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/from/disallow', { method: 'POST', body: data });
         const j = await r.json();
         if (j && j.ok) {
           showToast('Saved (not applied). Click Apply Changes.', 'ok');
@@ -848,7 +880,8 @@
       const btn = document.getElementById('applyBtn');
       if (btn) btn.disabled = true;
       try {
-        const r = await fetch('/api/apply', { method: 'POST' });
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        const r = await apiFetch('/api/apply', { method: 'POST' });
         const j = await r.json();
         const out = (j.output || '').trim() || 'ok';
         showToast('Applied changes.', j.level === 'error' ? 'error' : 'ok');
@@ -1070,8 +1103,18 @@
           <button id="themeBtn" type="button" onclick="toggleTheme()"
             class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
             <i data-lucide="moon" class="h-4 w-4"></i>
-            <span id="themeBtnLabel">Dark</span>
+            <span id="themeBtnLabel" class="sr-only">Dark</span>
           </button>
+
+          {% if user %}
+          <form method="post" action="/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+            <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Sign out">
+              <i data-lucide="log-out" class="h-4 w-4"></i>
+              Logout
+            </button>
+          </form>
+          {% endif %}
         </div>
       </div>
     </header>

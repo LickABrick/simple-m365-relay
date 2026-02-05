@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en" class="h-full scroll-smooth">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title or 'Simple M365 Relay' }}</title>
+  <meta name="csrf-token" content="{{ csrf_token or '' }}" />
+
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = window.tailwind.config || {};
+    window.tailwind.config.darkMode = 'class';
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    const themeKey = 'simple-m365-relay-theme';
+    const saved = localStorage.getItem(themeKey);
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if ((saved === 'dark') || (!saved && prefersDark)) {
+      document.documentElement.classList.add('dark');
+    }
+
+    function setTheme(mode){
+      const isDark = (mode === 'dark');
+      document.documentElement.classList.toggle('dark', isDark);
+      if (document.body) document.body.classList.toggle('dark', isDark);
+      localStorage.setItem(themeKey, mode);
+      syncThemeButton();
+    }
+
+    function toggleTheme(){
+      const isDark = document.documentElement.classList.contains('dark');
+      setTheme(isDark ? 'light' : 'dark');
+    }
+
+    function syncThemeButton(){
+      const label = document.getElementById('themeBtnLabel');
+      if (!label) return;
+      const isDark = document.documentElement.classList.contains('dark');
+      label.textContent = isDark ? 'Light' : 'Dark';
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      try { lucide.createIcons(); } catch(e) {}
+      syncThemeButton();
+    });
+  </script>
+
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+</head>
+<body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <div class="mx-auto flex min-h-full max-w-xl flex-col px-4 py-10">
+
+    <div class="mb-6 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
+          <i data-lucide="mail" class="h-5 w-5"></i>
+        </div>
+        <div>
+          <div class="text-sm font-semibold leading-5">Simple M365 Relay</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">Admin access</div>
+        </div>
+      </div>
+
+      <button type="button" id="themeBtn" onclick="toggleTheme()" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Toggle theme">
+        <i data-lucide="moon" class="h-4 w-4"></i>
+        <span id="themeBtnLabel" class="sr-only">Dark</span>
+      </button>
+    </div>
+
+    {% if error %}
+    <div class="mb-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+      <div class="flex items-start gap-2">
+        <i data-lucide="triangle-alert" class="mt-0.5 h-4 w-4"></i>
+        <div>{{ error }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      {% block content %}{% endblock %}
+    </div>
+
+    <div class="mt-6 text-center text-xs text-slate-500 dark:text-slate-400">
+      Tip: keep this UI behind HTTPS.
+    </div>
+
+  </div>
+</body>
+</html>
