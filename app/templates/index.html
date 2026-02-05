@@ -620,6 +620,47 @@
       }
     }
 
+    async function defaultFromNoReload(){
+      const form = document.getElementById('defaultFromForm');
+      if (!form) return;
+      try {
+        const data = new FormData(form);
+        const r = await fetch('/api/from/default', { method: 'POST', body: data });
+        const j = await r.json();
+        if (j && j.ok) {
+          showToast('Saved (not applied). Click Apply Changes.', 'ok');
+          if (typeof j.pending !== 'undefined') syncPendingFromApi(!!j.pending);
+          await refreshSendersSection();
+          await refreshStatus();
+        } else {
+          showToast('Save failed.', 'error');
+        }
+      } catch (e) {
+        showToast('Save failed.', 'error');
+      }
+    }
+
+    async function testmailNoReload(){
+      const form = document.getElementById('testmailForm');
+      if (!form) return;
+      const btn = document.getElementById('testmailBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const data = new FormData(form);
+        const r = await fetch('/api/testmail', { method: 'POST', body: data });
+        const j = await r.json();
+        const out = (j.output || '').trim() || 'ok';
+        const pre = document.getElementById('testmailOut');
+        if (pre) pre.textContent = out;
+        showToast(out.length > 120 ? (out.slice(0,120) + '…') : out, j.level === 'error' ? 'error' : 'ok');
+        await refreshStatus();
+      } catch (e) {
+        showToast('Send test mail failed.', 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
     async function disallowFrom(login, fromAddr){
       try {
         const data = new FormData();
@@ -650,6 +691,9 @@
     function initSendersAjax(){
       const f = document.getElementById('fromAllowForm');
       if (f) f.addEventListener('submit', (e) => { e.preventDefault(); allowFromNoReload(); });
+      const d = document.getElementById('defaultFromForm');
+      if (d) d.addEventListener('submit', (e) => { e.preventDefault(); defaultFromNoReload(); });
+
       // disallow handled via onclick buttons after we render (and initial HTML still has forms, but those will submit normally).
       // To prevent page reload on initial-render disallow forms, intercept submit events in the senders section.
       const container = document.getElementById('senders');
@@ -664,6 +708,11 @@
           disallowFrom(fd.get('login') || '', fd.get('from_addr') || '');
         }, true);
       }
+    }
+
+    function initTestmailAjax(){
+      const t = document.getElementById('testmailForm');
+      if (t) t.addEventListener('submit', (e) => { e.preventDefault(); testmailNoReload(); });
     }
 
     function initOauthAjax(){
@@ -694,6 +743,7 @@
       initOauthAjax();
       initUsersAjax();
       initSendersAjax();
+      initTestmailAjax();
       syncTokenExpiryFromDom();
       applyLogFilter();
     });
@@ -1141,16 +1191,29 @@
           </div>
 
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <form id="fromAllowForm" method="post" action="/from/allow" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
-              <div class="text-sm font-semibold">Add allowed From</div>
-              <div class="text-xs text-slate-500 dark:text-slate-400">This applies to authenticated clients (SMTP AUTH).</div>
-              <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-              <input name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-              <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
-                <i data-lucide="plus" class="h-4 w-4"></i>
-                Add
-              </button>
-            </form>
+            <div class="space-y-4">
+              <form id="fromAllowForm" method="post" action="/from/allow" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                <div class="text-sm font-semibold">Add allowed From</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">This applies to authenticated clients (SMTP AUTH).</div>
+                <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+                <input name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+                <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
+                  <i data-lucide="plus" class="h-4 w-4"></i>
+                  Add
+                </button>
+              </form>
+
+              <form id="defaultFromForm" method="post" action="/from/default" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+                <div class="text-sm font-semibold">Set default From</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Used when clients don’t specify a From address.</div>
+                <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+                <input name="from_addr" placeholder="default-from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+                <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
+                  <i data-lucide="pin" class="h-4 w-4"></i>
+                  Save default
+                </button>
+              </form>
+            </div>
 
             <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
               <div class="text-sm font-semibold">M365 note (Option A)</div>
@@ -1237,7 +1300,7 @@
           </div>
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Sends via local <span class="mono">sendmail</span> in the Postfix container (so it goes through the configured relay).</p>
 
-          <form method="post" action="/testmail" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <form id="testmailForm" method="post" action="/testmail" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div class="sm:col-span-1">
               <label class="text-sm font-medium">From</label>
               <div class="mt-1 flex gap-2">
@@ -1271,10 +1334,17 @@
             </div>
             <div class="sm:col-span-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div class="text-xs text-slate-500 dark:text-slate-400">If this errors: check “Recent warnings / errors” and “Queue (mailq)”.</div>
-              <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              <button id="testmailBtn" type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
                 <i data-lucide="send" class="h-4 w-4"></i>
                 Send test mail
               </button>
+            </div>
+
+            <div class="sm:col-span-2">
+              <details class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                <summary class="cursor-pointer text-sm font-semibold">Last send output</summary>
+                <pre id="testmailOut" class="mono mt-3 max-h-56 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-900/40">(none)</pre>
+              </details>
             </div>
           </form>
         </div>

@@ -612,12 +612,11 @@ def testmail(
     subject: str = Form("Test"),
     body: str = Form("Does it work?"),
 ):
-    # Return to the dashboard with a toast message.
+    # HTML fallback
     from urllib.parse import quote
 
     out = send_test_mail(to_addr, from_addr, subject, body)
 
-    # keep it short for the URL
     msg = (out or "ok").strip()
     if len(msg) > 600:
         msg = msg[:600] + "…"
@@ -625,6 +624,19 @@ def testmail(
     level = "error" if "exit" in msg.lower() else "ok"
 
     return RedirectResponse(url=f"/?toast={quote(msg)}&toastLevel={level}#testmail", status_code=303)
+
+
+@app.post("/api/testmail")
+def api_testmail(
+    to_addr: str = Form(...),
+    from_addr: str = Form(...),
+    subject: str = Form("Test"),
+    body: str = Form("Does it work?"),
+):
+    out = send_test_mail(to_addr, from_addr, subject, body)
+    msg = (out or "ok").strip() or "ok"
+    level = "error" if "exit" in msg.lower() else "ok"
+    return {"ok": True, "output": msg, "level": level}
 
 
 @app.get("/api/status")
