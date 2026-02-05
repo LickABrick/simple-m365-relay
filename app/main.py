@@ -440,6 +440,11 @@ def setup_post(
 def login_get(request: Request):
     if not auth.admin_exists():
         return RedirectResponse(url="/setup", status_code=303)
+
+    # If already signed in, go to dashboard.
+    if auth.read_session(request.cookies.get(auth.SESSION_COOKIE, "")):
+        return RedirectResponse(url="/", status_code=303)
+
     return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": None})
 
 
@@ -494,10 +499,13 @@ def index(request: Request):
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
+    user = getattr(request.state, "user", "")
+
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
+            "user": user,
             "cfg": cfg,
             "queue_size": qsize,
             "mailq": mailq_out,
