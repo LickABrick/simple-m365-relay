@@ -386,6 +386,14 @@ def _is_public_path(path: str) -> bool:
     return False
 
 
+def onboarding_complete(cfg: Dict[str, Any]) -> bool:
+    relayhost = str((cfg or {}).get("relayhost") or "").strip()
+    oauth = (cfg or {}).get("oauth") or {}
+    tenant_id = str((oauth or {}).get("tenant_id") or "").strip()
+    client_id = str((oauth or {}).get("client_id") or "").strip()
+    return bool(relayhost and tenant_id and client_id)
+
+
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
@@ -408,6 +416,14 @@ async def auth_middleware(request: Request, call_next):
             provided = get_csrf_from_request(request)
             if not provided or provided != request.state.csrf:
                 return Response(content="Forbidden", status_code=403)
+
+        # Onboarding gate (core settings only; OAuth device flow optional)
+        if (not path.startswith("/api/")) and (path != "/onboarding"):
+            try:
+                if not onboarding_complete(load_cfg()):
+                    return RedirectResponse(url="/onboarding", status_code=303)
+            except Exception:
+                pass
 
     return await call_next(request)
 
@@ -548,6 +564,28 @@ def logout_post(request: Request, csrf_token: str = Form("")):
     resp = RedirectResponse(url="/login", status_code=303)
     resp.delete_cookie(auth.SESSION_COOKIE, path="/")
     return resp
+
+
+@app.get("/onboarding", response_class=HTMLResponse)
+def onboarding_get(request: Request):
+    cfg = load_cfg()
+
+    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+
+    return templates.TemplateResponse(
+        "onboarding.html",
+        {
+            "request": request,
+            "title": "Onboarding",
+            "cfg": cfg,
+            "csrf_token": getattr(request.state, "csrf", ""),
+            "token_exp_ts": token_exp_ts,
+            "device_flow_log": tail(DEVICE_FLOW_LOG, 400),
+            "onboarding_ok": onboarding_complete(cfg),
+        },
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

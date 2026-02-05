@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en" class="h-full scroll-smooth">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ title or 'Onboarding' }} · Simple M365 Relay</title>
+  <meta name="csrf-token" content="{{ csrf_token or '' }}" />
+
+  <script>
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = window.tailwind.config || {};
+    window.tailwind.config.darkMode = 'class';
+  </script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    const themeKey = 'simple-m365-relay-theme';
+    const saved = localStorage.getItem(themeKey);
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if ((saved === 'dark') || (!saved && prefersDark)) {
+      document.documentElement.classList.add('dark');
+    }
+
+    function setTheme(mode){
+      const isDark = (mode === 'dark');
+      document.documentElement.classList.toggle('dark', isDark);
+      if (document.body) document.body.classList.toggle('dark', isDark);
+      localStorage.setItem(themeKey, mode);
+      syncThemeButton();
+    }
+
+    function toggleTheme(){
+      const isDark = document.documentElement.classList.contains('dark');
+      setTheme(isDark ? 'light' : 'dark');
+    }
+
+    function syncThemeButton(){
+      const label = document.getElementById('themeBtnLabel');
+      if (!label) return;
+      const isDark = document.documentElement.classList.contains('dark');
+      label.textContent = isDark ? 'Light' : 'Dark';
+    }
+
+    function showToast(msg, level){
+      const box = document.getElementById('toast');
+      const text = document.getElementById('toastText');
+      if (!box || !text) return;
+
+      text.textContent = msg;
+      box.classList.remove('hidden');
+      box.classList.toggle('toast-error', (level === 'error'));
+
+      window.setTimeout(() => {
+        box.classList.add('hidden');
+      }, 8000);
+    }
+
+    function getCsrf(){
+      return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+    }
+
+    async function apiFetch(url, opts){
+      const o = Object.assign({}, (opts || {}));
+      const method = String(o.method || 'GET').toUpperCase();
+      o.headers = Object.assign({}, (o.headers || {}));
+      if (method !== 'GET') {
+        o.headers['x-csrf-token'] = o.headers['x-csrf-token'] || getCsrf();
+      }
+
+      const r = await fetch(url, o);
+      if (r.status === 403) {
+        showToast('Session expired or invalid. Please refresh and sign in again.', 'error');
+        window.setTimeout(() => { window.location.href = '/login'; }, 1200);
+        throw new Error('forbidden');
+      }
+      return r;
+    }
+
+    function _fieldOk(v){
+      return String(v || '').trim().length > 0;
+    }
+
+    function refreshCompletionFromForm(){
+      const relay = document.querySelector('input[name="relayhost"]')?.value || '';
+      const tenant = document.querySelector('input[name="tenant_id"]')?.value || '';
+      const client = document.querySelector('input[name="client_id"]')?.value || '';
+
+      const a = document.getElementById('stepCoreDot');
+      const b = document.getElementById('stepOAuthDot');
+
+      const okCore = _fieldOk(relay);
+      const okOAuth = _fieldOk(tenant) && _fieldOk(client);
+
+      if (a) {
+        a.classList.toggle('bg-emerald-500', okCore);
+        a.classList.toggle('bg-slate-300', !okCore);
+        a.classList.toggle('dark:bg-slate-700', !okCore);
+      }
+      if (b) {
+        b.classList.toggle('bg-emerald-500', okOAuth);
+        b.classList.toggle('bg-slate-300', !okOAuth);
+        b.classList.toggle('dark:bg-slate-700', !okOAuth);
+      }
+
+      const done = okCore && okOAuth;
+      const banner = document.getElementById('doneBanner');
+      if (banner) banner.classList.toggle('hidden', !done);
+    }
+
+    async function refreshTokenBits(){
+      const tokenChip = document.getElementById('tokenChip');
+      const tokenText = document.getElementById('tokenText');
+      const tokenExp = document.getElementById('tokenExp');
+      try {
+        const r = await fetch('/api/status', { cache: 'no-store' });
+        const j = await r.json();
+        const ts = j.token_exp_ts || '';
+        if (tokenExp) tokenExp.textContent = ts ? (new Date(ts * 1000)).toLocaleString() : 'Missing/unknown';
+
+        const has = !!ts;
+        if (tokenChip) {
+          tokenChip.classList.toggle('bg-emerald-100', has);
+          tokenChip.classList.toggle('text-emerald-900', has);
+          tokenChip.classList.toggle('bg-amber-100', !has);
+          tokenChip.classList.toggle('text-amber-900', !has);
+          tokenChip.classList.toggle('dark:bg-emerald-950/40', has);
+          tokenChip.classList.toggle('dark:text-emerald-200', has);
+          tokenChip.classList.toggle('dark:bg-amber-950/30', !has);
+          tokenChip.classList.toggle('dark:text-amber-200', !has);
+        }
+        if (tokenText) tokenText.textContent = has ? 'Token present' : 'Token not set (optional)';
+      } catch (e) {}
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      try { lucide.createIcons(); } catch(e) {}
+      syncThemeButton();
+
+      // track fields
+      for (const el of document.querySelectorAll('input[name="relayhost"],input[name="tenant_id"],input[name="client_id"]')) {
+        el.addEventListener('input', refreshCompletionFromForm);
+      }
+      refreshCompletionFromForm();
+      refreshTokenBits();
+
+      const form = document.getElementById('settingsForm');
+      if (form) {
+        form.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          try {
+            const data = new FormData(form);
+            const r = await apiFetch('/api/settings', { method: 'POST', body: data });
+            const j = await r.json();
+            if (!r.ok || !j.ok) {
+              showToast(j.detail || 'Save failed.', 'error');
+              return;
+            }
+            showToast('Saved. You can continue.', 'ok');
+            refreshCompletionFromForm();
+          } catch (err) {
+            showToast('Save failed.', 'error');
+          }
+        });
+      }
+
+      const start = document.getElementById('startDeviceFlowBtn');
+      const log = document.getElementById('deviceFlowLog');
+      const refreshLog = async () => {
+        if (!log) return;
+        const r = await fetch('/api/device-flow-log', { cache: 'no-store' });
+        const j = await r.json();
+        log.textContent = j.log || '';
+      };
+      if (start) {
+        start.addEventListener('click', async () => {
+          try {
+            await apiFetch('/api/token/start', { method: 'POST' });
+            showToast('Device flow started. Follow the instructions below.', 'ok');
+            await refreshLog();
+            await refreshTokenBits();
+          } catch(e) {
+            showToast('Could not start device flow.', 'error');
+          }
+        });
+      }
+      const refresh = document.getElementById('refreshDeviceFlowBtn');
+      if (refresh) {
+        refresh.addEventListener('click', async () => { await refreshLog(); await refreshTokenBits(); });
+      }
+      refreshLog();
+    });
+  </script>
+
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    #toast.toast-error { border-color: rgb(254 202 202); background: rgb(254 242 242); color: rgb(127 29 29); }
+    .dark #toast.toast-error { border-color: rgb(127 29 29 / 0.35); background: rgb(69 10 10 / 0.4); color: rgb(254 226 226); }
+  </style>
+</head>
+
+<body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+
+  <div id="toast" class="fixed right-4 top-4 z-50 hidden max-w-md rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-lg dark:border-slate-800 dark:bg-slate-900">
+    <div class="flex items-start gap-2">
+      <i data-lucide="sparkles" class="mt-0.5 h-4 w-4 text-slate-500"></i>
+      <div id="toastText" class="leading-5">Toast</div>
+    </div>
+  </div>
+
+  <div class="mx-auto max-w-6xl px-4 py-8">
+
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
+          <i data-lucide="mail" class="h-6 w-6"></i>
+        </div>
+        <div>
+          <div class="text-sm font-semibold leading-5">Simple M365 Relay</div>
+          <div class="text-xs text-slate-500 dark:text-slate-400">Onboarding</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button type="button" id="themeBtn" onclick="toggleTheme()" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Toggle theme">
+          <i data-lucide="moon" class="h-4 w-4"></i>
+          <span id="themeBtnLabel" class="sr-only">Dark</span>
+        </button>
+
+        <form method="post" action="/logout" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+          <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+            <i data-lucide="log-out" class="h-4 w-4"></i>
+            Logout
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
+
+      <aside class="lg:col-span-4">
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="text-sm font-semibold">Checklist</div>
+          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">You can skip optional steps for now.</div>
+
+          <div class="mt-4 space-y-3 text-sm">
+            <div class="flex items-center gap-3">
+              <span id="stepCoreDot" class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+              <div>
+                <div class="font-semibold">Relay settings</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Required</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span id="stepOAuthDot" class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+              <div>
+                <div class="font-semibold">OAuth app IDs</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Required</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+              <div>
+                <div class="font-semibold">OAuth device flow</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Optional</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+              <div>
+                <div class="font-semibold">Test mail</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Optional</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+              <div>
+                <div class="font-semibold">SMTP AUTH users</div>
+                <div class="text-xs text-slate-500 dark:text-slate-400">Optional</div>
+              </div>
+            </div>
+          </div>
+
+          <div id="doneBanner" class="mt-5 hidden rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
+            <div class="flex items-start gap-2">
+              <i data-lucide="badge-check" class="mt-0.5 h-4 w-4"></i>
+              <div>
+                <div class="font-semibold">Core onboarding complete</div>
+                <div class="mt-1 text-xs">You can go to the dashboard now and finish the optional steps anytime.</div>
+                <a href="/" class="mt-3 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                  <i data-lucide="layout-dashboard" class="h-4 w-4"></i>
+                  Go to dashboard
+                </a>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </aside>
+
+      <main class="lg:col-span-8 space-y-6">
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex items-center gap-2">
+            <i data-lucide="settings" class="h-5 w-5 text-slate-500"></i>
+            <h2 class="text-lg font-semibold">Core settings</h2>
+          </div>
+          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Fill in the required values, then click <b>Save</b>. This unlocks the dashboard.</p>
+
+          <form id="settingsForm" method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div class="sm:col-span-2">
+              <div class="text-sm font-semibold">Outbound relay</div>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
+              <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            </div>
+
+            <div class="sm:col-span-2">
+              <div class="text-sm font-semibold">Inbound TLS</div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Port 25 and 587 encryption requirements.</div>
+            </div>
+            <div>
+              <label class="text-sm font-medium">Port 25 (smtp)</label>
+              <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+                {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
+                <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+                <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+                <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-sm font-medium">Port 587 (submission)</label>
+              <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+                {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
+                <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+                <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+                <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+              </select>
+            </div>
+
+            <div class="sm:col-span-2">
+              <div class="text-sm font-semibold">OAuth (Microsoft 365)</div>
+            </div>
+            <div>
+              <label class="text-sm font-medium">Tenant ID <span class="text-xs text-slate-500">(required)</span></label>
+              <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            </div>
+            <div>
+              <label class="text-sm font-medium">Client ID <span class="text-xs text-slate-500">(required)</span></label>
+              <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            </div>
+            <div>
+              <label class="text-sm font-medium">Auto refresh (minutes)</label>
+              <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
+            </div>
+            <div class="hidden sm:block"></div>
+
+            <div class="sm:col-span-2 flex justify-end">
+              <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                <i data-lucide="save" class="h-4 w-4"></i>
+                Save
+              </button>
+            </div>
+          </form>
+
+          <div class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+            <div class="flex items-start gap-2">
+              <i data-lucide="shield-alert" class="mt-0.5 h-4 w-4"></i>
+              <div>
+                OAuth device flow is optional for now (you can skip). But until a token exists, mail delivery will not work.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <i data-lucide="key-round" class="h-5 w-5 text-slate-500"></i>
+              <h2 class="text-lg font-semibold">OAuth device flow (optional)</h2>
+            </div>
+            <span id="tokenChip" class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+              <span id="tokenText">Token not set (optional)</span>
+            </span>
+          </div>
+
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button id="startDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+              <i data-lucide="play" class="h-4 w-4"></i>
+              Start device flow
+            </button>
+            <button id="refreshDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+              <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+              Refresh
+            </button>
+            <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp">{{ token_exp_ts or '' }}</span></div>
+          </div>
+
+          <pre id="deviceFlowLog" class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ device_flow_log or '' }}</pre>
+
+          <div class="mt-3 text-xs text-slate-500 dark:text-slate-400">
+            Tip: once the token is acquired, you can use <b>Test mail</b> from the dashboard.
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div class="flex items-center gap-2">
+            <i data-lucide="sparkles" class="h-5 w-5 text-slate-500"></i>
+            <h2 class="text-lg font-semibold">Next</h2>
+          </div>
+          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">When you’re ready, go to the dashboard to add users, test mail, and apply changes.</p>
+          <a href="/" class="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="layout-dashboard" class="h-4 w-4"></i>
+            Open dashboard
+          </a>
+        </div>
+
+      </main>
+
+    </div>
+  </div>
+
+</body>
+</html>
