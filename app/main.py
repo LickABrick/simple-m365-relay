@@ -55,6 +55,7 @@ from . import lockout  # noqa: E402
 from .security import client_ip, get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
+POSTFIX_CONTROL_SOCKET = (os.environ.get("POSTFIX_CONTROL_SOCKET") or "").strip()
 
 _device_flow_lock = threading.Lock()
 _device_flow_running = False
@@ -242,9 +243,75 @@ def _control_headers(extra: Optional[dict] = None) -> dict:
     return h
 
 
+def _unix_http_json(method: str, path: str, body: bytes = b"", headers: Optional[dict] = None, timeout: float = 10.0) -> dict:
+    """Minimal HTTP client over a unix domain socket.
+
+    We keep this tiny on purpose to avoid extra deps.
+    """
+    import socket
+
+    sock_path = POSTFIX_CONTROL_SOCKET
+    if not sock_path:
+        raise RuntimeError("POSTFIX_CONTROL_SOCKET not set")
+
+    hdrs = _control_headers(headers or {})
+    if body:
+        hdrs.setdefault("Content-Length", str(len(body)))
+    else:
+        hdrs.setdefault("Content-Length", "0")
+    hdrs.setdefault("Host", "postfix")
+
+    req = f"{method} {path} HTTP/1.1\r\n" + "\r\n".join([f"{k}: {v}" for k, v in hdrs.items()]) + "\r\n\r\n"
+
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    s.connect(sock_path)
+    try:
+        s.sendall(req.encode("utf-8") + (body or b""))
+        data = b""
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+            # stop early if body complete
+            if b"\r\n\r\n" in data:
+                head, rest = data.split(b"\r\n\r\n", 1)
+                # try parse content-length
+                hl = head.decode("iso-8859-1", "ignore").split("\r\n")
+                clen = None
+                for ln in hl[1:]:
+                    if ln.lower().startswith("content-length:"):
+                        try:
+                            clen = int(ln.split(":", 1)[1].strip())
+                        except Exception:
+                            pass
+                if clen is not None and len(rest) >= clen:
+                    break
+        if b"\r\n\r\n" not in data:
+            raise RuntimeError("invalid response")
+        head, body_bytes = data.split(b"\r\n\r\n", 1)
+        status_line = head.split(b"\r\n", 1)[0].decode("ascii", "ignore")
+        try:
+            status = int(status_line.split()[1])
+        except Exception:
+            status = 0
+        if status >= 400:
+            raise RuntimeError(f"control api error HTTP {status}")
+        return json.loads(body_bytes.decode("utf-8"))
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
 def _control_get(path: str) -> dict:
     import urllib.request
     import ssl
+
+    if POSTFIX_CONTROL_SOCKET:
+        return _unix_http_json("GET", path, timeout=10)
 
     url = POSTFIX_CONTROL_URL + path
     req = urllib.request.Request(url, headers=_control_headers())
@@ -255,6 +322,9 @@ def _control_get(path: str) -> dict:
 def _control_post(path: str) -> dict:
     import urllib.request
     import ssl
+
+    if POSTFIX_CONTROL_SOCKET:
+        return _unix_http_json("POST", path, body=b"", timeout=20)
 
     url = POSTFIX_CONTROL_URL + path
     req = urllib.request.Request(url, method="POST", data=b"", headers=_control_headers())
@@ -274,6 +344,10 @@ def ensure_user(login: str, password: str) -> str:
     import urllib.request, ssl
 
     data = json.dumps({"login": login, "password": password}).encode("utf-8")
+    if POSTFIX_CONTROL_SOCKET:
+        j = _unix_http_json("POST", "/users/add", body=data, headers={"Content-Type": "application/json"}, timeout=15)
+        return j.get("output") or "ok"
+
     req = urllib.request.Request(
         POSTFIX_CONTROL_URL + "/users/add",
         method="POST",
@@ -288,6 +362,10 @@ def delete_user(login: str) -> str:
     import urllib.request, ssl
 
     data = json.dumps({"login": login}).encode("utf-8")
+    if POSTFIX_CONTROL_SOCKET:
+        j = _unix_http_json("POST", "/users/delete", body=data, headers={"Content-Type": "application/json"}, timeout=15)
+        return j.get("output") or "ok"
+
     req = urllib.request.Request(
         POSTFIX_CONTROL_URL + "/users/delete",
         method="POST",
@@ -340,6 +418,10 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         "subject": subject,
         "body": body,
     }).encode("utf-8")
+
+    if POSTFIX_CONTROL_SOCKET:
+        j = _unix_http_json("POST", "/testmail", body=payload, headers={"Content-Type": "application/json"}, timeout=20)
+        return j.get("output") or "ok"
 
     req = urllib.request.Request(
         POSTFIX_CONTROL_URL + "/testmail",

@@ -4,6 +4,7 @@ import os
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import socketserver
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -40,6 +41,7 @@ def get_auto_refresh_minutes() -> int:
 
 BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
 PORT = int(os.environ.get("CONTROL_PORT", "18080"))
+SOCKET_PATH = os.environ.get("CONTROL_SOCKET", "")
 CONTROL_TOKEN_ENV = os.environ.get("CONTROL_TOKEN", "")
 CONTROL_TOKEN_FILE = DATA_DIR / "state" / "control.token"
 
@@ -419,10 +421,27 @@ def _auto_refresh_loop():
         _time.sleep(5)
 
 
+class _UnixHTTPServer(socketserver.UnixStreamServer, HTTPServer):
+    # allow immediate restart
+    allow_reuse_address = True
+
+
 def main():
     # always start loop; it self-disables when interval <= 0
     threading.Thread(target=_auto_refresh_loop, daemon=True).start()
-    httpd = HTTPServer((BIND, PORT), H)
+
+    if SOCKET_PATH:
+        sock = Path(SOCKET_PATH)
+        try:
+            if sock.exists():
+                sock.unlink()
+        except Exception:
+            pass
+        sock.parent.mkdir(parents=True, exist_ok=True)
+        httpd = _UnixHTTPServer(str(sock), H)
+    else:
+        httpd = HTTPServer((BIND, PORT), H)
+
     httpd.serve_forever()
 
 
