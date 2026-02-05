@@ -315,6 +315,7 @@ def update_settings(
     domain: str = Form(...),
     mynetworks: str = Form(""),
 ):
+    """HTML form endpoint (kept for no-JS fallback)."""
     cfg = load_cfg()
     cfg["hostname"] = hostname.strip()
     cfg["domain"] = domain.strip()
@@ -324,6 +325,27 @@ def update_settings(
     cfg["mynetworks"] = nets
     save_cfg(cfg)
     return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#settings", status_code=303)
+
+
+@app.post("/api/settings")
+def api_settings_save(
+    hostname: str = Form(...),
+    domain: str = Form(...),
+    mynetworks: str = Form(""),
+):
+    """AJAX endpoint: save settings without reload."""
+    cfg = load_cfg()
+    cfg["hostname"] = hostname.strip()
+    cfg["domain"] = domain.strip()
+    nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
+    cfg["mynetworks"] = nets
+    save_cfg(cfg)
+
+    current_hash = cfg_hash(cfg)
+    applied_hash = get_applied_hash()
+    pending = bool(applied_hash) and (current_hash != applied_hash)
+
+    return {"ok": True, "pending": pending}
 
 
 @app.post("/users/add")
@@ -398,7 +420,7 @@ def apply_changes():
     msg = (out or "ok").strip() or "ok"
     if len(msg) > 600:
         msg = msg[:600] + "…"
-    level = "error" if "fatal" in msg.lower() or "error" in msg.lower() else "ok"
+    level = "error" if ("fatal" in msg.lower() or "error" in msg.lower()) else "ok"
 
     return RedirectResponse(url=f"/?toast={quote('Applied changes.')}&toastLevel={level}#status", status_code=303)
 

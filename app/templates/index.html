@@ -107,29 +107,32 @@
       }
     }
 
-    function showToastFromUrl(){
-      const url = new URL(window.location.href);
-      const msg = url.searchParams.get('toast');
-      if (!msg) return;
-      const level = (url.searchParams.get('toastLevel') || 'ok');
-
+    function showToast(msg, level){
       const box = document.getElementById('toast');
       const text = document.getElementById('toastText');
       if (!box || !text) return;
 
       text.textContent = msg;
       box.classList.remove('hidden');
-      box.classList.toggle('toast-error', level === 'error');
+      box.classList.toggle('toast-error', (level === 'error'));
+
+      window.setTimeout(() => {
+        box.classList.add('hidden');
+      }, 8000);
+    }
+
+    function showToastFromUrl(){
+      const url = new URL(window.location.href);
+      const msg = url.searchParams.get('toast');
+      if (!msg) return;
+      const level = (url.searchParams.get('toastLevel') || 'ok');
+
+      showToast(msg, level);
 
       // remove params so refresh doesn't keep re-toasting
       url.searchParams.delete('toast');
       url.searchParams.delete('toastLevel');
       window.history.replaceState({}, '', url.pathname + url.search + url.hash);
-
-      // auto-hide
-      window.setTimeout(() => {
-        box.classList.add('hidden');
-      }, 8000);
     }
 
     function copyText(elId){
@@ -300,6 +303,15 @@
         }
         if (lbl) lbl.textContent = j.ok ? 'Postfix OK' : 'Postfix not reachable';
 
+        // header health chip
+        const hd = document.getElementById('headerHealthDot');
+        const ht = document.getElementById('headerHealthText');
+        if (hd) {
+          hd.classList.toggle('bg-emerald-500', !!j.ok);
+          hd.classList.toggle('bg-red-500', !j.ok);
+        }
+        if (ht) ht.textContent = j.ok ? 'Postfix OK' : 'Postfix not reachable';
+
         // cards
         const qs = document.getElementById('queueSize');
         if (qs && typeof j.queue_size !== 'undefined') qs.textContent = String(j.queue_size);
@@ -385,8 +397,46 @@
 
     function syncPendingFromApi(pending){
       const btn = document.getElementById('applyBtn');
-      if (!btn) return;
-      btn.disabled = !pending;
+      if (btn) btn.disabled = !pending;
+
+      const banner = document.getElementById('pendingBanner');
+      if (banner) banner.classList.toggle('hidden', !pending);
+
+      const chip = document.getElementById('headerPendingChip');
+      if (chip) chip.classList.toggle('hidden', !pending);
+
+      // health chip
+      const hd = document.getElementById('headerHealthDot');
+      const ht = document.getElementById('headerHealthText');
+      // updated elsewhere in refreshStatus
+    }
+
+    async function saveSettingsNoReload(){
+      const form = document.getElementById('settingsForm');
+      if (!form) return;
+      try {
+        const data = new FormData(form);
+        const r = await fetch('/api/settings', { method: 'POST', body: data });
+        const j = await r.json();
+        if (j && j.ok) {
+          showToast('Saved (not applied). Click Apply Changes.', 'ok');
+          if (typeof j.pending !== 'undefined') syncPendingFromApi(!!j.pending);
+        } else {
+          showToast('Save failed.', 'error');
+        }
+      } catch (e) {
+        showToast('Save failed.', 'error');
+      }
+    }
+
+    function initSettingsAjax(){
+      const form = document.getElementById('settingsForm');
+      if (!form) return;
+      form.addEventListener('submit', (e) => {
+        // progressive enhancement: prevent full reload
+        e.preventDefault();
+        saveSettingsNoReload();
+      });
     }
 
     window.addEventListener('DOMContentLoaded', () => {
@@ -396,6 +446,7 @@
       initScrollSpy();
       showToastFromUrl();
       initAutoRefresh();
+      initSettingsAjax();
       syncTokenExpiryFromDom();
       applyLogFilter();
     });
@@ -501,9 +552,8 @@
     </div>
 
     <!-- Pending changes banner -->
-    {% if pending %}
-    <div id="pendingBanner" class="fixed inset-x-0 bottom-4 z-40 mx-auto max-w-4xl px-4">
-      <div class="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-lg dark:border-amber-900/40 dark:bg-amber-950/25 sm:flex-row sm:items-center sm:justify-between">
+    <div id="pendingBanner" class="fixed inset-x-0 bottom-4 z-40 mx-auto max-w-4xl px-4 {% if not pending %}hidden{% endif %}">
+      <div class="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-lg dark:border-amber-900/40 dark:bg-amber-950 sm:flex-row sm:items-center sm:justify-between">
         <div class="flex items-start gap-3">
           <div class="mt-0.5 text-amber-700 dark:text-amber-300">
             <i data-lucide="triangle-alert" class="h-5 w-5"></i>
@@ -527,7 +577,6 @@
         </div>
       </div>
     </div>
-    {% endif %}
 
     <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
       <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
@@ -542,6 +591,18 @@
         </div>
 
         <div class="flex items-center gap-2">
+          <div class="hidden items-center gap-2 sm:flex">
+            <span id="headerHealthChip" class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+              <span id="headerHealthDot" class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if postfix_ok else 'bg-red-500' }}"></span>
+              <span id="headerHealthText">{{ 'Postfix OK' if postfix_ok else 'Postfix not reachable' }}</span>
+            </span>
+
+            <span id="headerPendingChip" class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm dark:border-amber-900/40 dark:bg-amber-950 dark:text-amber-200 {% if not pending %}hidden{% endif %}">
+              <i data-lucide="triangle-alert" class="h-3.5 w-3.5"></i>
+              Pending changes
+            </span>
+          </div>
+
           <button id="themeBtn" type="button" onclick="toggleTheme()"
             class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
             <i data-lucide="moon" class="h-4 w-4"></i>
@@ -717,7 +778,7 @@
           </div>
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Hostname + trusted subnets (mynetworks).</p>
 
-          <form method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <form id="settingsForm" method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label class="text-sm font-medium">Hostname</label>
               <input name="hostname" value="{{ cfg.hostname }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
