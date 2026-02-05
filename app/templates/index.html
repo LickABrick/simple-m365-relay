@@ -152,13 +152,23 @@
       inp.value = '{{ env.MS365_SMTP_USER }}';
     }
 
+    function _getFullMailLog(){
+      const pre = document.getElementById('mailLogPre');
+      if (!pre) return '';
+      const raw = pre.getAttribute('data-fulljson');
+      if (raw) {
+        try { return JSON.parse(raw); } catch (e) {}
+      }
+      return pre.textContent || '';
+    }
+
     function applyLogFilter(){
       const pre = document.getElementById('mailLogPre');
       if (!pre) return;
-      const full = pre.getAttribute('data-fulltext') || pre.textContent || '';
+      const full = _getFullMailLog();
       const q = (document.getElementById('logSearch')?.value || '').toLowerCase();
       const only = !!document.getElementById('logOnlyProblems')?.checked;
-      const lines = full.split('\n');
+      const lines = (full || '').split('\n');
       const out = [];
       for (const ln of lines){
         const ll = ln.toLowerCase();
@@ -175,6 +185,29 @@
       if (s) s.value = '';
       if (o) o.checked = false;
       applyLogFilter();
+    }
+
+    function formatTokenExpiryLocal(ts){
+      if (!ts) return '(unknown)';
+      try {
+        const d = new Date(Number(ts) * 1000);
+        return d.toLocaleString(undefined, { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+      } catch (e) {
+        return String(ts);
+      }
+    }
+
+    function syncTokenExpiryFromDom(){
+      const te = document.getElementById('tokenExp');
+      if (te) {
+        const ts = te.getAttribute('data-ts');
+        te.textContent = formatTokenExpiryLocal(ts);
+      }
+      const oe = document.getElementById('oauthTokenExp');
+      if (oe) {
+        const ts = oe.getAttribute('data-ts');
+        oe.textContent = formatTokenExpiryLocal(ts);
+      }
     }
 
     async function refreshStatus(){
@@ -199,7 +232,10 @@
         const mu = document.getElementById('ms365User');
         if (mu && j.env?.MS365_SMTP_USER) mu.textContent = j.env.MS365_SMTP_USER;
         const te = document.getElementById('tokenExp');
-        if (te) te.textContent = j.token_exp || '(unknown)';
+        if (te) {
+          te.setAttribute('data-ts', j.token_exp_ts || '');
+          te.textContent = formatTokenExpiryLocal(j.token_exp_ts);
+        }
 
         // warn tail
         const wt = document.getElementById('warnTail');
@@ -214,7 +250,8 @@
         // mail log (keep fulltext for filtering)
         const ml = document.getElementById('mailLogPre');
         if (ml) {
-          ml.setAttribute('data-fulltext', j.mail_log || '');
+          // store as JSON so escaping doesn't break filtering
+          ml.setAttribute('data-fulljson', JSON.stringify(j.mail_log || ''));
           applyLogFilter();
         }
 
@@ -270,6 +307,7 @@
       initScrollSpy();
       showToastFromUrl();
       initAutoRefresh();
+      syncTokenExpiryFromDom();
       applyLogFilter();
     });
   </script>
@@ -477,13 +515,13 @@
               </label>
 
               <form method="post" action="/postfix/render_reload">
-                <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Regenerates Postfix config from the UI settings + reloads Postfix">
                   <i data-lucide="sparkles" class="h-4 w-4"></i>
                   Render + reload
                 </button>
               </form>
               <form method="post" action="/postfix/reload">
-                <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+                <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Reloads Postfix (keeps current config)">
                   <i data-lucide="rotate-cw" class="h-4 w-4"></i>
                   Reload
                 </button>
@@ -509,8 +547,8 @@
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Token expiry</div>
-              <div class="mt-1 text-sm font-semibold" id="tokenExp">{{ token_exp or "(unknown)" }}</div>
-              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">best effort</div>
+              <div class="mt-1 text-sm font-semibold" id="tokenExp" data-ts="{{ token_exp_ts or '' }}">(loading…)</div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">shown in your local time</div>
             </div>
           </div>
 
@@ -562,9 +600,9 @@
               <input name="mynetworks" value="{{ (cfg.mynetworks or []) | join(' ') }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
             </div>
             <div class="sm:col-span-2 flex justify-end">
-              <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200">
+              <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
                 <i data-lucide="save" class="h-4 w-4"></i>
-                Save
+                Save settings
               </button>
             </div>
           </form>
@@ -686,23 +724,36 @@
         <div id="oauth" class="scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div class="flex items-center gap-2">
             <i data-lucide="key-round" class="h-5 w-5 text-slate-500"></i>
-            <h2 class="text-lg font-semibold">OAuth device flow</h2>
+            <h2 class="text-lg font-semibold">OAuth</h2>
           </div>
-          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">
-            Starts a device flow using <span class="mono">sasl-xoauth2-tool</span> and writes the token into the shared volume.
-          </p>
 
-          <form method="post" action="/token/start" class="mt-4">
-            <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
-              <i data-lucide="play" class="h-4 w-4"></i>
-              Start device flow
-            </button>
-          </form>
-
-          <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-            <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Log (tail)</div>
-            <pre class="mono mt-2 max-h-72 overflow-auto text-xs">{{ device_flow_log }}</pre>
+          <div class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+            <div class="flex items-start gap-3">
+              <div class="mt-0.5">
+                <i data-lucide="badge-check" class="h-5 w-5"></i>
+              </div>
+              <div class="flex-1">
+                <div class="font-semibold">Current token status</div>
+                <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Expiry: <span class="mono" id="oauthTokenExp" data-ts="{{ token_exp_ts or '' }}">(unknown)</span>
+                </div>
+                <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">
+                  You normally don’t need device flow unless you want to re-authenticate or rotate the token.
+                </div>
+              </div>
+              <form method="post" action="/token/start">
+                <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Start a new OAuth device flow and overwrite the token in the shared volume">
+                  <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                  Restart device flow
+                </button>
+              </form>
+            </div>
           </div>
+
+          <details class="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+            <summary class="cursor-pointer text-sm font-semibold">Device flow log (tail)</summary>
+            <pre class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-900/40">{{ device_flow_log }}</pre>
+          </details>
         </div>
 
         <!-- TEST MAIL -->
@@ -796,7 +847,7 @@
                 </button>
               </div>
 
-              <pre id="mailLogPre" class="mono mt-2 max-h-[28rem] overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950" data-fulltext="{{ mail_log | e }}">{{ mail_log }}</pre>
+              <pre id="mailLogPre" class="mono mt-2 max-h-[28rem] overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950" data-fulljson='{{ mail_log | tojson }}'>{{ mail_log }}</pre>
             </div>
           </div>
         </div>

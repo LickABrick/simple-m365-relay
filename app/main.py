@@ -55,13 +55,14 @@ def parse_queue_size(mailq_out: str) -> int:
     return len(ids)
 
 
-def token_expiry_best_effort(token_path: Path) -> Optional[str]:
+def token_expiry_ts_best_effort(token_path: Path) -> Optional[int]:
     if not token_path.exists():
         return None
     try:
         data = json.loads(token_path.read_text(encoding="utf-8"))
     except Exception:
-        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(token_path.stat().st_mtime)) + " (mtime)"
+        # fallback: file mtime
+        return int(token_path.stat().st_mtime)
 
     # try common MSAL/cache fields
     def walk(obj):
@@ -80,10 +81,17 @@ def token_expiry_best_effort(token_path: Path) -> Optional[str]:
             ts = int(str(v))
             if ts > 10_000_000_000:
                 ts //= 1000
-            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+            return ts
         except Exception:
             pass
     return None
+
+
+def token_expiry_best_effort(token_path: Path) -> Optional[str]:
+    ts = token_expiry_ts_best_effort(token_path)
+    if ts is None:
+        return None
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
 
 
 def _control_get(path: str) -> dict:
@@ -242,7 +250,7 @@ def index(request: Request):
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
-    token_exp = token_expiry_best_effort(token_path) if token_path else None
+    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     return templates.TemplateResponse(
         "index.html",
@@ -256,7 +264,7 @@ def index(request: Request):
             "postfix_ok": _best_effort_health(),
             "users": list_users(),
             "device_flow_log": device_flow_log(),
-            "token_exp": token_exp,
+            "token_exp_ts": token_exp_ts,
             "from_identities": from_identities(cfg, ms365_user),
             "env": {
                 "MS365_SMTP_USER": ms365_user,
@@ -380,7 +388,7 @@ def api_status():
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
-    token_exp = token_expiry_best_effort(token_path) if token_path else None
+    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     return {
         "ok": _best_effort_health(),
@@ -388,7 +396,7 @@ def api_status():
         "mailq": mailq_out,
         "mail_log": mail_log,
         "mail_log_warn": _extract_recent_warnings(mail_log),
-        "token_exp": token_exp,
+        "token_exp_ts": token_exp_ts,
         "from_identities": from_identities(cfg, ms365_user),
         "env": {
             "MS365_SMTP_USER": ms365_user,
@@ -419,7 +427,7 @@ def diagnostics_txt():
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
-    token_exp = token_expiry_best_effort(token_path) if token_path else None
+    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     parts = []
     parts.append("# ms365-relay diagnostics\n")
@@ -427,7 +435,7 @@ def diagnostics_txt():
     parts.append("\n## env\n")
     parts.append(f"RELAYHOST={os.environ.get('RELAYHOST','')}\n")
     parts.append(f"MS365_SMTP_USER={ms365_user}\n")
-    parts.append(f"token_expiry={token_exp or ''}\n")
+    parts.append(f"token_expiry_ts={token_exp_ts or ''}\n")
 
     parts.append("\n## config.json\n")
     parts.append(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
