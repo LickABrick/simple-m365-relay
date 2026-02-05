@@ -688,12 +688,11 @@ def update_settings(
 ):
     """HTML form endpoint (kept for no-JS fallback)."""
     cfg = load_cfg()
-    cfg["hostname"] = hostname.strip()
-    cfg["domain"] = domain.strip()
-    nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
+    cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
+    cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
     from urllib.parse import quote
 
-    cfg["mynetworks"] = nets
+    cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
     cfg.setdefault("tls", {})
@@ -701,8 +700,8 @@ def update_settings(
     cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
 
     cfg.setdefault("oauth", {})
-    cfg["oauth"]["tenant_id"] = (tenant_id or "").strip()
-    cfg["oauth"]["client_id"] = (client_id or "").strip()
+    cfg["oauth"]["tenant_id"] = _reject_ctl(tenant_id or "")
+    cfg["oauth"]["client_id"] = _reject_ctl(client_id or "")
     cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
 
     save_cfg(cfg)
@@ -716,9 +715,74 @@ def _validate_tls_level(v: str, default: str) -> str:
     return default
 
 
+def _has_ctl(s: str) -> bool:
+    return any((ord(ch) < 32) or (ord(ch) == 127) for ch in (s or ""))
+
+
+def _reject_ctl(s: str) -> str:
+    s = (s or "").strip()
+    if _has_ctl(s) or "\n" in s or "\r" in s or "\x00" in s:
+        raise ValueError("invalid control characters")
+    return s
+
+
+def _validate_fqdnish(v: str, default: str) -> str:
+    """Strict-ish validation for hostname/domain to prevent config injection.
+
+    We accept LDH labels separated by dots, 1-253 chars total.
+    """
+    import re
+
+    v = _reject_ctl(v)
+    if not v:
+        return default
+    if len(v) > 253:
+        return default
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*", v):
+        return default
+    return v
+
+
 def _validate_relayhost(v: str, default: str) -> str:
-    v = (v or "").strip()
-    return v or default
+    """Validate relayhost format like [smtp.office365.com]:587 or smtp.example:587."""
+    import re
+
+    v = _reject_ctl(v)
+    if not v:
+        return default
+    # allow bracketed host or plain host, optional port
+    if not re.fullmatch(r"\[?[A-Za-z0-9.-]+\]?(?::\d{2,5})?", v):
+        return default
+    return v
+
+
+def _validate_mynetworks(v: str) -> list[str]:
+    """Parse and validate Postfix mynetworks tokens (CIDR/IP only)."""
+    import ipaddress
+
+    v = _reject_ctl(v)
+    toks = [t.strip() for t in v.replace(",", " ").split() if t.strip()]
+    out: list[str] = []
+    for t in toks:
+        try:
+            if "/" in t:
+                ipaddress.ip_network(t, strict=False)
+                out.append(t)
+            else:
+                # allow single host IP -> normalize to /32 or /128
+                ip = ipaddress.ip_address(t)
+                out.append(str(ip) + ("/32" if ip.version == 4 else "/128"))
+        except Exception:
+            # skip invalid tokens
+            continue
+    # stable unique
+    seen = set()
+    uniq = []
+    for n in out:
+        if n not in seen:
+            seen.add(n)
+            uniq.append(n)
+    return uniq
 
 
 def _validate_int(v: str, default: int, lo: int = 0, hi: int = 1440) -> int:
@@ -748,12 +812,11 @@ def api_settings_save(
     cfg = load_cfg()
 
     if hostname.strip():
-        cfg["hostname"] = hostname.strip()
+        cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
     if domain.strip():
-        cfg["domain"] = domain.strip()
+        cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
     if mynetworks.strip():
-        nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
-        cfg["mynetworks"] = nets
+        cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
     cfg.setdefault("tls", {})
@@ -761,8 +824,8 @@ def api_settings_save(
     cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
 
     cfg.setdefault("oauth", {})
-    cfg["oauth"]["tenant_id"] = (tenant_id or "").strip()
-    cfg["oauth"]["client_id"] = (client_id or "").strip()
+    cfg["oauth"]["tenant_id"] = _reject_ctl(tenant_id or "")
+    cfg["oauth"]["client_id"] = _reject_ctl(client_id or "")
     cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
 
     save_cfg(cfg)
