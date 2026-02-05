@@ -38,25 +38,24 @@
     function setTheme(mode){
       const isDark = (mode === 'dark');
       document.documentElement.classList.toggle('dark', isDark);
+      // also toggle on body in case of any CSS that targets body.dark
       if (document.body) document.body.classList.toggle('dark', isDark);
       localStorage.setItem(themeKey, mode);
       syncThemeButton();
     }
+
     function toggleTheme(){
       const isDark = document.documentElement.classList.contains('dark');
       setTheme(isDark ? 'light' : 'dark');
     }
-    function syncThemeButton(){
-      const label = document.getElementById('themeBtnLabel');
-      const icon = document.querySelector('#themeBtn i');
-      const isDark = document.documentElement.classList.contains('dark');
-      if (label) label.textContent = isDark ? 'Light' : 'Dark';
 
-      // swap icon for clarity (moon=dark, sun=light)
-      if (icon) {
-        icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
-        try { lucide.createIcons(); } catch(e) {}
-      }
+    function syncThemeButton(){
+      const btn = document.getElementById('themeBtn');
+      const label = document.getElementById('themeBtnLabel');
+      if (!btn || !label) return;
+      const isDark = document.documentElement.classList.contains('dark');
+      label.textContent = isDark ? 'Light' : 'Dark';
+      btn.setAttribute('title', isDark ? 'Switch to light mode' : 'Switch to dark mode');
     }
 
     function showToast(msg, level){
@@ -506,7 +505,8 @@
       <div class="flex items-center gap-2">
         <span id="coreReadyChip" class="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Core settings incomplete</span>
 
-        <button type="button" id="themeBtn" onclick="toggleTheme()" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Toggle theme">
+        <button id="themeBtn" type="button" onclick="toggleTheme()"
+          class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
           <i data-lucide="moon" class="h-4 w-4"></i>
           <span id="themeBtnLabel" class="sr-only">Dark</span>
         </button>
