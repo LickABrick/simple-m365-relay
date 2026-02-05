@@ -35,10 +35,8 @@ services:
       - "18080"
 
     # Debug: allow core dumps from postfix daemons (signal 11 in smtp client)
-    # Note: fs.suid_dumpable is not namespaced; to override host defaults we need privileged.
     ulimits:
       core: -1
-    privileged: true
 
   ui:
     build:
