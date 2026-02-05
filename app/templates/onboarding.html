@@ -198,28 +198,54 @@
       }
     }
 
+    let _tokenValid = false;
+    let _tokenVerified = false;
+
     async function refreshTokenBits(){
       const tokenChip = document.getElementById('tokenChip');
       const tokenText = document.getElementById('tokenText');
       const tokenExp = document.getElementById('tokenExp');
+      const hint = document.getElementById('tokenVerifyHint');
+      const sendBtn = document.getElementById('sendTestBtn');
+      const sendHint = document.getElementById('testDisabledHint');
+
       try {
         const r = await fetch('/api/status', { cache: 'no-store' });
         const j = await r.json();
-        const ts = j.token_exp_ts || '';
+        const ts = Number(j.token_exp_ts || 0);
         if (tokenExp) tokenExp.textContent = ts ? (new Date(ts * 1000)).toLocaleString() : 'Missing/unknown';
 
-        const has = !!ts;
-        if (tokenChip) {
-          tokenChip.classList.toggle('bg-emerald-100', has);
-          tokenChip.classList.toggle('text-emerald-900', has);
-          tokenChip.classList.toggle('bg-amber-100', !has);
-          tokenChip.classList.toggle('text-amber-900', !has);
-          tokenChip.classList.toggle('dark:bg-emerald-950/40', has);
-          tokenChip.classList.toggle('dark:text-emerald-200', has);
-          tokenChip.classList.toggle('dark:bg-amber-950/30', !has);
-          tokenChip.classList.toggle('dark:text-amber-200', !has);
+        const now = Math.floor(Date.now() / 1000);
+        _tokenValid = !!ts && (ts > (now + 60));
+
+        if (!_tokenValid) {
+          _tokenVerified = false;
         }
-        if (tokenText) tokenText.textContent = has ? 'Token present' : 'Token not set (optional)';
+
+        // chip colors
+        if (tokenChip) {
+          tokenChip.classList.toggle('bg-emerald-100', _tokenValid);
+          tokenChip.classList.toggle('text-emerald-900', _tokenValid);
+          tokenChip.classList.toggle('bg-amber-100', !_tokenValid);
+          tokenChip.classList.toggle('text-amber-900', !_tokenValid);
+          tokenChip.classList.toggle('dark:bg-emerald-950/40', _tokenValid);
+          tokenChip.classList.toggle('dark:text-emerald-200', _tokenValid);
+          tokenChip.classList.toggle('dark:bg-amber-950/30', !_tokenValid);
+          tokenChip.classList.toggle('dark:text-amber-200', !_tokenValid);
+        }
+        if (tokenText) tokenText.textContent = _tokenValid ? 'Token valid' : 'Token missing/expired';
+
+        if (hint) hint.textContent = _tokenVerified ? 'Verified' : 'Not verified';
+
+        // disable test mail send unless token valid
+        if (sendBtn) {
+          sendBtn.toggleAttribute('disabled', !_tokenValid);
+          sendBtn.classList.toggle('opacity-60', !_tokenValid);
+          sendBtn.classList.toggle('cursor-not-allowed', !_tokenValid);
+        }
+        if (sendHint) {
+          sendHint.classList.toggle('hidden', _tokenValid);
+        }
       } catch (e) {}
     }
 
@@ -264,7 +290,14 @@
 
       document.getElementById('s3Prev')?.addEventListener('click', () => showStep(2));
       document.getElementById('s3Skip')?.addEventListener('click', () => showStep(4));
-      document.getElementById('s3Next')?.addEventListener('click', () => showStep(4));
+      document.getElementById('s3Next')?.addEventListener('click', async () => {
+        // optional step; still allow proceeding if not verified
+        await refreshTokenBits();
+        if (!_tokenVerified) {
+          showToast('OAuth token not verified yet. You can skip and do this later.', 'ok');
+        }
+        showStep(4);
+      });
 
       document.getElementById('s4Prev')?.addEventListener('click', () => showStep(3));
       document.getElementById('s4Skip')?.addEventListener('click', () => showStep(5));
@@ -296,10 +329,31 @@
         });
       }
       document.getElementById('refreshDeviceFlowBtn')?.addEventListener('click', async () => { await refreshLog(); await refreshTokenBits(); });
+
+      document.getElementById('verifyTokenBtn')?.addEventListener('click', async () => {
+        await refreshTokenBits();
+        if (_tokenValid) {
+          _tokenVerified = true;
+          const hint = document.getElementById('tokenVerifyHint');
+          if (hint) hint.textContent = 'Verified';
+          showToast('Token verified.', 'ok');
+        } else {
+          _tokenVerified = false;
+          const hint = document.getElementById('tokenVerifyHint');
+          if (hint) hint.textContent = 'Not verified';
+          showToast('No valid token found (missing or expired).', 'error');
+        }
+      });
+
       refreshLog();
 
       // Step 4: test mail (optional)
       document.getElementById('sendTestBtn')?.addEventListener('click', async () => {
+        await refreshTokenBits();
+        if (!_tokenValid) {
+          showToast('OAuth token missing/expired. Complete Step 3 first.', 'error');
+          return;
+        }
         const to = document.getElementById('testTo')?.value || '';
         if (!_fieldOk(to)) { showToast('Recipient (To) is required.', 'error'); return; }
         const from = document.getElementById('testFrom')?.value || '';
@@ -568,7 +622,11 @@
             <i data-lucide="refresh-cw" class="h-4 w-4"></i>
             Refresh
           </button>
-          <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp">{{ token_exp_ts or '' }}</span></div>
+          <button id="verifyTokenBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/50">
+            <i data-lucide="badge-check" class="h-4 w-4"></i>
+            Verify token
+          </button>
+          <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp">{{ token_exp_ts or '' }}</span> · <span id="tokenVerifyHint">Not verified</span></div>
         </div>
 
         <pre id="deviceFlowLog" class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ device_flow_log or '' }}</pre>
@@ -618,10 +676,15 @@
         </div>
 
         <div class="mt-4 flex items-center justify-between">
-          <button id="sendTestBtn" type="button" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
-            <i data-lucide="send" class="h-4 w-4"></i>
-            Send test mail
-          </button>
+          <div>
+            <button id="sendTestBtn" type="button" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              <i data-lucide="send" class="h-4 w-4"></i>
+              Send test mail
+            </button>
+            <div id="testDisabledHint" class="mt-2 hidden text-xs text-amber-700 dark:text-amber-200">
+              Test mail is disabled until a valid OAuth token exists (Step 3).
+            </div>
+          </div>
           <div class="text-xs text-slate-500 dark:text-slate-400">Output below</div>
         </div>
 
