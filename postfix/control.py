@@ -126,6 +126,33 @@ def refresh_token() -> str:
     return out or "ok"
 
 
+def _ensure_sasldb_ok() -> None:
+    """If /data/sasl/sasldb2 exists but is not a readable Berkeley DB for this image,
+    move it aside so saslpasswd2 can recreate it."""
+    db = DATA_DIR / "sasl" / "sasldb2"
+    if not db.exists():
+        return
+    try:
+        # If it's not a regular file, quarantine it.
+        if not db.is_file():
+            raise RuntimeError("not a file")
+        # If Cyrus can't read it, it's likely a format mismatch.
+        out = sh(["sasldblistusers2", "-f", str(db)], check=False)
+        if "unexpected file type" in out.lower() or "listusers failed" in out.lower() or "invalid" in out.lower():
+            raise RuntimeError(out.strip()[:200])
+    except Exception:
+        import time as _time
+
+        ts = int(_time.time())
+        try:
+            db.rename(db.with_name(f"sasldb2.bad.{ts}"))
+        except Exception:
+            try:
+                db.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def start_device_flow_background() -> None:
     global _device_running
     with _device_lock:
@@ -235,6 +262,9 @@ class H(BaseHTTPRequestHandler):
             realm = os.environ.get("RELAY_DOMAIN", "local")
             if not login or not pw:
                 return self._json(400, {"error": "missing login/password"})
+
+            _ensure_sasldb_ok()
+
             p = subprocess.run(
                 ["saslpasswd2", "-p", "-c", "-u", realm, "-f", str(DATA_DIR / "sasl" / "sasldb2"), login],
                 input=pw + "\n",
@@ -242,15 +272,21 @@ class H(BaseHTTPRequestHandler):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
-            return self._json(200, {"output": p.stdout.strip() or "ok"})
+            out = (p.stdout or "").strip()
+            if p.returncode != 0:
+                return self._json(400, {"error": out or f"saslpasswd2 exit {p.returncode}"})
+            return self._json(200, {"output": out or "ok"})
         if self.path == "/users/delete":
             body = self._read_json()
             login = (body.get("login") or "").strip()
             realm = os.environ.get("RELAY_DOMAIN", "local")
             if not login:
                 return self._json(400, {"error": "missing login"})
-            out = sh(["saslpasswd2", "-d", "-u", realm, "-f", str(DATA_DIR / "sasl" / "sasldb2"), login], check=False)
-            return self._json(200, {"output": out.strip() or "ok"})
+
+            _ensure_sasldb_ok()
+
+            out = sh(["saslpasswd2", "-d", "-u", realm, "-f", str(DATA_DIR / "sasl" / "sasldb2"), login], check=False).strip()
+            return self._json(200, {"output": out or "ok"})
         if self.path == "/testmail":
             body = self._read_json()
             to_addr = (body.get("to_addr") or "").strip()
