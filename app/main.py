@@ -605,7 +605,13 @@ def api_token_start():
 @app.post("/api/token/refresh")
 def api_token_refresh():
     out = refresh_token_now()
-    return {"ok": True, "output": out}
+
+    # recompute expiry after refresh
+    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+
+    return {"ok": True, "output": out, "token_exp_ts": token_exp_ts}
 
 
 @app.get("/api/device-flow-log")
@@ -679,6 +685,7 @@ def api_status():
         "env": {
             "MS365_SMTP_USER": ms365_user,
             "RELAYHOST": os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
+            "AUTO_TOKEN_REFRESH_MINUTES": os.environ.get("AUTO_TOKEN_REFRESH_MINUTES", ""),
         },
     }
 

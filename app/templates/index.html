@@ -481,11 +481,32 @@
         const r = await fetch('/api/token/refresh', { method: 'POST' });
         const j = await r.json();
         const out = (j.output || '').trim();
-        if (out && out.toLowerCase().includes('failed')) {
+        const ok = !(out && out.toLowerCase().includes('failed'));
+
+        if (!ok) {
           showToast('Token refresh failed.', 'error');
-        } else {
-          showToast('Token refresh executed.', 'ok');
+          return;
         }
+
+        // Update expiry immediately if backend provided it
+        if (typeof j.token_exp_ts !== 'undefined' && j.token_exp_ts) {
+          const te = document.getElementById('tokenExp');
+          if (te) {
+            te.setAttribute('data-ts', j.token_exp_ts);
+            te.textContent = formatTokenExpiryLocal(j.token_exp_ts);
+            setTokenCardStatus(j.token_exp_ts);
+          }
+          const oe = document.getElementById('oauthTokenExp');
+          if (oe) {
+            oe.setAttribute('data-ts', j.token_exp_ts);
+            oe.textContent = formatTokenExpiryLocal(j.token_exp_ts);
+            setOauthStatus(j.token_exp_ts);
+          }
+        }
+
+        showToast('Token refreshed.', 'ok');
+
+        // Always re-sync full status after refresh
         await refreshStatus();
       } catch (e) {
         showToast('Token refresh failed.', 'error');
@@ -1268,6 +1289,9 @@
                 </div>
                 <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">
                   You normally don’t need device flow unless you want to re-authenticate or rotate the token.
+                </div>
+                <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Auto-refresh: <span class="font-semibold">{{ env.AUTO_TOKEN_REFRESH_MINUTES or 'off' }}</span>{% if env.AUTO_TOKEN_REFRESH_MINUTES %} min{% endif %}
                 </div>
               </div>
               <div class="flex flex-col gap-2 sm:flex-row">
