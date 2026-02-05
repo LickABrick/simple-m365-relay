@@ -68,7 +68,7 @@ def token_expiry_best_effort(token_path: Path) -> Optional[str]:
         if isinstance(obj, dict):
             for k, v in obj.items():
                 lk = str(k).lower()
-                if lk in ("expires_on", "expiresat", "expires_at", "expireson"):
+                if lk in ("expires_on", "expiresat", "expires_at", "expireson", "expiry"):
                     yield v
                 yield from walk(v)
         elif isinstance(obj, list):
