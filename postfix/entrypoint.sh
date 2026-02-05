@@ -28,9 +28,12 @@ if [ "${RELAY_TLS_GENERATE_SELF_SIGNED:-true}" = "true" ] && { [ ! -f "$CERT_PAT
   chmod 600 "$KEY_PATH" || true
 fi
 
-# Make sure Cyrus SASL can find sasldb2 (only if it exists).
+# Make sure Cyrus SASL can find sasldb2 (only if it exists and looks non-empty).
 # We don't create an empty sasldb2 file because sasldblistusers2 will complain about invalid DB format.
 mkdir -p /etc/sasl2
+if [ -f "$DATA_DIR/sasl/sasldb2" ] && [ ! -s "$DATA_DIR/sasl/sasldb2" ]; then
+  rm -f "$DATA_DIR/sasl/sasldb2" || true
+fi
 if [ -f "$DATA_DIR/sasl/sasldb2" ]; then
   ln -sf "$DATA_DIR/sasl/sasldb2" /etc/sasl2/sasldb2
 fi
