@@ -16,6 +16,7 @@ SECRET_PATH = STATE_DIR / "secret.key"
 
 SESSION_COOKIE = "sm365r_session"
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7  # 7 days
+LOCKOUT_PATH = STATE_DIR / "lockout.json"
 
 
 @dataclass
@@ -81,22 +82,41 @@ def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(secret_key=base64.urlsafe_b64encode(secret).decode("ascii"), salt="sm365r")
 
 
-def make_session(username: str) -> str:
-    return _serializer().dumps({"u": username})
+def new_csrf_token() -> str:
+    return secrets.token_urlsafe(24)
 
 
-def read_session(token: str) -> Optional[str]:
+def make_session(username: str, csrf_token: str) -> str:
+    return _serializer().dumps({"u": username, "c": csrf_token})
+
+
+def read_session(token: str) -> Optional[dict]:
     if not token:
         return None
     try:
         data = _serializer().loads(token, max_age=SESSION_MAX_AGE_SECONDS)
     except (BadSignature, SignatureExpired):
         return None
-    try:
-        u = str((data or {}).get("u") or "").strip()
-        return u or None
-    except Exception:
+    if not isinstance(data, dict):
         return None
+    u = str(data.get("u") or "").strip()
+    c = str(data.get("c") or "").strip()
+    if not u:
+        return None
+    if not c:
+        # legacy session tokens (pre-csrf)
+        c = new_csrf_token()
+    return {"u": u, "c": c}
+
+
+def session_user(token: str) -> Optional[str]:
+    d = read_session(token)
+    return str(d.get("u")) if d else None
+
+
+def session_csrf(token: str) -> Optional[str]:
+    d = read_session(token)
+    return str(d.get("c")) if d else None
 
 
 def verify_password(password: str, password_hash: str) -> bool:

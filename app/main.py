@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import Response
+from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
@@ -21,6 +22,7 @@ templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
 app = FastAPI(title="Simple M365 Relay")
 
 from . import auth  # noqa: E402
+from .security import get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
 
@@ -392,10 +394,18 @@ async def auth_middleware(request: Request, call_next):
 
     # If admin exists, require login for everything except login/setup/logout
     if auth.admin_exists() and (not _is_public_path(path)):
-        u = auth.read_session(request.cookies.get(auth.SESSION_COOKIE, ""))
-        if not u:
+        tok = request.cookies.get(auth.SESSION_COOKIE, "")
+        sess = auth.read_session(tok)
+        if not sess:
             return RedirectResponse(url="/login", status_code=303)
-        request.state.user = u
+        request.state.user = sess.get("u")
+        request.state.csrf = sess.get("c")
+
+        # CSRF protection for API POSTs (AJAX)
+        if path.startswith("/api/") and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            provided = get_csrf_from_request(request)
+            if not provided or provided != request.state.csrf:
+                return Response(content="Forbidden", status_code=403)
 
     return await call_next(request)
 
@@ -404,7 +414,7 @@ async def auth_middleware(request: Request, call_next):
 def setup_get(request: Request):
     if auth.admin_exists():
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": None})
+    return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": None, "csrf_token": ""})
 
 
 @app.post("/setup")
@@ -432,7 +442,16 @@ def setup_post(
     auth.save_admin(username, pw_hash)
 
     resp = RedirectResponse(url="/", status_code=303)
-    resp.set_cookie(auth.SESSION_COOKIE, auth.make_session(username), httponly=True, samesite="lax")
+    csrf = auth.new_csrf_token()
+    resp.set_cookie(
+        auth.SESSION_COOKIE,
+        auth.make_session(username, csrf),
+        httponly=True,
+        samesite="lax",
+        secure=is_https_request(request),
+        max_age=auth.SESSION_MAX_AGE_SECONDS,
+        path="/",
+    )
     return resp
 
 
@@ -442,10 +461,10 @@ def login_get(request: Request):
         return RedirectResponse(url="/setup", status_code=303)
 
     # If already signed in, go to dashboard.
-    if auth.read_session(request.cookies.get(auth.SESSION_COOKIE, "")):
+    if auth.session_user(request.cookies.get(auth.SESSION_COOKIE, "")):
         return RedirectResponse(url="/", status_code=303)
 
-    return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": None})
+    return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": None, "csrf_token": ""})
 
 
 @app.post("/login")
@@ -459,7 +478,7 @@ def login_post(
 
     admin = auth.load_admin()
     if not admin:
-        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin."})
+        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin.", "csrf_token": ""})
 
     username = (username or "").strip()
     if username != admin.username:
@@ -468,14 +487,29 @@ def login_post(
         return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid username or password."})
 
     resp = RedirectResponse(url="/", status_code=303)
-    resp.set_cookie(auth.SESSION_COOKIE, auth.make_session(username), httponly=True, samesite="lax")
+    csrf = auth.new_csrf_token()
+    resp.set_cookie(
+        auth.SESSION_COOKIE,
+        auth.make_session(username, csrf),
+        httponly=True,
+        samesite="lax",
+        secure=is_https_request(request),
+        max_age=auth.SESSION_MAX_AGE_SECONDS,
+        path="/",
+    )
     return resp
 
 
 @app.post("/logout")
-def logout_post():
+def logout_post(request: Request, csrf_token: str = Form("")):
+    # CSRF-protected logout
+    try:
+        require_csrf(request, csrf_token)
+    except HTTPException:
+        # if token missing, still clear cookie but redirect to login
+        pass
     resp = RedirectResponse(url="/login", status_code=303)
-    resp.delete_cookie(auth.SESSION_COOKIE)
+    resp.delete_cookie(auth.SESSION_COOKIE, path="/")
     return resp
 
 
@@ -500,12 +534,14 @@ def index(request: Request):
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     user = getattr(request.state, "user", "")
+    csrf_token = getattr(request.state, "csrf", "")
 
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
             "user": user,
+            "csrf_token": csrf_token,
             "cfg": cfg,
             "queue_size": qsize,
             "mailq": mailq_out,
