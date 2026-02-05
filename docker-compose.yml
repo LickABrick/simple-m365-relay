@@ -67,4 +67,4 @@ services:
 volumes:
   # Keep the underlying Docker volume name to preserve existing data
   simple-m365-relay-data:
-    name: ms365-relay-data
+    name: ms365-relay_ms365-relay-data

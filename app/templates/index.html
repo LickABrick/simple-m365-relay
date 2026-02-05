@@ -247,11 +247,13 @@
       const hint = document.getElementById('tokenHint');
       const icon = document.getElementById('tokenCardIcon');
       const headerChip = document.getElementById('headerTokenChip');
+      const headerUnknown = document.getElementById('headerTokenUnknownChip');
       if (!card || !hint || !icon) return;
 
       const st = _tokenStatus(ts);
 
       if (headerChip) headerChip.classList.toggle('hidden', st.state !== 'expired');
+      if (headerUnknown) headerUnknown.classList.toggle('hidden', st.state !== 'unknown');
 
       // reset
       card.classList.remove('bg-red-50','border-red-200','bg-amber-50','border-amber-200');
@@ -273,7 +275,7 @@
         hint.textContent = `Token valid (${st.mins} min left) — shown in your local time.`;
         icon.innerHTML = '<i data-lucide="badge-check" class="h-4 w-4 text-emerald-600"></i>';
       } else {
-        hint.textContent = 'shown in your local time';
+        hint.textContent = 'Token expiry unknown — check OAuth status and token file.';
         icon.innerHTML = '<i data-lucide="help-circle" class="h-4 w-4"></i>';
       }
 
@@ -1049,6 +1051,11 @@
             <span id="headerTokenChip" class="hidden inline-flex items-center gap-2 rounded-full border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-900 shadow-sm dark:border-red-900/40 dark:bg-red-950 dark:text-red-200" title="OAuth token expired">
               <i data-lucide="badge-alert" class="h-3.5 w-3.5"></i>
               Token expired
+            </span>
+
+            <span id="headerTokenUnknownChip" class="hidden inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200" title="Token expiry unknown">
+              <i data-lucide="help-circle" class="h-3.5 w-3.5"></i>
+              Token unknown
             </span>
           </div>
 
