@@ -710,6 +710,28 @@
       }
     }
 
+    async function applyNoReload(){
+      const btn = document.getElementById('applyBtn');
+      if (btn) btn.disabled = true;
+      try {
+        const r = await fetch('/api/apply', { method: 'POST' });
+        const j = await r.json();
+        const out = (j.output || '').trim() || 'ok';
+        showToast('Applied changes.', j.level === 'error' ? 'error' : 'ok');
+        syncPendingFromApi(false);
+        await refreshStatus();
+      } catch (e) {
+        showToast('Apply failed.', 'error');
+      } finally {
+        // keep disabled state correct after refreshStatus
+      }
+    }
+
+    function initApplyAjax(){
+      const f = document.getElementById('applyForm');
+      if (f) f.addEventListener('submit', (e) => { e.preventDefault(); applyNoReload(); });
+    }
+
     function initTestmailAjax(){
       const t = document.getElementById('testmailForm');
       if (t) t.addEventListener('submit', (e) => { e.preventDefault(); testmailNoReload(); });
@@ -744,6 +766,7 @@
       initUsersAjax();
       initSendersAjax();
       initTestmailAjax();
+      initApplyAjax();
       syncTokenExpiryFromDom();
       applyLogFilter();
     });

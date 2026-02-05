@@ -544,7 +544,7 @@ def btn_reload():
 
 @app.post("/apply")
 def apply_changes():
-    # Apply saved config.json to postfix by re-rendering + reloading.
+    # HTML fallback
     out = render_and_reload()
 
     # Mark current config as applied.
@@ -560,6 +560,19 @@ def apply_changes():
     level = "error" if ("fatal" in msg.lower() or "error" in msg.lower()) else "ok"
 
     return RedirectResponse(url=f"/?toast={quote('Applied changes.')}&toastLevel={level}#status", status_code=303)
+
+
+@app.post("/api/apply")
+def api_apply_changes():
+    out = render_and_reload()
+
+    cfg = load_cfg()
+    set_applied_hash(cfg_hash(cfg))
+
+    msg = (out or "ok").strip() or "ok"
+    level = "error" if ("fatal" in msg.lower() or "error" in msg.lower()) else "ok"
+
+    return {"ok": True, "output": msg, "level": level, "pending": False}
 
 
 @app.post("/token/start")
