@@ -281,6 +281,40 @@
               <div class="mt-1 text-sm font-semibold">{{ token_exp or "(unknown)" }}</div>
             </div>
           </div>
+
+          <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div class="flex items-center gap-2">
+              <i data-lucide="send" class="h-5 w-5 text-slate-500"></i>
+              <h3 class="text-base font-semibold">Send test mail</h3>
+            </div>
+            <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Sends via local <span class="mono">sendmail</span> in the Postfix container (so it goes through the configured relay).</p>
+
+            <form method="post" action="/testmail" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div class="sm:col-span-1">
+                <label class="text-sm font-medium">From</label>
+                <input name="from_addr" placeholder="from@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              </div>
+              <div class="sm:col-span-1">
+                <label class="text-sm font-medium">To</label>
+                <input name="to_addr" placeholder="to@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              </div>
+              <div class="sm:col-span-2">
+                <label class="text-sm font-medium">Subject</label>
+                <input name="subject" value="Test message" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              </div>
+              <div class="sm:col-span-2">
+                <label class="text-sm font-medium">Body</label>
+                <textarea name="body" rows="5" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">Does it work?</textarea>
+              </div>
+              <div class="sm:col-span-2 flex justify-end">
+                <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                  <i data-lucide="send" class="h-4 w-4"></i>
+                  Send test mail
+                </button>
+              </div>
+            </form>
+            <div class="mt-3 text-xs text-slate-500 dark:text-slate-400">Tip: if this errors, check the mail log and the Postfix queue.</div>
+          </div>
         </div>
 
         <!-- SETTINGS -->

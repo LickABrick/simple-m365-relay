@@ -51,6 +51,35 @@ def render_and_reload() -> str:
     return (out + "\n" + out2).strip()
 
 
+def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str:
+    # Basic header-injection guard
+    for v in (to_addr, from_addr, subject):
+        if "\n" in v or "\r" in v:
+            raise ValueError("invalid header value")
+
+    msg = (
+        f"From: {from_addr}\n"
+        f"To: {to_addr}\n"
+        f"Subject: {subject}\n"
+        "MIME-Version: 1.0\n"
+        "Content-Type: text/plain; charset=UTF-8\n"
+        "\n"
+        f"{body}\n"
+    )
+
+    p = subprocess.run(
+        ["/usr/sbin/sendmail", "-t", "-f", from_addr],
+        input=msg,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    out = (p.stdout or "").strip()
+    if p.returncode != 0:
+        return f"sendmail exit {p.returncode}\n" + out
+    return out or "ok"
+
+
 def start_device_flow_background() -> None:
     global _device_running
     with _device_lock:
@@ -168,6 +197,19 @@ class H(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "missing login"})
             out = sh(["saslpasswd2", "-d", "-u", realm, "-f", str(DATA_DIR / "sasl" / "sasldb2"), login], check=False)
             return self._json(200, {"output": out.strip() or "ok"})
+        if self.path == "/testmail":
+            body = self._read_json()
+            to_addr = (body.get("to_addr") or "").strip()
+            from_addr = (body.get("from_addr") or "").strip()
+            subject = (body.get("subject") or "Test message").strip()
+            mail_body = body.get("body") or "Does it work?"
+            if not to_addr or not from_addr:
+                return self._json(400, {"error": "missing to_addr/from_addr"})
+            try:
+                out = send_test_mail(to_addr, from_addr, subject, mail_body)
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {"output": out})
         self._json(404, {"error": "not_found"})
 
 

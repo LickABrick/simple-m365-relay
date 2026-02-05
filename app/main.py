@@ -155,8 +155,23 @@ def list_users() -> str:
 
 
 def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str:
-    # Not implemented in UI-only container yet; keep UI responsive.
-    return "Not supported in UI container (yet). Use Postfix container or implement /send_test endpoint."
+    import urllib.request, ssl
+
+    payload = json.dumps({
+        "to_addr": to_addr,
+        "from_addr": from_addr,
+        "subject": subject,
+        "body": body,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        POSTFIX_CONTROL_URL + "/testmail",
+        method="POST",
+        data=payload,
+        headers={"Content-Type": "application/json", "User-Agent": "ms365-relay-ui"},
+    )
+    with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
+        return json.loads(r.read().decode("utf-8")).get("output") or "ok"
 
 
 def start_device_flow_background() -> None:
