@@ -9,7 +9,9 @@
   <script>
     // IMPORTANT: Tailwind CDN defaults to darkMode: 'media'. Force class-based.
     // Must be defined BEFORE loading the CDN script.
-    window.tailwind = { config: { darkMode: 'class' } };
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = window.tailwind.config || {};
+    window.tailwind.config.darkMode = 'class';
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -60,29 +62,35 @@
     }
 
     function initScrollSpy(){
+      // Simple scroll-based spy (works everywhere; avoids IntersectionObserver quirks)
       const ids = ['status','settings','users','senders','oauth','logs'];
       const els = ids.map(id => document.getElementById(id)).filter(Boolean);
       if (!els.length) return;
 
-      const obs = new IntersectionObserver((entries) => {
-        // pick the entry closest to the top that is intersecting
-        const intersecting = entries.filter(e => e.isIntersecting);
-        if (!intersecting.length) return;
-        intersecting.sort((a,b) => Math.abs(a.boundingClientRect.top) - Math.abs(b.boundingClientRect.top));
-        const id = intersecting[0].target && intersecting[0].target.id;
-        if (id) setActiveNavById(id);
-      }, {
-        root: null,
-        // activate when the section passes under the sticky header
-        rootMargin: '-96px 0px -70% 0px',
-        threshold: [0.01, 0.1, 0.25]
-      });
+      const headerOffset = 96; // sticky header height-ish
+      let ticking = false;
 
-      for (const el of els) obs.observe(el);
+      function update(){
+        ticking = false;
+        const y = window.scrollY + headerOffset + 8;
+        let current = els[0].id;
+        for (const el of els) {
+          if (el.offsetTop <= y) current = el.id;
+        }
+        setActiveNavById(current);
+      }
+
+      function onScroll(){
+        if (ticking) return;
+        ticking = true;
+        window.requestAnimationFrame(update);
+      }
+
+      window.addEventListener('scroll', onScroll, { passive: true });
+      window.addEventListener('resize', onScroll);
 
       // initial
-      const initial = (location.hash || '#status').slice(1);
-      setActiveNavById(initial || 'status');
+      onScroll();
     }
 
     // smooth scrolling for sidebar clicks (and update hash)
