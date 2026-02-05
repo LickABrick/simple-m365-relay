@@ -450,7 +450,15 @@
       try {
         const data = new FormData(form);
         const r = await fetch('/api/settings', { method: 'POST', body: data });
-        const j = await r.json();
+        let j = null;
+        try { j = await r.json(); } catch(e) {}
+
+        if (!r.ok) {
+          const msg = (j && j.detail) ? ('Save failed: ' + JSON.stringify(j.detail)) : 'Save failed.';
+          showToast(msg, 'error');
+          return;
+        }
+
         if (j && j.ok) {
           showToast('Saved (not applied). Click Apply Changes.', 'ok');
           if (typeof j.pending !== 'undefined') syncPendingFromApi(!!j.pending);
