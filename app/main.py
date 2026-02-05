@@ -25,10 +25,31 @@ _device_flow_lock = threading.Lock()
 _device_flow_running = False
 
 
+def _default_cfg() -> Dict[str, Any]:
+    return {
+        "hostname": "relay.local",
+        "domain": "local",
+        "mynetworks": ["127.0.0.0/8"],
+        "relayhost": "[smtp.office365.com]:587",
+        "tls": {"smtpd_25": "may", "smtpd_587": "encrypt"},
+        "oauth": {"tenant_id": "", "client_id": "", "auto_refresh_minutes": 30},
+        "allowed_from": {},
+        "default_from": {},
+    }
+
+
 def load_cfg() -> Dict[str, Any]:
     if not CFG_JSON.exists():
-        return {"hostname": "relay.local", "domain": "local", "mynetworks": ["127.0.0.0/8"], "allowed_from": {}, "default_from": {}}
-    return json.loads(CFG_JSON.read_text(encoding="utf-8"))
+        return _default_cfg()
+    cfg = json.loads(CFG_JSON.read_text(encoding="utf-8"))
+    # merge defaults for forward-compat
+    base = _default_cfg()
+    base.update(cfg or {})
+    base.setdefault("tls", _default_cfg()["tls"])
+    base.setdefault("oauth", _default_cfg()["oauth"])
+    base.setdefault("allowed_from", {})
+    base.setdefault("default_from", {})
+    return base
 
 
 APPLIED_HASH_PATH = DATA_DIR / "state" / "applied.hash"
@@ -389,10 +410,10 @@ def index(request: Request):
             "from_identities": from_identities(cfg, ms365_user),
             "env": {
                 "MS365_SMTP_USER": ms365_user,
-                "MS365_TENANT_ID": os.environ.get("MS365_TENANT_ID", ""),
-                "MS365_CLIENT_ID": os.environ.get("MS365_CLIENT_ID", ""),
-                "RELAYHOST": os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
-                "AUTO_TOKEN_REFRESH_MINUTES": os.environ.get("AUTO_TOKEN_REFRESH_MINUTES", ""),
+                "MS365_TENANT_ID": (cfg.get("oauth") or {}).get("tenant_id", ""),
+                "MS365_CLIENT_ID": (cfg.get("oauth") or {}).get("client_id", ""),
+                "RELAYHOST": cfg.get("relayhost") or os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
+                "AUTO_TOKEN_REFRESH_MINUTES": str((cfg.get("oauth") or {}).get("auto_refresh_minutes", "")),
             },
         },
     )
@@ -403,6 +424,12 @@ def update_settings(
     hostname: str = Form(...),
     domain: str = Form(...),
     mynetworks: str = Form(""),
+    relayhost: str = Form(""),
+    tls_25: str = Form("may"),
+    tls_587: str = Form("encrypt"),
+    tenant_id: str = Form(""),
+    client_id: str = Form(""),
+    auto_refresh_minutes: str = Form("30"),
 ):
     """HTML form endpoint (kept for no-JS fallback)."""
     cfg = load_cfg()
@@ -412,15 +439,52 @@ def update_settings(
     from urllib.parse import quote
 
     cfg["mynetworks"] = nets
+
+    cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
+    cfg.setdefault("tls", {})
+    cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
+    cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
+
+    cfg.setdefault("oauth", {})
+    cfg["oauth"]["tenant_id"] = (tenant_id or "").strip()
+    cfg["oauth"]["client_id"] = (client_id or "").strip()
+    cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
+
     save_cfg(cfg)
     return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#settings", status_code=303)
 
 
 @app.post("/api/settings")
+def _validate_tls_level(v: str, default: str) -> str:
+    v = (v or "").strip().lower()
+    if v in ("none", "may", "encrypt"):
+        return v
+    return default
+
+
+def _validate_relayhost(v: str, default: str) -> str:
+    v = (v or "").strip()
+    return v or default
+
+
+def _validate_int(v: str, default: int, lo: int = 0, hi: int = 1440) -> int:
+    try:
+        n = int(str(v).strip())
+    except Exception:
+        return default
+    return max(lo, min(hi, n))
+
+
 def api_settings_save(
     hostname: str = Form(...),
     domain: str = Form(...),
     mynetworks: str = Form(""),
+    relayhost: str = Form(""),
+    tls_25: str = Form("may"),
+    tls_587: str = Form("encrypt"),
+    tenant_id: str = Form(""),
+    client_id: str = Form(""),
+    auto_refresh_minutes: str = Form("30"),
 ):
     """AJAX endpoint: save settings without reload."""
     cfg = load_cfg()
@@ -428,6 +492,17 @@ def api_settings_save(
     cfg["domain"] = domain.strip()
     nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
     cfg["mynetworks"] = nets
+
+    cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
+    cfg.setdefault("tls", {})
+    cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
+    cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
+
+    cfg.setdefault("oauth", {})
+    cfg["oauth"]["tenant_id"] = (tenant_id or "").strip()
+    cfg["oauth"]["client_id"] = (client_id or "").strip()
+    cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
+
     save_cfg(cfg)
 
     current_hash = cfg_hash(cfg)
@@ -748,8 +823,8 @@ def api_status():
         "from_identities": from_identities(cfg, ms365_user),
         "env": {
             "MS365_SMTP_USER": ms365_user,
-            "RELAYHOST": os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
-            "AUTO_TOKEN_REFRESH_MINUTES": os.environ.get("AUTO_TOKEN_REFRESH_MINUTES", ""),
+            "RELAYHOST": cfg.get("relayhost") or os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
+            "AUTO_TOKEN_REFRESH_MINUTES": str((cfg.get("oauth") or {}).get("auto_refresh_minutes", "")),
         },
     }
 

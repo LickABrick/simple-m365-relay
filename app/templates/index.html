@@ -1232,7 +1232,7 @@
             <i data-lucide="settings" class="h-5 w-5 text-slate-500"></i>
             <h2 class="text-lg font-semibold">Settings</h2>
           </div>
-          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Hostname + trusted subnets (mynetworks).</p>
+          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Postfix and OAuth settings. Saved vs applied is explicit.</p>
 
           <form id="settingsForm" method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
@@ -1247,6 +1247,57 @@
               <label class="text-sm font-medium">Trusted subnets (mynetworks; space/comma separated)</label>
               <input name="mynetworks" value="{{ (cfg.mynetworks or []) | join(' ') }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
             </div>
+
+            <div class="sm:col-span-2">
+              <div class="text-sm font-semibold">Outbound relay</div>
+            </div>
+            <div class="sm:col-span-2">
+              <label class="text-sm font-medium">Relayhost</label>
+              <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Used by Postfix for outbound delivery.</div>
+            </div>
+
+            <div class="sm:col-span-2">
+              <div class="text-sm font-semibold">Inbound TLS</div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Controls encryption requirements for clients connecting to port 25 and 587.</div>
+            </div>
+            <div>
+              <label class="text-sm font-medium">Port 25 (smtp)</label>
+              <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+                {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
+                <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+                <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+                <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-sm font-medium">Port 587 (submission)</label>
+              <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+                {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
+                <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+                <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+                <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+              </select>
+            </div>
+
+            <div class="sm:col-span-2">
+              <div class="text-sm font-semibold">OAuth (Microsoft 365)</div>
+            </div>
+            <div>
+              <label class="text-sm font-medium">Tenant ID</label>
+              <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            </div>
+            <div>
+              <label class="text-sm font-medium">Client ID</label>
+              <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            </div>
+            <div>
+              <label class="text-sm font-medium">Auto refresh (minutes)</label>
+              <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
+            </div>
+            <div class="hidden sm:block"></div>
+
             <div class="sm:col-span-2 flex justify-end">
               <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
                 <i data-lucide="save" class="h-4 w-4"></i>

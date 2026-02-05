@@ -11,9 +11,32 @@ CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 TOKEN_REFRESH_LOG = DATA_DIR / "state" / "token_refresh.log"
 
-AUTO_REFRESH_MIN = int(os.environ.get("AUTO_TOKEN_REFRESH_MINUTES", "0") or "0")
 TEST_CONFIG = os.environ.get("SASL_XOAUTH2_TEST_CONFIG", "/usr/lib/x86_64-linux-gnu/sasl-xoauth2/test-config")
 SASL_XOAUTH2_CONFIG = os.environ.get("SASL_XOAUTH2_CONFIG", "/etc/sasl-xoauth2.conf")
+
+
+def load_cfg() -> dict:
+    try:
+        if CFG_JSON.exists():
+            return json.loads(CFG_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def get_auto_refresh_minutes() -> int:
+    # prefer config.json; fallback to env
+    cfg = load_cfg()
+    try:
+        v = (cfg.get("oauth") or {}).get("auto_refresh_minutes", None)
+        if v is not None:
+            return max(0, int(v))
+    except Exception:
+        pass
+    try:
+        return max(0, int(os.environ.get("AUTO_TOKEN_REFRESH_MINUTES", "0") or "0"))
+    except Exception:
+        return 0
 
 BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
 PORT = int(os.environ.get("CONTROL_PORT", "18080"))
@@ -166,11 +189,12 @@ def start_device_flow_background() -> None:
     def run():
         global _device_running
         try:
-            tenant = os.environ.get("MS365_TENANT_ID", "")
-            client_id = os.environ.get("MS365_CLIENT_ID", "")
+            cfg = load_cfg()
+            tenant = (cfg.get("oauth") or {}).get("tenant_id") or os.environ.get("MS365_TENANT_ID", "")
+            client_id = (cfg.get("oauth") or {}).get("client_id") or os.environ.get("MS365_CLIENT_ID", "")
             user = os.environ.get("MS365_SMTP_USER", "")
             if not (tenant and client_id and user):
-                DEVICE_FLOW_LOG.write_text("Missing MS365_TENANT_ID, MS365_CLIENT_ID or MS365_SMTP_USER\n", encoding="utf-8")
+                DEVICE_FLOW_LOG.write_text("Missing tenant_id/client_id (OAuth settings) or MS365_SMTP_USER\n", encoding="utf-8")
                 return
             tok_path = str(DATA_DIR / "tokens" / user)
             Path(tok_path).parent.mkdir(parents=True, exist_ok=True)
@@ -304,22 +328,30 @@ class H(BaseHTTPRequestHandler):
 
 
 def _auto_refresh_loop():
-    if AUTO_REFRESH_MIN <= 0:
-        return
     import time as _time
 
+    last_run = 0
     while True:
-        try:
-            # refresh token in the background
-            refresh_token()
-        except Exception as e:
-            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] auto-refresh error: {e}\n")
-        _time.sleep(max(60, AUTO_REFRESH_MIN * 60))
+        mins = get_auto_refresh_minutes()
+        if mins <= 0:
+            _time.sleep(5)
+            continue
+
+        # run at most once per interval
+        now = _time.time()
+        if now - last_run >= mins * 60:
+            try:
+                refresh_token()
+            except Exception as e:
+                _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] auto-refresh error: {e}\n")
+            last_run = now
+
+        _time.sleep(5)
 
 
 def main():
-    if AUTO_REFRESH_MIN > 0:
-        threading.Thread(target=_auto_refresh_loop, daemon=True).start()
+    # always start loop; it self-disables when interval <= 0
+    threading.Thread(target=_auto_refresh_loop, daemon=True).start()
     httpd = HTTPServer((BIND, PORT), H)
     httpd.serve_forever()
 

@@ -15,7 +15,26 @@ chown -R postfix:postfix "$DATA_DIR/tokens" 2>/dev/null || true
 # Create default config if missing
 if [ ! -f "$CFG_JSON" ]; then
   cat > "$CFG_JSON" <<'EOF'
-{"hostname":"relay.local","domain":"local","mynetworks":["127.0.0.0/8"],"allowed_from":{},"default_from":{}}
+{
+  "hostname": "relay.local",
+  "domain": "local",
+  "mynetworks": ["127.0.0.0/8"],
+
+  "relayhost": "[smtp.office365.com]:587",
+  "tls": {
+    "smtpd_25": "may",
+    "smtpd_587": "encrypt"
+  },
+
+  "oauth": {
+    "tenant_id": "",
+    "client_id": "",
+    "auto_refresh_minutes": 30
+  },
+
+  "allowed_from": {},
+  "default_from": {}
+}
 EOF
 fi
 
@@ -56,13 +75,39 @@ python3 /opt/ms365-relay/postfix/render.py \
   --tls-key "$KEY_PATH"
 
 # Render sasl-xoauth2 config (used by the sasl-xoauth2 plugin for token refresh)
+# Prefer app config.json, fallback to env.
 # Match https://std.rocks/relay-ms365-oauth.html : client_secret may be empty but MUST exist.
-if [ -n "${MS365_CLIENT_ID:-}" ] && [ -n "${MS365_TENANT_ID:-}" ]; then
+_cfg_client_id=$(python3 - <<'PY'
+import json
+from pathlib import Path
+p=Path('/data/config/config.json')
+try:
+  cfg=json.loads(p.read_text())
+  print((cfg.get('oauth') or {}).get('client_id','') or '')
+except Exception:
+  print('')
+PY
+)
+_cfg_tenant_id=$(python3 - <<'PY'
+import json
+from pathlib import Path
+p=Path('/data/config/config.json')
+try:
+  cfg=json.loads(p.read_text())
+  print((cfg.get('oauth') or {}).get('tenant_id','') or '')
+except Exception:
+  print('')
+PY
+)
+client_id="${_cfg_client_id:-${MS365_CLIENT_ID:-}}"
+tenant_id="${_cfg_tenant_id:-${MS365_TENANT_ID:-}}"
+
+if [ -n "${client_id:-}" ] && [ -n "${tenant_id:-}" ]; then
   cat > /etc/sasl-xoauth2.conf <<EOF
 {
-  "client_id": "${MS365_CLIENT_ID}",
+  "client_id": "${client_id}",
   "client_secret": "",
-  "token_endpoint": "https://login.microsoftonline.com/${MS365_TENANT_ID}/oauth2/v2.0/token",
+  "token_endpoint": "https://login.microsoftonline.com/${tenant_id}/oauth2/v2.0/token",
   "log_full_trace_on_failure": "yes",
   "log_to_syslog_on_failure": "yes"
 }
