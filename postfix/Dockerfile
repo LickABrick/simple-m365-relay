@@ -35,9 +35,11 @@ RUN apk add --no-cache \
     cyrus-sasl \
     openssl \
     python3 \
+    py3-pip \
     busybox-suid \
     libcurl \
     jsoncpp \
+  && python3 -m pip install --no-cache-dir --break-system-packages msal \
   && mkdir -p /data
 
 # XOAUTH2 plugin + tool
