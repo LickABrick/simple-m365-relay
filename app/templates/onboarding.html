@@ -23,6 +23,10 @@
   </style>
 
   <script>
+    // server-provided defaults
+    window.SM365R = window.SM365R || {};
+    window.SM365R.ms365User = {{ (ms365_user or '') | tojson }};
+
     // theme (persisted)
     const themeKey = 'simple-m365-relay-theme';
     const saved = localStorage.getItem(themeKey);
@@ -356,7 +360,9 @@
         }
         const to = document.getElementById('testTo')?.value || '';
         if (!_fieldOk(to)) { showToast('Recipient (To) is required.', 'error'); return; }
-        const from = document.getElementById('testFrom')?.value || '';
+        let from = document.getElementById('testFrom')?.value || '';
+        // Postfix control requires a from_addr. When left blank, use the relay M365 user as fallback.
+        if (!_fieldOk(from)) from = (window.SM365R?.ms365User || '').trim();
         const subject = document.getElementById('testSubject')?.value || 'Simple M365 Relay test';
         const body = document.getElementById('testBody')?.value || 'Hello from Simple M365 Relay.';
 
@@ -383,6 +389,7 @@
         }
       });
       document.getElementById('s4Next')?.addEventListener('click', () => showStep(5));
+      document.getElementById('goToOauthBtn')?.addEventListener('click', () => showStep(3));
 
       // Step 5: add user (optional)
       document.getElementById('addUserBtn')?.addEventListener('click', async () => {
@@ -683,6 +690,7 @@
             </button>
             <div id="testDisabledHint" class="mt-2 hidden text-xs text-amber-700 dark:text-amber-200">
               Test mail is disabled until a valid OAuth token exists (Step 3).
+              <button type="button" id="goToOauthBtn" class="ml-2 underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100">Go to OAuth step</button>
             </div>
           </div>
           <div class="text-xs text-slate-500 dark:text-slate-400">Output below</div>

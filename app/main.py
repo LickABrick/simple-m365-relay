@@ -584,6 +584,7 @@ def onboarding_get(request: Request):
             "token_exp_ts": token_exp_ts,
             "device_flow_log": tail(DEVICE_FLOW_LOG, 400),
             "onboarding_ok": onboarding_complete(cfg),
+            "ms365_user": ms365_user,
         },
     )
 
