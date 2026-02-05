@@ -49,6 +49,12 @@ services:
       POSTFIX_CONTROL_URL: ${POSTFIX_CONTROL_URL:-http://postfix:18080}
       RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
       DATA_DIR: ${DATA_DIR:-/data}
+
+      # Display + token expiry parsing (same as postfix)
+      RELAYHOST: ${RELAYHOST:-[smtp.office365.com]:587}
+      MS365_SMTP_USER: ${MS365_SMTP_USER:-postfix@example.com}
+      MS365_TENANT_ID: ${MS365_TENANT_ID:-}
+      MS365_CLIENT_ID: ${MS365_CLIENT_ID:-}
     volumes:
       - ms365-relay-data:/data
     depends_on:
