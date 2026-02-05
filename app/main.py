@@ -397,12 +397,25 @@ def api_status():
     }
 
 
+def _redact_mail_log(text: str) -> str:
+    if not text:
+        return ""
+    out_lines = []
+    for ln in text.splitlines():
+        ll = ln.lower()
+        if "refresh_token=" in ll or "access_token" in ll or "tokenstore::read: refresh=" in ll:
+            out_lines.append("[REDACTED token material]")
+        else:
+            out_lines.append(ln)
+    return "\n".join(out_lines)
+
+
 @app.get("/diagnostics.txt")
 def diagnostics_txt():
-    # No secrets: we do NOT include token files.
+    # No secrets: we do NOT include token files, and we redact token-like content from logs.
     cfg = load_cfg()
     mailq_out = (_control_get("/mailq").get("mailq") or "")
-    mail_log = (_control_get("/maillog").get("maillog") or "")
+    mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
