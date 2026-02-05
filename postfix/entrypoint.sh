@@ -42,6 +42,16 @@ python3 /opt/ms365-relay/postfix/render.py \
   --tls-cert "$CERT_PATH" \
   --tls-key "$KEY_PATH"
 
+# Render sasl-xoauth2 config (used by the sasl-xoauth2 plugin for token refresh)
+# Device-flow apps are usually public clients -> no client_secret required.
+if [ -n "${MS365_CLIENT_ID:-}" ]; then
+  cat > /etc/sasl-xoauth2.conf <<EOF
+{
+  "client_id": "${MS365_CLIENT_ID}"
+}
+EOF
+fi
+
 # Ensure postfix dirs
 postfix check || true
 
