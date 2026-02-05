@@ -197,6 +197,37 @@
       }
     }
 
+    function setOauthStatus(ts){
+      const iconWrap = document.getElementById('oauthStatusIcon');
+      const text = document.getElementById('oauthStatusText');
+      if (!text || !iconWrap) return;
+
+      const n = Number(ts || 0);
+      // unknown
+      if (!n || Number.isNaN(n)) {
+        text.textContent = 'Unknown';
+        iconWrap.innerHTML = '<i data-lucide="help-circle" class="h-5 w-5"></i>';
+        try { lucide.createIcons(); } catch(e) {}
+        return;
+      }
+
+      const now = Date.now();
+      const exp = n * 1000;
+      const mins = Math.round((exp - now) / 60000);
+
+      if (exp <= now) {
+        text.textContent = 'Expired';
+        iconWrap.innerHTML = '<i data-lucide="badge-alert" class="h-5 w-5 text-red-600"></i>';
+      } else if (mins <= 30) {
+        text.textContent = `Expiring soon (${mins} min)`;
+        iconWrap.innerHTML = '<i data-lucide="badge-alert" class="h-5 w-5 text-amber-500"></i>';
+      } else {
+        text.textContent = `Valid (${mins} min)`;
+        iconWrap.innerHTML = '<i data-lucide="badge-check" class="h-5 w-5 text-emerald-600"></i>';
+      }
+      try { lucide.createIcons(); } catch(e) {}
+    }
+
     function syncTokenExpiryFromDom(){
       const te = document.getElementById('tokenExp');
       if (te) {
@@ -207,6 +238,7 @@
       if (oe) {
         const ts = oe.getAttribute('data-ts');
         oe.textContent = formatTokenExpiryLocal(ts);
+        setOauthStatus(ts);
       }
     }
 
@@ -235,6 +267,12 @@
         if (te) {
           te.setAttribute('data-ts', j.token_exp_ts || '');
           te.textContent = formatTokenExpiryLocal(j.token_exp_ts);
+        }
+        const oe = document.getElementById('oauthTokenExp');
+        if (oe) {
+          oe.setAttribute('data-ts', j.token_exp_ts || '');
+          oe.textContent = formatTokenExpiryLocal(j.token_exp_ts);
+          setOauthStatus(j.token_exp_ts);
         }
 
         // warn tail
@@ -729,12 +767,14 @@
 
           <div class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
             <div class="flex items-start gap-3">
-              <div class="mt-0.5">
+              <div class="mt-0.5" id="oauthStatusIcon">
                 <i data-lucide="badge-check" class="h-5 w-5"></i>
               </div>
               <div class="flex-1">
                 <div class="font-semibold">Current token status</div>
                 <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  <span id="oauthStatusText" class="font-semibold">(unknown)</span>
+                  <span class="opacity-50">•</span>
                   Expiry: <span class="mono" id="oauthTokenExp" data-ts="{{ token_exp_ts or '' }}">(unknown)</span>
                 </div>
                 <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">
