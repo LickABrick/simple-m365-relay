@@ -275,9 +275,7 @@
       try { lucide.createIcons(); } catch(e) {}
       syncThemeButton();
 
-      // ensure theme button works even if inline onclick is blocked
-      const tb = document.getElementById('themeBtn');
-      if (tb) tb.addEventListener('click', (e) => { e.preventDefault(); toggleTheme(); });
+      // theme toggle handled via inline onclick on the button
 
       // initial step
       const savedStep = parseInt(localStorage.getItem('sm365r_onboarding_step') || '1', 10) || 1;
@@ -508,7 +506,7 @@
       <div class="flex items-center gap-2">
         <span id="coreReadyChip" class="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Core settings incomplete</span>
 
-        <button type="button" id="themeBtn" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Toggle theme">
+        <button type="button" id="themeBtn" onclick="toggleTheme()" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Toggle theme">
           <i data-lucide="moon" class="h-4 w-4"></i>
           <span id="themeBtnLabel" class="sr-only">Dark</span>
         </button>
