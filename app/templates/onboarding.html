@@ -48,9 +48,15 @@
     }
     function syncThemeButton(){
       const label = document.getElementById('themeBtnLabel');
-      if (!label) return;
+      const icon = document.querySelector('#themeBtn i');
       const isDark = document.documentElement.classList.contains('dark');
-      label.textContent = isDark ? 'Light' : 'Dark';
+      if (label) label.textContent = isDark ? 'Light' : 'Dark';
+
+      // swap icon for clarity (moon=dark, sun=light)
+      if (icon) {
+        icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+        try { lucide.createIcons(); } catch(e) {}
+      }
     }
 
     function showToast(msg, level){
@@ -256,6 +262,10 @@
     window.addEventListener('DOMContentLoaded', () => {
       try { lucide.createIcons(); } catch(e) {}
       syncThemeButton();
+
+      // ensure theme button works even if inline onclick is blocked
+      const tb = document.getElementById('themeBtn');
+      if (tb) tb.addEventListener('click', (e) => { e.preventDefault(); toggleTheme(); });
 
       // initial step
       const savedStep = parseInt(localStorage.getItem('sm365r_onboarding_step') || '1', 10) || 1;
