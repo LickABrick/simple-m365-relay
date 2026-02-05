@@ -211,6 +211,10 @@ def start_device_flow_background() -> None:
     _control_post("/token/start")
 
 
+def refresh_token_now() -> str:
+    return (_control_post("/token/refresh").get("output") or "ok")
+
+
 def device_flow_log() -> str:
     try:
         return (_control_get("/device-flow-log").get("log") or "")
@@ -428,7 +432,20 @@ def apply_changes():
 @app.post("/token/start")
 def token_start():
     start_device_flow_background()
-    return RedirectResponse(url="/", status_code=303)
+    return RedirectResponse(url="/#oauth", status_code=303)
+
+
+@app.post("/token/refresh")
+def token_refresh():
+    from urllib.parse import quote
+
+    out = refresh_token_now()
+    msg = (out or "ok").strip()
+    if len(msg) > 600:
+        msg = msg[:600] + "…"
+    level = "error" if "failed" in msg.lower() or "error" in msg.lower() else "ok"
+
+    return RedirectResponse(url=f"/?toast={quote('Token refresh executed.')}&toastLevel={level}#oauth", status_code=303)
 
 
 @app.post("/testmail")

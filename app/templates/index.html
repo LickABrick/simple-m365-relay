@@ -943,12 +943,20 @@
                   You normally don’t need device flow unless you want to re-authenticate or rotate the token.
                 </div>
               </div>
-              <form method="post" action="/token/start">
-                <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Start a new OAuth device flow and overwrite the token in the shared volume">
-                  <i data-lucide="refresh-cw" class="h-4 w-4"></i>
-                  Restart device flow
-                </button>
-              </form>
+              <div class="flex flex-col gap-2 sm:flex-row">
+                <form method="post" action="/token/refresh">
+                  <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Manually refresh the OAuth token (uses existing refresh token)">
+                    <i data-lucide="wand-2" class="h-4 w-4"></i>
+                    Refresh token
+                  </button>
+                </form>
+                <form method="post" action="/token/start">
+                  <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Start a new OAuth device flow and overwrite the token in the shared volume">
+                    <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                    Restart device flow
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
 
