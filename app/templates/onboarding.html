@@ -14,7 +14,16 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
 
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    #toast.toast-error { border-color: rgb(254 202 202); background: rgb(254 242 242); color: rgb(127 29 29); }
+    .dark #toast.toast-error { border-color: rgb(127 29 29 / 0.35); background: rgb(69 10 10 / 0.4); color: rgb(254 226 226); }
+    .dot-done { background: rgb(16 185 129) !important; }
+    .dot-active { background: rgb(37 99 235) !important; }
+  </style>
+
   <script>
+    // theme (persisted)
     const themeKey = 'simple-m365-relay-theme';
     const saved = localStorage.getItem(themeKey);
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -29,12 +38,10 @@
       localStorage.setItem(themeKey, mode);
       syncThemeButton();
     }
-
     function toggleTheme(){
       const isDark = document.documentElement.classList.contains('dark');
       setTheme(isDark ? 'light' : 'dark');
     }
-
     function syncThemeButton(){
       const label = document.getElementById('themeBtnLabel');
       if (!label) return;
@@ -81,31 +88,114 @@
       return String(v || '').trim().length > 0;
     }
 
-    function refreshCompletionFromForm(){
-      const relay = document.querySelector('input[name="relayhost"]')?.value || '';
-      const tenant = document.querySelector('input[name="tenant_id"]')?.value || '';
-      const client = document.querySelector('input[name="client_id"]')?.value || '';
+    function _setProgress(step){
+      const total = 6;
+      const stepNum = document.getElementById('stepNum');
+      const stepTotal = document.getElementById('stepTotal');
+      if (stepNum) stepNum.textContent = String(step);
+      if (stepTotal) stepTotal.textContent = String(total);
 
-      const a = document.getElementById('stepCoreDot');
-      const b = document.getElementById('stepOAuthDot');
+      for (let i=1;i<=total;i++){
+        const d = document.getElementById('p'+i+'Dot');
+        if (!d) continue;
+        d.classList.remove('dot-done','dot-active');
+        d.classList.remove('bg-slate-300','dark:bg-slate-700');
 
-      const okCore = _fieldOk(relay);
-      const okOAuth = _fieldOk(tenant) && _fieldOk(client);
-
-      if (a) {
-        a.classList.toggle('bg-emerald-500', okCore);
-        a.classList.toggle('bg-slate-300', !okCore);
-        a.classList.toggle('dark:bg-slate-700', !okCore);
-      }
-      if (b) {
-        b.classList.toggle('bg-emerald-500', okOAuth);
-        b.classList.toggle('bg-slate-300', !okOAuth);
-        b.classList.toggle('dark:bg-slate-700', !okOAuth);
+        if (i < step) d.classList.add('dot-done');
+        else if (i === step) d.classList.add('dot-active');
+        else d.classList.add('bg-slate-300','dark:bg-slate-700');
       }
 
-      const done = okCore && okOAuth;
-      const banner = document.getElementById('doneBanner');
-      if (banner) banner.classList.toggle('hidden', !done);
+      for (let i=1;i<=total-1;i++){
+        const b = document.getElementById('p'+i+'Bar');
+        if (!b) continue;
+        b.style.width = (step > i+0.5) ? '100%' : '0%';
+      }
+    }
+
+    function showStep(step){
+      const total = 6;
+      for (let i=1;i<=total;i++){
+        const el = document.getElementById('step'+i);
+        if (el) el.classList.toggle('hidden', i !== step);
+      }
+      _setProgress(step);
+      try { localStorage.setItem('sm365r_onboarding_step', String(step)); } catch(e) {}
+    }
+
+    function _getCoreFields(){
+      const relayhost = document.querySelector('input[name="relayhost"]')?.value || '';
+      const tls25 = document.querySelector('select[name="tls_25"]')?.value || 'may';
+      const tls587 = document.querySelector('select[name="tls_587"]')?.value || 'encrypt';
+      return { relayhost, tls_25: tls25, tls_587: tls587 };
+    }
+
+    function _getOauthFields(){
+      const tenant_id = document.querySelector('input[name="tenant_id"]')?.value || '';
+      const client_id = document.querySelector('input[name="client_id"]')?.value || '';
+      const auto_refresh_minutes = document.querySelector('input[name="auto_refresh_minutes"]')?.value || '30';
+      return { tenant_id, client_id, auto_refresh_minutes };
+    }
+
+    function refreshCompletionChips(){
+      const core = _getCoreFields();
+      const oauth = _getOauthFields();
+
+      const okCore = _fieldOk(core.relayhost);
+      const okOAuth = _fieldOk(oauth.tenant_id) && _fieldOk(oauth.client_id);
+
+      const chip = document.getElementById('coreReadyChip');
+      if (chip) {
+        chip.textContent = (okCore && okOAuth) ? 'Core settings complete' : 'Core settings incomplete';
+        chip.classList.toggle('bg-emerald-100', (okCore && okOAuth));
+        chip.classList.toggle('text-emerald-900', (okCore && okOAuth));
+        chip.classList.toggle('bg-amber-100', !(okCore && okOAuth));
+        chip.classList.toggle('text-amber-900', !(okCore && okOAuth));
+        chip.classList.toggle('dark:bg-emerald-950/40', (okCore && okOAuth));
+        chip.classList.toggle('dark:text-emerald-200', (okCore && okOAuth));
+        chip.classList.toggle('dark:bg-amber-950/30', !(okCore && okOAuth));
+        chip.classList.toggle('dark:text-amber-200', !(okCore && okOAuth));
+      }
+
+      const doneBanner = document.getElementById('doneBanner');
+      if (doneBanner) doneBanner.classList.toggle('hidden', !(okCore && okOAuth));
+    }
+
+    async function saveCoreStep(){
+      const core = _getCoreFields();
+      if (!_fieldOk(core.relayhost)) throw new Error('Relayhost is required.');
+
+      const data = new FormData();
+      data.append('relayhost', core.relayhost);
+      data.append('tls_25', core.tls_25);
+      data.append('tls_587', core.tls_587);
+
+      const r = await apiFetch('/api/settings', { method: 'POST', body: data });
+      let j = null;
+      try { j = await r.json(); } catch(e) {}
+      if (!r.ok || !j || !j.ok) {
+        const detail = (j && (j.detail || j.error)) ? (j.detail || j.error) : (await r.text().catch(()=>''));
+        throw new Error(detail || `Save failed (HTTP ${r.status}).`);
+      }
+    }
+
+    async function saveOauthStep(){
+      const oauth = _getOauthFields();
+      if (!_fieldOk(oauth.tenant_id)) throw new Error('Tenant ID is required.');
+      if (!_fieldOk(oauth.client_id)) throw new Error('Client ID is required.');
+
+      const data = new FormData();
+      data.append('tenant_id', oauth.tenant_id);
+      data.append('client_id', oauth.client_id);
+      data.append('auto_refresh_minutes', oauth.auto_refresh_minutes);
+
+      const r = await apiFetch('/api/settings', { method: 'POST', body: data });
+      let j = null;
+      try { j = await r.json(); } catch(e) {}
+      if (!r.ok || !j || !j.ok) {
+        const detail = (j && (j.detail || j.error)) ? (j.detail || j.error) : (await r.text().catch(()=>''));
+        throw new Error(detail || `Save failed (HTTP ${r.status}).`);
+      }
     }
 
     async function refreshTokenBits(){
@@ -137,86 +227,54 @@
       try { lucide.createIcons(); } catch(e) {}
       syncThemeButton();
 
-      // track fields
+      // initial step
+      const savedStep = parseInt(localStorage.getItem('sm365r_onboarding_step') || '1', 10) || 1;
+      showStep(Math.min(6, Math.max(1, savedStep)));
+
+      // live validation chips
       for (const el of document.querySelectorAll('input[name="relayhost"],input[name="tenant_id"],input[name="client_id"]')) {
-        el.addEventListener('input', refreshCompletionFromForm);
+        el.addEventListener('input', refreshCompletionChips);
       }
-      refreshCompletionFromForm();
+      refreshCompletionChips();
       refreshTokenBits();
 
-      function _setProgress(n){
-        const stepNum = document.getElementById('stepNum');
-        if (stepNum) stepNum.textContent = String(n);
-
-        const p1 = document.getElementById('p1Dot');
-        const p2 = document.getElementById('p2Dot');
-        const p3 = document.getElementById('p3Dot');
-        const pb1 = document.getElementById('progressBar');
-        const pb2 = document.getElementById('progressBar2');
-
-        const done = (el) => {
-          el?.classList.remove('bg-slate-300','dark:bg-slate-700');
-          el?.classList.add('bg-emerald-500');
-        };
-        const active = (el) => {
-          el?.classList.remove('bg-slate-300','dark:bg-slate-700','bg-emerald-500');
-          el?.classList.add('bg-blue-600');
-        };
-        const todo = (el) => {
-          el?.classList.remove('bg-blue-600','bg-emerald-500');
-          el?.classList.add('bg-slate-300','dark:bg-slate-700');
-        };
-
-        if (n === 1) { active(p1); todo(p2); todo(p3); }
-        if (n === 2) { done(p1); active(p2); todo(p3); }
-        if (n === 3) { done(p1); done(p2); active(p3); }
-
-        if (pb1) pb1.style.width = (n >= 2) ? '100%' : '0%';
-        if (pb2) pb2.style.width = (n >= 3) ? '100%' : '0%';
-      }
-
-      function showStep(n){
-        const stepIds = ['step1','step2','step3'];
-        for (let i=0;i<stepIds.length;i++){
-          const id = stepIds[i];
-          const el = document.getElementById(id);
-          if (el) el.classList.toggle('hidden', (i+1)!==n);
+      // Step navigation handlers
+      document.getElementById('s1Next')?.addEventListener('click', async () => {
+        try {
+          await saveCoreStep();
+          showToast('Saved relay settings.', 'ok');
+          refreshCompletionChips();
+          showStep(2);
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
         }
-        _setProgress(n);
-        try { localStorage.setItem('sm365r_onboarding_step', String(n)); } catch(e) {}
-      }
+      });
 
-      const savedStep = parseInt(localStorage.getItem('sm365r_onboarding_step') || '1', 10) || 1;
-      showStep(Math.min(3, Math.max(1, savedStep)));
+      document.getElementById('s2Prev')?.addEventListener('click', () => showStep(1));
+      document.getElementById('s2Next')?.addEventListener('click', async () => {
+        try {
+          await saveOauthStep();
+          showToast('Saved OAuth app IDs.', 'ok');
+          refreshCompletionChips();
+          showStep(3);
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        }
+      });
 
-      // navigation only via next/previous buttons
-      document.getElementById('step1Next')?.addEventListener('click', () => showStep(2));
-      document.getElementById('step2Back')?.addEventListener('click', () => showStep(1));
-      document.getElementById('step2Next')?.addEventListener('click', () => showStep(3));
-      document.getElementById('step3Back')?.addEventListener('click', () => showStep(2));
+      document.getElementById('s3Prev')?.addEventListener('click', () => showStep(2));
+      document.getElementById('s3Skip')?.addEventListener('click', () => showStep(4));
+      document.getElementById('s3Next')?.addEventListener('click', () => showStep(4));
 
-      const form = document.getElementById('settingsForm');
-      if (form) {
-        form.addEventListener('submit', async (e) => {
-          e.preventDefault();
-          try {
-            const data = new FormData(form);
-            const r = await apiFetch('/api/settings', { method: 'POST', body: data });
-            let j = null;
-            try { j = await r.json(); } catch(e) {}
-            if (!r.ok || !j || !j.ok) {
-              const detail = (j && (j.detail || j.error)) ? (j.detail || j.error) : (await r.text().catch(()=>''));
-              showToast(detail || `Save failed (HTTP ${r.status}).`, 'error');
-              return;
-            }
-            showToast('Saved.', 'ok');
-            refreshCompletionFromForm();
-          } catch (err) {
-            showToast(String(err?.message || 'Save failed.'), 'error');
-          }
-        });
-      }
+      document.getElementById('s4Prev')?.addEventListener('click', () => showStep(3));
+      document.getElementById('s4Skip')?.addEventListener('click', () => showStep(5));
 
+      document.getElementById('s5Prev')?.addEventListener('click', () => showStep(4));
+      document.getElementById('s5Skip')?.addEventListener('click', () => showStep(6));
+
+      document.getElementById('s6Prev')?.addEventListener('click', () => showStep(5));
+
+      // Step 3: device flow
       const start = document.getElementById('startDeviceFlowBtn');
       const log = document.getElementById('deviceFlowLog');
       const refreshLog = async () => {
@@ -237,19 +295,83 @@
           }
         });
       }
-      const refresh = document.getElementById('refreshDeviceFlowBtn');
-      if (refresh) {
-        refresh.addEventListener('click', async () => { await refreshLog(); await refreshTokenBits(); });
-      }
+      document.getElementById('refreshDeviceFlowBtn')?.addEventListener('click', async () => { await refreshLog(); await refreshTokenBits(); });
       refreshLog();
+
+      // Step 4: test mail (optional)
+      document.getElementById('sendTestBtn')?.addEventListener('click', async () => {
+        const to = document.getElementById('testTo')?.value || '';
+        if (!_fieldOk(to)) { showToast('Recipient (To) is required.', 'error'); return; }
+        const from = document.getElementById('testFrom')?.value || '';
+        const subject = document.getElementById('testSubject')?.value || 'Simple M365 Relay test';
+        const body = document.getElementById('testBody')?.value || 'Hello from Simple M365 Relay.';
+
+        const btn = document.getElementById('sendTestBtn');
+        btn?.setAttribute('disabled','disabled');
+        btn?.classList.add('opacity-60');
+        try {
+          const data = new FormData();
+          data.append('from_addr', from);
+          data.append('to_addr', to);
+          data.append('subject', subject);
+          data.append('body', body);
+          const r = await apiFetch('/api/testmail', { method: 'POST', body: data });
+          const j = await r.json().catch(()=>({}));
+          const out = document.getElementById('testOut');
+          if (out) out.textContent = j.output || '';
+          if (r.ok && j.ok) showToast('Test mail sent (check output below).', 'ok');
+          else showToast(j.detail || j.output || 'Test mail failed.', 'error');
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        } finally {
+          btn?.removeAttribute('disabled');
+          btn?.classList.remove('opacity-60');
+        }
+      });
+      document.getElementById('s4Next')?.addEventListener('click', () => showStep(5));
+
+      // Step 5: add user (optional)
+      document.getElementById('addUserBtn')?.addEventListener('click', async () => {
+        const login = document.getElementById('userLogin')?.value || '';
+        const pw = document.getElementById('userPw')?.value || '';
+        if (!_fieldOk(login)) { showToast('Login is required.', 'error'); return; }
+        if (!_fieldOk(pw) || String(pw).length < 8) { showToast('Password is required (min 8 chars).', 'error'); return; }
+
+        const btn = document.getElementById('addUserBtn');
+        btn?.setAttribute('disabled','disabled');
+        btn?.classList.add('opacity-60');
+        try {
+          const data = new FormData();
+          data.append('login', login);
+          data.append('password', pw);
+          const r = await apiFetch('/api/users/add', { method: 'POST', body: data });
+          const j = await r.json().catch(()=>({}));
+          if (r.ok && j.ok) showToast('User created.', 'ok');
+          else showToast(j.detail || 'Create user failed.', 'error');
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        } finally {
+          btn?.removeAttribute('disabled');
+          btn?.classList.remove('opacity-60');
+        }
+      });
+      document.getElementById('s5Next')?.addEventListener('click', () => showStep(6));
+
+      // Finish
+      document.getElementById('finishBtn')?.addEventListener('click', async () => {
+        try {
+          // ensure core steps are persisted and valid
+          await saveCoreStep();
+          await saveOauthStep();
+          showToast('Saved. Redirecting…', 'ok');
+          window.setTimeout(() => { window.location.href = '/'; }, 600);
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        }
+      });
+
     });
   </script>
-
-  <style>
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    #toast.toast-error { border-color: rgb(254 202 202); background: rgb(254 242 242); color: rgb(127 29 29); }
-    .dark #toast.toast-error { border-color: rgb(127 29 29 / 0.35); background: rgb(69 10 10 / 0.4); color: rgb(254 226 226); }
-  </style>
 </head>
 
 <body class="h-full bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -261,7 +383,7 @@
     </div>
   </div>
 
-  <div class="mx-auto max-w-6xl px-4 py-8">
+  <div class="mx-auto max-w-5xl px-4 py-8">
 
     <div class="flex items-center justify-between">
       <div class="flex items-center gap-3">
@@ -275,6 +397,8 @@
       </div>
 
       <div class="flex items-center gap-2">
+        <span id="coreReadyChip" class="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Core settings incomplete</span>
+
         <button type="button" id="themeBtn" onclick="toggleTheme()" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Toggle theme">
           <i data-lucide="moon" class="h-4 w-4"></i>
           <span id="themeBtnLabel" class="sr-only">Dark</span>
@@ -290,250 +414,311 @@
       </div>
     </div>
 
-    <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-12">
-
-      <aside class="lg:col-span-4">
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div class="text-sm font-semibold">Checklist</div>
-          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">You can skip optional steps for now.</div>
-
-          <div class="mt-4 space-y-3 text-sm">
-            <div class="flex items-center gap-3">
-              <span id="stepCoreDot" class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
-              <div>
-                <div class="font-semibold">Relay settings</div>
-                <div class="text-xs text-slate-500 dark:text-slate-400">Required</div>
-              </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span id="stepOAuthDot" class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
-              <div>
-                <div class="font-semibold">OAuth app IDs</div>
-                <div class="text-xs text-slate-500 dark:text-slate-400">Required</div>
-              </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
-              <div>
-                <div class="font-semibold">OAuth device flow</div>
-                <div class="text-xs text-slate-500 dark:text-slate-400">Optional</div>
-              </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
-              <div>
-                <div class="font-semibold">Test mail</div>
-                <div class="text-xs text-slate-500 dark:text-slate-400">Optional</div>
-              </div>
-            </div>
-            <div class="flex items-center gap-3">
-              <span class="h-2.5 w-2.5 rounded-full bg-slate-300 dark:bg-slate-700"></span>
-              <div>
-                <div class="font-semibold">SMTP AUTH users</div>
-                <div class="text-xs text-slate-500 dark:text-slate-400">Optional</div>
-              </div>
-            </div>
-          </div>
-
-          <div id="doneBanner" class="mt-5 hidden rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
-            <div class="flex items-start gap-2">
-              <i data-lucide="badge-check" class="mt-0.5 h-4 w-4"></i>
-              <div>
-                <div class="font-semibold">Core onboarding complete</div>
-                <div class="mt-1 text-xs">You can go to the dashboard now and finish the optional steps anytime.</div>
-                <a href="/" class="mt-3 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
-                  <i data-lucide="layout-dashboard" class="h-4 w-4"></i>
-                  Go to dashboard
-                </a>
-              </div>
-            </div>
-          </div>
-
+    <!-- Progress stepper -->
+    <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="text-sm font-semibold">Setup wizard</div>
+          <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Step <span id="stepNum">1</span> of <span id="stepTotal">6</span></div>
         </div>
-      </aside>
 
-      <main class="lg:col-span-8 space-y-6">
+        <div id="doneBanner" class="hidden rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200">
+          Core settings complete
+        </div>
+      </div>
 
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <div class="mt-4">
+        <div class="grid grid-cols-6 items-center gap-2">
+          {% for i in [1,2,3,4,5,6] %}
+          <div class="flex items-center">
+            <div id="p{{ i }}Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+            {% if i < 6 %}
+            <div class="ml-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800">
+              <div id="p{{ i }}Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="mt-3 grid grid-cols-6 gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+          <div>Relay</div>
+          <div>OAuth IDs</div>
+          <div>OAuth login<br/><span class="font-normal">(optional)</span></div>
+          <div>Test mail<br/><span class="font-normal">(optional)</span></div>
+          <div>Add user<br/><span class="font-normal">(optional)</span></div>
+          <div>Finish</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Steps -->
+    <div class="mt-6 space-y-6">
+
+      <!-- Step 1 -->
+      <section id="step1" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="settings" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">Relay settings</h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Set where Postfix delivers outbound mail.</p>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
+            <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Example: <span class="mono">[smtp.office365.com]:587</span></div>
+          </div>
+
+          <div class="sm:col-span-2">
+            <div class="text-sm font-semibold">Inbound TLS</div>
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Encryption requirements for clients connecting to port 25 and 587.</div>
+          </div>
+
+          <div>
+            <label class="text-sm font-medium">Port 25 (smtp)</label>
+            <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+              {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
+              <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+              <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+              <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-sm font-medium">Port 587 (submission)</label>
+            <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+              {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
+              <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+              <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+              <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-end">
+          <button type="button" id="s1Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            Next
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 2 -->
+      <section id="step2" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="key-round" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">OAuth application IDs</h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Configure the Azure AD app IDs. No client secret needed.</p>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="text-sm font-medium">Tenant ID <span class="text-xs text-slate-500">(required)</span></label>
+            <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label class="text-sm font-medium">Client ID <span class="text-xs text-slate-500">(required)</span></label>
+            <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label class="text-sm font-medium">Auto refresh (minutes)</label>
+            <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s2Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <button type="button" id="s2Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            Next
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 3 -->
+      <section id="step3" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <i data-lucide="settings" class="h-5 w-5 text-slate-500"></i>
-            <h2 class="text-lg font-semibold">Core settings</h2>
+            <i data-lucide="shield" class="h-5 w-5 text-slate-500"></i>
+            <h2 class="text-lg font-semibold">OAuth device flow <span class="text-xs font-semibold text-slate-400">(optional)</span></h2>
           </div>
-          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Fill in the required values, then click <b>Save</b>. This unlocks the dashboard.</p>
+          <span id="tokenChip" class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            <span id="tokenText">Token not set (optional)</span>
+          </span>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Acquire an OAuth token using device flow.</p>
 
-          <div class="mt-4">
-
-            <!-- Stepper progress (non-clickable) -->
-            <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-              <div class="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
-                <div class="flex items-center gap-2">
-                  <span id="p1Dot" class="h-3 w-3 rounded-full bg-blue-600"></span>
-                  <span>Relay</span>
-                </div>
-                <div class="flex-1 px-3">
-                  <div class="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800">
-                    <div id="progressBar" class="h-1.5 rounded-full bg-blue-600" style="width: 0%"></div>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span id="p2Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></span>
-                  <span>OAuth IDs</span>
-                </div>
-                <div class="flex-1 px-3 hidden sm:block">
-                  <div class="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800">
-                    <div id="progressBar2" class="h-1.5 rounded-full bg-blue-600" style="width: 0%"></div>
-                  </div>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span id="p3Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></span>
-                  <span>OAuth login</span>
-                  <span class="text-[10px] font-semibold text-slate-400">optional</span>
-                </div>
-              </div>
-              <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                Step <span id="stepNum">1</span> of 3
-              </div>
-            </div>
-
-            <form id="settingsForm" method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <section id="step1" class="stepSection sm:col-span-2">
-                <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                  <div class="text-sm font-semibold">Outbound relay</div>
-                  <div class="mt-2">
-                    <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
-                    <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-                    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Example: <span class="mono">[smtp.office365.com]:587</span></div>
-                  </div>
-
-                  <div class="mt-4 text-sm font-semibold">Inbound TLS</div>
-                  <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Port 25 and 587 encryption requirements.</div>
-
-                  <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <label class="text-sm font-medium">Port 25 (smtp)</label>
-                      <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900">
-                        {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
-                        <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
-                        <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
-                        <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label class="text-sm font-medium">Port 587 (submission)</label>
-                      <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900">
-                        {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
-                        <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
-                        <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
-                        <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div class="mt-4 flex justify-between">
-                    <div></div>
-                    <button type="button" id="step1Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
-                      Next
-                      <i data-lucide="arrow-right" class="h-4 w-4"></i>
-                    </button>
-                  </div>
-                </div>
-              </section>
-
-              <section id="step2" class="stepSection sm:col-span-2 hidden">
-                <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                  <div class="text-sm font-semibold">OAuth application</div>
-                  <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Set the Azure app IDs used for device flow (no client secret).</div>
-
-                  <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div>
-                      <label class="text-sm font-medium">Tenant ID <span class="text-xs text-slate-500">(required)</span></label>
-                      <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-                    </div>
-                    <div>
-                      <label class="text-sm font-medium">Client ID <span class="text-xs text-slate-500">(required)</span></label>
-                      <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-                    </div>
-                    <div>
-                      <label class="text-sm font-medium">Auto refresh (minutes)</label>
-                      <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
-                    </div>
-                  </div>
-
-                  <div class="mt-4 flex justify-between">
-                    <button type="button" id="step2Back" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
-                      <i data-lucide="arrow-left" class="h-4 w-4"></i>
-                      Back
-                    </button>
-                    <button type="button" id="step2Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
-                      Next
-                      <i data-lucide="arrow-right" class="h-4 w-4"></i>
-                    </button>
-                  </div>
-                </div>
-              </section>
-
-              <section id="step3" class="stepSection sm:col-span-2 hidden">
-                <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                  <div class="flex items-center justify-between">
-                    <div class="text-sm font-semibold">OAuth device flow (optional)</div>
-                    <span id="tokenChip" class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                      <span id="tokenText">Token not set (optional)</span>
-                    </span>
-                  </div>
-
-                  <div class="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
-                    <div class="flex items-start gap-2">
-                      <i data-lucide="shield-alert" class="mt-0.5 h-4 w-4"></i>
-                      <div>
-                        You can skip this step. But until a token exists, mail delivery will not work.
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="mt-3 flex flex-wrap gap-2">
-                    <button id="startDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
-                      <i data-lucide="play" class="h-4 w-4"></i>
-                      Start device flow
-                    </button>
-                    <button id="refreshDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
-                      <i data-lucide="refresh-cw" class="h-4 w-4"></i>
-                      Refresh
-                    </button>
-                    <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp">{{ token_exp_ts or '' }}</span></div>
-                  </div>
-
-                  <pre id="deviceFlowLog" class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-900">{{ device_flow_log or '' }}</pre>
-
-                  <div class="mt-4 flex justify-between">
-                    <button type="button" id="step3Back" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
-                      <i data-lucide="arrow-left" class="h-4 w-4"></i>
-                      Back
-                    </button>
-                    <a href="/" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
-                      Finish
-                      <i data-lucide="layout-dashboard" class="h-4 w-4"></i>
-                    </a>
-                  </div>
-
-                </div>
-              </section>
-
-              <div class="sm:col-span-2 flex justify-end">
-                <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
-                  <i data-lucide="save" class="h-4 w-4"></i>
-                  Save (this step)
-                </button>
-              </div>
-            </form>
+        <div class="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+          <div class="flex items-start gap-2">
+            <i data-lucide="shield-alert" class="mt-0.5 h-4 w-4"></i>
+            <div>You can skip this step. But until a token exists, mail delivery will not work.</div>
           </div>
-
         </div>
 
-      </main>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button id="startDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="play" class="h-4 w-4"></i>
+            Start device flow
+          </button>
+          <button id="refreshDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+            Refresh
+          </button>
+          <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp">{{ token_exp_ts or '' }}</span></div>
+        </div>
+
+        <pre id="deviceFlowLog" class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ device_flow_log or '' }}</pre>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s3Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" id="s3Skip" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+              Skip
+            </button>
+            <button type="button" id="s3Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              Next
+              <i data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 4 -->
+      <section id="step4" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="send" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">Test mail <span class="text-xs font-semibold text-slate-400">(optional)</span></h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Send a quick test mail through the relay.</p>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">To</label>
+            <input id="testTo" placeholder="you@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">From (optional)</label>
+            <input id="testFrom" placeholder="(leave blank to use default/fallback)" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">Subject</label>
+            <input id="testSubject" value="Simple M365 Relay test" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">Body</label>
+            <textarea id="testBody" rows="4" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">Hello from Simple M365 Relay.</textarea>
+          </div>
+        </div>
+
+        <div class="mt-4 flex items-center justify-between">
+          <button id="sendTestBtn" type="button" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            <i data-lucide="send" class="h-4 w-4"></i>
+            Send test mail
+          </button>
+          <div class="text-xs text-slate-500 dark:text-slate-400">Output below</div>
+        </div>
+
+        <pre id="testOut" class="mono mt-3 max-h-60 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950"></pre>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s4Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" id="s4Skip" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">Skip</button>
+            <button type="button" id="s4Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              Next
+              <i data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 5 -->
+      <section id="step5" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="users" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">Add SMTP AUTH user <span class="text-xs font-semibold text-slate-400">(optional)</span></h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Create a username/password for clients authenticating to this relay.</p>
+
+        <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="text-sm font-medium">Login</label>
+            <input id="userLogin" placeholder="example" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label class="text-sm font-medium">Password</label>
+            <input id="userPw" type="password" placeholder="********" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Min 8 characters.</div>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <button id="addUserBtn" type="button" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            <i data-lucide="user-plus" class="h-4 w-4"></i>
+            Create user
+          </button>
+        </div>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s5Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button" id="s5Skip" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">Skip</button>
+            <button type="button" id="s5Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+              Next
+              <i data-lucide="arrow-right" class="h-4 w-4"></i>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 6 -->
+      <section id="step6" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-2">
+          <i data-lucide="badge-check" class="h-5 w-5 text-slate-500"></i>
+          <h2 class="text-lg font-semibold">Finish</h2>
+        </div>
+        <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">We’ll save your settings and take you to the dashboard.</p>
+
+        <div class="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-950">
+          <div class="flex items-start gap-2">
+            <i data-lucide="info" class="mt-0.5 h-4 w-4 text-slate-500"></i>
+            <div>
+              <div class="font-semibold">What’s next?</div>
+              <ul class="mt-2 list-disc pl-5 text-sm text-slate-600 dark:text-slate-300">
+                <li>Apply changes on the dashboard when you’re ready.</li>
+                <li>If you skipped OAuth login, you can run device flow later.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s6Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
+          <button type="button" id="finishBtn" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            <i data-lucide="layout-dashboard" class="h-4 w-4"></i>
+            Go to dashboard
+          </button>
+        </div>
+      </section>
 
     </div>
-  </div>
 
+  </div>
 </body>
 </html>
