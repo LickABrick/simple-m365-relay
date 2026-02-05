@@ -79,6 +79,26 @@ def parse_queue_size(mailq_out: str) -> int:
     return len(ids)
 
 
+def _jwt_exp_best_effort(jwt: str) -> Optional[int]:
+    # Parse JWT exp (no signature verification; best-effort display only)
+    try:
+        import base64
+
+        parts = (jwt or "").split(".")
+        if len(parts) < 2:
+            return None
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        raw = base64.urlsafe_b64decode(payload.encode("utf-8"))
+        obj = json.loads(raw.decode("utf-8"))
+        exp = obj.get("exp")
+        if exp is None:
+            return None
+        return int(exp)
+    except Exception:
+        return None
+
+
 def token_expiry_ts_best_effort(token_path: Path) -> Optional[int]:
     if not token_path.exists():
         return None
@@ -88,7 +108,21 @@ def token_expiry_ts_best_effort(token_path: Path) -> Optional[int]:
         # fallback: file mtime
         return int(token_path.stat().st_mtime)
 
-    # try common MSAL/cache fields
+    # common field
+    try:
+        exp0 = int(str(data.get("expiry", "") or 0))
+        if exp0 > 0:
+            return exp0
+    except Exception:
+        pass
+
+    # fallback: access_token JWT exp
+    jwt = data.get("access_token") if isinstance(data, dict) else None
+    jwt_exp = _jwt_exp_best_effort(jwt or "")
+    if jwt_exp:
+        return jwt_exp
+
+    # try nested common MSAL/cache fields
     def walk(obj):
         if isinstance(obj, dict):
             for k, v in obj.items():
@@ -105,9 +139,11 @@ def token_expiry_ts_best_effort(token_path: Path) -> Optional[int]:
             ts = int(str(v))
             if ts > 10_000_000_000:
                 ts //= 1000
-            return ts
+            if ts > 0:
+                return ts
         except Exception:
             pass
+
     return None
 
 
@@ -213,6 +249,14 @@ def start_device_flow_background() -> None:
 
 def refresh_token_now() -> str:
     return (_control_post("/token/refresh").get("output") or "ok")
+
+
+def get_device_flow_log() -> str:
+    return (_control_get("/device-flow-log").get("log") or "")
+
+
+def get_token_refresh_log() -> str:
+    return (_control_get("/token/refresh-log").get("log") or "")
 
 
 def device_flow_log() -> str:
@@ -431,12 +475,14 @@ def apply_changes():
 
 @app.post("/token/start")
 def token_start():
+    # HTML fallback
     start_device_flow_background()
     return RedirectResponse(url="/#oauth", status_code=303)
 
 
 @app.post("/token/refresh")
 def token_refresh():
+    # HTML fallback
     from urllib.parse import quote
 
     out = refresh_token_now()
@@ -446,6 +492,28 @@ def token_refresh():
     level = "error" if "failed" in msg.lower() or "error" in msg.lower() else "ok"
 
     return RedirectResponse(url=f"/?toast={quote('Token refresh executed.')}&toastLevel={level}#oauth", status_code=303)
+
+
+@app.post("/api/token/start")
+def api_token_start():
+    start_device_flow_background()
+    return {"ok": True}
+
+
+@app.post("/api/token/refresh")
+def api_token_refresh():
+    out = refresh_token_now()
+    return {"ok": True, "output": out}
+
+
+@app.get("/api/device-flow-log")
+def api_device_flow_log():
+    return {"log": get_device_flow_log()}
+
+
+@app.get("/api/token-refresh-log")
+def api_token_refresh_log():
+    return {"log": get_token_refresh_log()}
 
 
 @app.post("/testmail")

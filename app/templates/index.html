@@ -216,9 +216,15 @@
     function setOauthStatus(ts){
       const iconWrap = document.getElementById('oauthStatusIcon');
       const text = document.getElementById('oauthStatusText');
+      const refreshBtn = document.getElementById('oauthRefreshBtn');
       if (!text || !iconWrap) return;
 
       const st = _tokenStatus(ts);
+      if (refreshBtn) {
+        // User requirement: if expired, refresh is disabled (force reauth/device-flow).
+        refreshBtn.disabled = (st.state === 'expired' || st.state === 'unknown');
+      }
+
       if (st.state === 'unknown') {
         text.textContent = 'Unknown';
         iconWrap.innerHTML = '<i data-lucide="help-circle" class="h-5 w-5"></i>';
@@ -432,6 +438,67 @@
       }
     }
 
+    async function startDeviceFlowNoReload(){
+      showToast('Starting device flow…', 'ok');
+      // hide previous callout
+      document.getElementById('deviceFlowCallout')?.classList.add('hidden');
+      try {
+        await fetch('/api/token/start', { method: 'POST' });
+      } catch (e) {
+        showToast('Failed to start device flow.', 'error');
+        return;
+      }
+
+      // Poll log until we see code + url
+      const started = Date.now();
+      while (Date.now() - started < 30000) {
+        try {
+          const r = await fetch('/api/device-flow-log', { cache: 'no-store' });
+          const j = await r.json();
+          const log = j.log || '';
+          const m = log.match(/open the page\s+(https?:\/\/\S+)\s+and enter the code\s+([A-Z0-9]+)/i);
+          if (m) {
+            const url = m[1];
+            const code = m[2];
+            const a = document.getElementById('deviceFlowUrl');
+            const c = document.getElementById('deviceFlowCode');
+            if (a) { a.href = url; a.textContent = url; }
+            if (c) { c.textContent = code; }
+            document.getElementById('deviceFlowCallout')?.classList.remove('hidden');
+            showToast('Device flow started. Use the code shown in OAuth section.', 'ok');
+            try { lucide.createIcons(); } catch(e) {}
+            return;
+          }
+        } catch (e) {}
+        await new Promise(res => setTimeout(res, 1000));
+      }
+
+      showToast('Device flow started. Check the log for the code.', 'ok');
+    }
+
+    async function refreshTokenNoReload(){
+      try {
+        const r = await fetch('/api/token/refresh', { method: 'POST' });
+        const j = await r.json();
+        const out = (j.output || '').trim();
+        if (out && out.toLowerCase().includes('failed')) {
+          showToast('Token refresh failed.', 'error');
+        } else {
+          showToast('Token refresh executed.', 'ok');
+        }
+        await refreshStatus();
+      } catch (e) {
+        showToast('Token refresh failed.', 'error');
+      }
+    }
+
+    function initOauthAjax(){
+      const rf = document.getElementById('oauthRefreshForm');
+      if (rf) rf.addEventListener('submit', (e) => { e.preventDefault(); refreshTokenNoReload(); });
+      const af = document.getElementById('oauthReauthForm');
+      if (af) af.addEventListener('submit', (e) => { e.preventDefault(); startDeviceFlowNoReload(); });
+    }
+
     function initSettingsAjax(){
       const form = document.getElementById('settingsForm');
       if (!form) return;
@@ -450,6 +517,7 @@
       showToastFromUrl();
       initAutoRefresh();
       initSettingsAjax();
+      initOauthAjax();
       syncTokenExpiryFromDom();
       applyLogFilter();
     });
@@ -944,18 +1012,37 @@
                 </div>
               </div>
               <div class="flex flex-col gap-2 sm:flex-row">
-                <form method="post" action="/token/refresh">
-                  <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Manually refresh the OAuth token (uses existing refresh token)">
+                <form id="oauthRefreshForm" method="post" action="/token/refresh">
+                  <button id="oauthRefreshBtn" type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50" title="Manually refresh the OAuth token (uses existing refresh token)">
                     <i data-lucide="wand-2" class="h-4 w-4"></i>
                     Refresh token
                   </button>
                 </form>
-                <form method="post" action="/token/start">
-                  <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Start a new OAuth device flow and overwrite the token in the shared volume">
+                <form id="oauthReauthForm" method="post" action="/token/start">
+                  <button id="oauthReauthBtn" type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Start a new OAuth device flow and overwrite the token in the shared volume">
                     <i data-lucide="refresh-cw" class="h-4 w-4"></i>
                     Restart device flow
                   </button>
                 </form>
+
+                <div id="deviceFlowCallout" class="hidden sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <div class="font-semibold">Device flow</div>
+                      <div class="mt-1">Open <a id="deviceFlowUrl" class="underline" href="#" target="_blank" rel="noreferrer">microsoft.com/devicelogin</a> and enter code:</div>
+                      <div class="mt-1 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-semibold dark:border-slate-800 dark:bg-slate-900/40">
+                        <span id="deviceFlowCode" class="mono text-sm">…</span>
+                        <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('deviceFlowCode')">
+                          <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                    <button type="button" class="rounded-lg px-2 py-1 opacity-70 hover:opacity-100" onclick="document.getElementById('deviceFlowCallout')?.classList.add('hidden')">
+                      <i data-lucide="x" class="h-4 w-4"></i>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
