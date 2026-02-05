@@ -352,6 +352,7 @@ def index(request: Request):
                 "MS365_TENANT_ID": os.environ.get("MS365_TENANT_ID", ""),
                 "MS365_CLIENT_ID": os.environ.get("MS365_CLIENT_ID", ""),
                 "RELAYHOST": os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
+                "AUTO_TOKEN_REFRESH_MINUTES": os.environ.get("AUTO_TOKEN_REFRESH_MINUTES", ""),
             },
         },
     )
