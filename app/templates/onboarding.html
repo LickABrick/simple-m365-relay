@@ -459,8 +459,17 @@
           // ensure core steps are persisted and valid
           await saveCoreStep();
           await saveOauthStep();
-          showToast('Saved. Redirecting…', 'ok');
-          window.setTimeout(() => { window.location.href = '/'; }, 600);
+
+          // Apply so dashboard doesn't immediately show the pending/apply banner.
+          const ar = await apiFetch('/api/apply', { method: 'POST' });
+          const aj = await ar.json().catch(()=>({}));
+          if (!ar.ok || !aj.ok) {
+            showToast(aj.detail || 'Saved, but apply failed. You can apply later on the dashboard.', 'error');
+          } else {
+            showToast('Saved & applied. Redirecting…', 'ok');
+          }
+
+          window.setTimeout(() => { window.location.href = '/'; }, 800);
         } catch(e) {
           showToast(String(e?.message || e), 'error');
         }
