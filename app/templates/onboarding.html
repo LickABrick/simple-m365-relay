@@ -99,7 +99,7 @@
     }
 
     function _setProgress(step){
-      const total = 6;
+      const total = 7;
       const stepNum = document.getElementById('stepNum');
       const stepTotal = document.getElementById('stepTotal');
       if (stepNum) stepNum.textContent = String(step);
@@ -124,7 +124,7 @@
     }
 
     function showStep(step){
-      const total = 6;
+      const total = 7;
       for (let i=1;i<=total;i++){
         const el = document.getElementById('step'+i);
         if (el) el.classList.toggle('hidden', i !== step);
@@ -269,7 +269,7 @@
 
       // initial step
       const savedStep = parseInt(localStorage.getItem('sm365r_onboarding_step') || '1', 10) || 1;
-      showStep(Math.min(6, Math.max(1, savedStep)));
+      showStep(Math.min(7, Math.max(1, savedStep)));
 
       // live validation chips
       for (const el of document.querySelectorAll('input[name="relayhost"],input[name="tenant_id"],input[name="client_id"]')) {
@@ -279,22 +279,12 @@
       refreshTokenBits();
 
       // Step navigation handlers
+      document.getElementById('getStartedBtn')?.addEventListener('click', () => showStep(2));
+
       document.getElementById('s1Next')?.addEventListener('click', async () => {
         try {
           await saveCoreStep();
           showToast('Saved relay settings.', 'ok');
-          refreshCompletionChips();
-          showStep(2);
-        } catch(e) {
-          showToast(String(e?.message || e), 'error');
-        }
-      });
-
-      document.getElementById('s2Prev')?.addEventListener('click', () => showStep(1));
-      document.getElementById('s2Next')?.addEventListener('click', async () => {
-        try {
-          await saveOauthStep();
-          showToast('Saved OAuth app IDs.', 'ok');
           refreshCompletionChips();
           showStep(3);
         } catch(e) {
@@ -302,24 +292,39 @@
         }
       });
 
-      document.getElementById('s3Prev')?.addEventListener('click', () => showStep(2));
-      document.getElementById('s3Skip')?.addEventListener('click', () => showStep(4));
+      document.getElementById('s2Prev')?.addEventListener('click', () => showStep(2));
+      document.getElementById('s2Next')?.addEventListener('click', async () => {
+        try {
+          await saveOauthStep();
+          showToast('Saved OAuth app IDs.', 'ok');
+          refreshCompletionChips();
+          showStep(4);
+        } catch(e) {
+          showToast(String(e?.message || e), 'error');
+        }
+      });
+
+      document.getElementById('s3Prev')?.addEventListener('click', () => showStep(3));
+      document.getElementById('s3Skip')?.addEventListener('click', () => showStep(5));
       document.getElementById('s3Next')?.addEventListener('click', async () => {
         // optional step; still allow proceeding if not verified
         await refreshTokenBits();
         if (!_tokenVerified) {
           showToast('OAuth token not verified yet. You can skip and do this later.', 'ok');
         }
-        showStep(4);
+        showStep(5);
       });
 
-      document.getElementById('s4Prev')?.addEventListener('click', () => showStep(3));
-      document.getElementById('s4Skip')?.addEventListener('click', () => showStep(5));
+      document.getElementById('s4Prev')?.addEventListener('click', () => showStep(4));
+      document.getElementById('s4Skip')?.addEventListener('click', () => showStep(6));
 
-      document.getElementById('s5Prev')?.addEventListener('click', () => showStep(4));
-      document.getElementById('s5Skip')?.addEventListener('click', () => showStep(6));
+      document.getElementById('s5Prev')?.addEventListener('click', () => showStep(5));
+      document.getElementById('s5Skip')?.addEventListener('click', () => showStep(7));
 
-      document.getElementById('s6Prev')?.addEventListener('click', () => showStep(5));
+      document.getElementById('s6Prev')?.addEventListener('click', () => showStep(6));
+      document.getElementById('s6Skip')?.addEventListener('click', () => showStep(7));
+
+      document.getElementById('s7Prev')?.addEventListener('click', () => showStep(6));
 
       // Step 3: device flow
       const start = document.getElementById('startDeviceFlowBtn');
@@ -398,8 +403,8 @@
           btn?.classList.remove('opacity-60');
         }
       });
-      document.getElementById('s4Next')?.addEventListener('click', () => showStep(5));
-      document.getElementById('goToOauthBtn')?.addEventListener('click', () => showStep(3));
+      document.getElementById('s4Next')?.addEventListener('click', () => showStep(6));
+      document.getElementById('goToOauthBtn')?.addEventListener('click', () => showStep(4));
 
       // Step 5: add user (optional)
       document.getElementById('addUserBtn')?.addEventListener('click', async () => {
@@ -426,7 +431,7 @@
           btn?.classList.remove('opacity-60');
         }
       });
-      document.getElementById('s5Next')?.addEventListener('click', () => showStep(6));
+      document.getElementById('s5Next')?.addEventListener('click', () => showStep(7));
 
       // Finish
       document.getElementById('finishBtn')?.addEventListener('click', async () => {
@@ -440,6 +445,8 @@
           showToast(String(e?.message || e), 'error');
         }
       });
+
+      // (handler attached earlier; keep single binding)
 
     });
   </script>
@@ -517,15 +524,20 @@
           <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p5Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
 
           <div id="p6Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p6Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p7Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
         </div>
 
-        <div class="mt-3 grid grid-cols-6 gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-          <div class="text-left">Relay</div>
+        <div class="mt-3 grid grid-cols-7 gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+          <div class="text-left">Welcome</div>
+          <div class="text-center">Relay</div>
           <div class="text-center">OAuth IDs</div>
           <div class="text-center">OAuth login<br/><span class="font-normal">(optional)</span></div>
           <div class="text-center">Test mail<br/><span class="font-normal">(optional)</span></div>
           <div class="text-center">Add user<br/><span class="font-normal">(optional)</span></div>
-          <div class="text-right">Finish</div>
+          <div class="text-center">Finish</div>
+          <div class="text-right">Done</div>
         </div>
       </div>
     </div>
@@ -533,8 +545,66 @@
     <!-- Steps -->
     <div class="mt-6 space-y-6">
 
-      <!-- Step 1 -->
-      <section id="step1" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <!-- Step 1 (Welcome) -->
+      <section id="step1" class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-3">
+          <div class="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm">
+            <i data-lucide="sparkles" class="h-5 w-5"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold">Welcome to Simple M365 Relay</h2>
+            <div class="mt-0.5 text-sm text-slate-600 dark:text-slate-300">A minimal Postfix relay for Microsoft 365 (OAuth2 / XOAUTH2), with a clean web UI.</div>
+          </div>
+        </div>
+
+        <div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div class="flex items-start gap-2">
+              <i data-lucide="shield-check" class="mt-0.5 h-4 w-4 text-emerald-600 dark:text-emerald-300"></i>
+              <div>
+                <div class="text-sm font-semibold">What problem it solves</div>
+                <div class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  Send mail via Microsoft 365 without storing an SMTP password — using OAuth device flow and refresh tokens.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div class="flex items-start gap-2">
+              <i data-lucide="mail" class="mt-0.5 h-4 w-4 text-blue-600 dark:text-blue-300"></i>
+              <div>
+                <div class="text-sm font-semibold">What you’ll configure</div>
+                <ul class="mt-2 list-disc pl-5 text-sm text-slate-600 dark:text-slate-300">
+                  <li>Relayhost + TLS policy</li>
+                  <li>OAuth tenant/client IDs</li>
+                  <li>Optional: device flow login</li>
+                  <li>Optional: test mail + add SMTP AUTH users</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-5 rounded-2xl border border-blue-200/70 bg-blue-50/60 p-4 text-sm text-slate-800 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/25 dark:text-blue-100">
+          <div class="flex items-start gap-2">
+            <i data-lucide="info" class="mt-0.5 h-4 w-4 text-blue-600 dark:text-blue-300"></i>
+            <div>
+              Tip: you can skip the optional steps and finish quickly — you can always come back later.
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-6 flex justify-end">
+          <button type="button" id="getStartedBtn" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+            Let's get started
+            <i data-lucide="arrow-right" class="h-4 w-4"></i>
+          </button>
+        </div>
+      </section>
+
+      <!-- Step 2 -->
+      <section id="step2" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div class="flex items-center gap-2">
           <i data-lucide="settings" class="h-5 w-5 text-slate-500"></i>
           <h2 class="text-lg font-semibold">Relay settings</h2>
@@ -582,7 +652,7 @@
       </section>
 
       <!-- Step 2 -->
-      <section id="step2" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <section id="step3" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div class="flex items-center gap-2">
           <i data-lucide="key-round" class="h-5 w-5 text-slate-500"></i>
           <h2 class="text-lg font-semibold">OAuth application IDs</h2>
@@ -618,7 +688,7 @@
       </section>
 
       <!-- Step 3 -->
-      <section id="step3" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <section id="step4" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <i data-lucide="shield" class="h-5 w-5 text-slate-500"></i>
@@ -675,7 +745,7 @@
       </section>
 
       <!-- Step 4 -->
-      <section id="step4" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <section id="step5" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div class="flex items-center gap-2">
           <i data-lucide="send" class="h-5 w-5 text-slate-500"></i>
           <h2 class="text-lg font-semibold">Test mail <span class="text-xs font-semibold text-slate-400">(optional)</span></h2>
@@ -733,7 +803,7 @@
       </section>
 
       <!-- Step 5 -->
-      <section id="step5" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      <section id="step6" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <div class="flex items-center gap-2">
           <i data-lucide="users" class="h-5 w-5 text-slate-500"></i>
           <h2 class="text-lg font-semibold">Add SMTP AUTH user <span class="text-xs font-semibold text-slate-400">(optional)</span></h2>
@@ -775,10 +845,15 @@
       </section>
 
       <!-- Step 6 -->
-      <section id="step6" class="hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div class="flex items-center gap-2">
-          <i data-lucide="badge-check" class="h-5 w-5 text-slate-500"></i>
-          <h2 class="text-lg font-semibold">Finish</h2>
+      <section id="step7" class="hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div class="flex items-center gap-3">
+          <div class="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-sm">
+            <span class="text-lg">🎉</span>
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold">You're all set!</h2>
+            <div class="mt-0.5 text-sm text-slate-600 dark:text-slate-300">Simple M365 Relay is ready to send mail. Party time.</div>
+          </div>
         </div>
         <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">We’ll save your settings and take you to the dashboard.</p>
 
