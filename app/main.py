@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Form, Request
+from fastapi.responses import Response
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
@@ -18,6 +19,8 @@ DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
 templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
 app = FastAPI(title="Simple M365 Relay")
+
+from . import auth  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
 
@@ -369,6 +372,106 @@ def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
             seen.add(a)
             out.append(a)
     return out
+
+
+def _is_public_path(path: str) -> bool:
+    if path in ("/login", "/logout", "/setup"):
+        return True
+    if path.startswith("/static"):
+        return True
+    return False
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    path = request.url.path
+
+    # Setup required first
+    if not auth.admin_exists() and path not in ("/setup", "/login"):
+        return RedirectResponse(url="/setup", status_code=303)
+
+    # If admin exists, require login for everything except login/setup/logout
+    if auth.admin_exists() and (not _is_public_path(path)):
+        u = auth.read_session(request.cookies.get(auth.SESSION_COOKIE, ""))
+        if not u:
+            return RedirectResponse(url="/login", status_code=303)
+        request.state.user = u
+
+    return await call_next(request)
+
+
+@app.get("/setup", response_class=HTMLResponse)
+def setup_get(request: Request):
+    if auth.admin_exists():
+        return RedirectResponse(url="/", status_code=303)
+    return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": None})
+
+
+@app.post("/setup")
+def setup_post(
+    request: Request,
+    username: str = Form(""),
+    password: str = Form(""),
+    password2: str = Form(""),
+):
+    if auth.admin_exists():
+        return RedirectResponse(url="/", status_code=303)
+
+    username = (username or "").strip()
+    if not username:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Username is required."})
+    if len(username) < 3:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Username must be at least 3 characters."})
+    if password != password2:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Passwords do not match."})
+    ok, msg = auth.validate_new_password(password)
+    if not ok:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": msg})
+
+    pw_hash = auth.hash_password(password)
+    auth.save_admin(username, pw_hash)
+
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.set_cookie(auth.SESSION_COOKIE, auth.make_session(username), httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/login", response_class=HTMLResponse)
+def login_get(request: Request):
+    if not auth.admin_exists():
+        return RedirectResponse(url="/setup", status_code=303)
+    return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": None})
+
+
+@app.post("/login")
+def login_post(
+    request: Request,
+    username: str = Form(""),
+    password: str = Form(""),
+):
+    if not auth.admin_exists():
+        return RedirectResponse(url="/setup", status_code=303)
+
+    admin = auth.load_admin()
+    if not admin:
+        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin."})
+
+    username = (username or "").strip()
+    if username != admin.username:
+        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid username or password."})
+    if not auth.verify_password(password, admin.password_hash):
+        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid username or password."})
+
+    resp = RedirectResponse(url="/", status_code=303)
+    resp.set_cookie(auth.SESSION_COOKIE, auth.make_session(username), httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/logout")
+def logout_post():
+    resp = RedirectResponse(url="/login", status_code=303)
+    resp.delete_cookie(auth.SESSION_COOKIE)
+    return resp
 
 
 @app.get("/", response_class=HTMLResponse)

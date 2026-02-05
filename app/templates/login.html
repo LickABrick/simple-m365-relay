@@ -1,0 +1,20 @@
+{% extends "auth_base.html" %}
+{% block content %}
+  <h1 class="text-lg font-semibold">Sign in</h1>
+  <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Use the admin account for Simple M365 Relay.</p>
+
+  <form method="post" action="/login" class="mt-6 space-y-3">
+    <div>
+      <label class="text-sm font-medium">Username</label>
+      <input name="username" autocomplete="username" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+    </div>
+    <div>
+      <label class="text-sm font-medium">Password</label>
+      <input name="password" type="password" autocomplete="current-password" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+    </div>
+    <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+      <i data-lucide="log-in" class="h-4 w-4"></i>
+      Sign in
+    </button>
+  </form>
+{% endblock %}

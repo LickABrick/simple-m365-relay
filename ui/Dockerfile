@@ -6,7 +6,7 @@ RUN apk add --no-cache \
     curl \
   && python3 -m venv /opt/venv \
   && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-  && /opt/venv/bin/pip install --no-cache-dir fastapi uvicorn jinja2 python-multipart pyyaml
+  && /opt/venv/bin/pip install --no-cache-dir fastapi uvicorn jinja2 python-multipart pyyaml itsdangerous argon2-cffi
 
 ENV PATH="/opt/venv/bin:$PATH"
 
