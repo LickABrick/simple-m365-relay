@@ -991,6 +991,20 @@
 
     /* pre blocks */
     pre { background: color-mix(in oklab, var(--card2) 80%, var(--card) 20%) !important; }
+
+    /* info/callout boxes (explicit colors; consistent in light + dark) */
+    .callout-info {
+      border-color: #93c5fd !important; /* blue-300 */
+      background-color: #bfdbfe !important; /* blue-200 */
+      color: #0f172a !important; /* slate-900 */
+    }
+    .callout-info .callout-icon { color: #1d4ed8 !important; /* blue-700 */ }
+    .dark .callout-info {
+      border-color: rgb(30 58 138 / 0.45) !important; /* blue-900/45 */
+      background-color: rgb(30 58 138 / 0.28) !important; /* blue-900/28 */
+      color: #dbeafe !important; /* blue-100 */
+    }
+    .dark .callout-info .callout-icon { color: #93c5fd !important; /* blue-300 */ }
   </style>
 </head>
 
@@ -1314,9 +1328,9 @@
             </div>
           </form>
 
-          <div class="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/25 dark:text-blue-100">
+          <div class="mt-4 callout-info rounded-2xl border p-4 text-sm shadow-sm">
             <div class="flex items-start gap-2">
-              <i data-lucide="info" class="mt-0.5 h-4 w-4 text-blue-700 dark:text-blue-300"></i>
+              <i data-lucide="info" class="callout-icon mt-0.5 h-4 w-4"></i>
               <div>
                 Ports/TLS and M365 OAuth settings are controlled by environment variables (docker compose).
               </div>
@@ -1382,9 +1396,9 @@
               </button>
             </form>
 
-            <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/25 dark:text-blue-100">
+            <div class="callout-info rounded-2xl border p-4 text-sm shadow-sm">
               <div class="flex items-start gap-2">
-                <i data-lucide="info" class="mt-0.5 h-4 w-4 text-blue-700 dark:text-blue-300"></i>
+                <i data-lucide="info" class="callout-icon mt-0.5 h-4 w-4"></i>
                 <div>
                   Pair this with <span class="font-semibold">Allowed From addresses</span> rules to prevent sender spoofing.
                 </div>
@@ -1478,9 +1492,9 @@
               </button>
             </form>
 
-            <div class="sm:col-span-2 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/25 dark:text-blue-100">
+            <div class="sm:col-span-2 callout-info rounded-2xl border p-4 text-sm shadow-sm">
               <div class="flex items-start gap-2">
-                <i data-lucide="info" class="mt-0.5 h-4 w-4 text-blue-700 dark:text-blue-300"></i>
+                <i data-lucide="info" class="callout-icon mt-0.5 h-4 w-4"></i>
                 <div>
                   The authenticated M365 user (<span class="mono">{{ env.MS365_SMTP_USER }}</span>) must have <span class="font-semibold">Send As</span> permissions for every mailbox/address you want to use as <span class="font-semibold">From</span>.
                 </div>
@@ -1498,9 +1512,9 @@
 
           <div class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
             {% if env.AUTO_TOKEN_REFRESH_MINUTES and env.AUTO_TOKEN_REFRESH_MINUTES != '0' %}
-            <div class="mb-3 rounded-2xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900 shadow-sm dark:border-blue-900/40 dark:bg-blue-950/25 dark:text-blue-100">
+            <div class="callout-info mb-3 rounded-2xl border p-3 text-xs shadow-sm">
               <div class="flex items-start gap-2">
-                <i data-lucide="info" class="mt-0.5 h-4 w-4 text-blue-700 dark:text-blue-300"></i>
+                <i data-lucide="info" class="callout-icon mt-0.5 h-4 w-4"></i>
                 <div>
                   Auto-refresh is enabled: the token is refreshed automatically every <span class="font-semibold">{{ env.AUTO_TOKEN_REFRESH_MINUTES }}</span> minutes.
                 </div>
