@@ -676,6 +676,8 @@ def index(request: Request):
 
 @app.post("/settings")
 def update_settings(
+    request: Request,
+    csrf_token: str = Form(""),
     hostname: str = Form(...),
     domain: str = Form(...),
     mynetworks: str = Form(""),
@@ -687,6 +689,7 @@ def update_settings(
     auto_refresh_minutes: str = Form("30"),
 ):
     """HTML form endpoint (kept for no-JS fallback)."""
+    require_csrf(request, csrf_token)
     cfg = load_cfg()
     cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
     cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
@@ -838,15 +841,17 @@ def api_settings_save(
 
 
 @app.post("/users/add")
-def users_add(login: str = Form(...), password: str = Form(...)):
+def users_add(request: Request, csrf_token: str = Form(""), login: str = Form(...), password: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     ensure_user(login.strip(), password)
     return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/users/delete")
-def users_del(login: str = Form(...)):
+def users_del(request: Request, csrf_token: str = Form(""), login: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     delete_user(login.strip())
     return RedirectResponse(url="/", status_code=303)
 
@@ -872,8 +877,9 @@ def api_users_delete(login: str = Form(...)):
 
 
 @app.post("/from/allow")
-def allow_from(login: str = Form(...), from_addr: str = Form(...)):
+def allow_from(request: Request, csrf_token: str = Form(""), login: str = Form(...), from_addr: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     cfg = load_cfg()
     login = login.strip()
     addrs = parse_addr_list(from_addr)
@@ -896,8 +902,9 @@ def allow_from(login: str = Form(...), from_addr: str = Form(...)):
 
 
 @app.post("/from/disallow")
-def disallow_from(login: str = Form(...), from_addr: str = Form(...)):
+def disallow_from(request: Request, csrf_token: str = Form(""), login: str = Form(...), from_addr: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     cfg = load_cfg()
     login = login.strip()
     addr = from_addr.strip().lower()
@@ -910,8 +917,9 @@ def disallow_from(login: str = Form(...), from_addr: str = Form(...)):
 
 
 @app.post("/from/default")
-def set_default_from(login: str = Form(...), from_addr: str = Form(...)):
+def set_default_from(request: Request, csrf_token: str = Form(""), login: str = Form(...), from_addr: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     cfg = load_cfg()
     cfg.setdefault("default_from", {})
     from urllib.parse import quote
@@ -999,14 +1007,16 @@ def api_from_default(login: str = Form(...), from_addr: str = Form(...)):
 
 
 @app.post("/postfix/reload")
-def btn_reload():
+def btn_reload(request: Request, csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
     out = postfix_reload()
     return PlainTextResponse(out)
 
 
 @app.post("/apply")
-def apply_changes():
+def apply_changes(request: Request, csrf_token: str = Form("")):
     # HTML fallback
+    require_csrf(request, csrf_token)
     out = render_and_reload()
 
     # Mark current config as applied.
@@ -1038,15 +1048,17 @@ def api_apply_changes():
 
 
 @app.post("/token/start")
-def token_start():
+def token_start(request: Request, csrf_token: str = Form("")):
     # HTML fallback
+    require_csrf(request, csrf_token)
     start_device_flow_background()
     return RedirectResponse(url="/#oauth", status_code=303)
 
 
 @app.post("/token/refresh")
-def token_refresh():
+def token_refresh(request: Request, csrf_token: str = Form("")):
     # HTML fallback
+    require_csrf(request, csrf_token)
     from urllib.parse import quote
 
     out = refresh_token_now()
@@ -1088,12 +1100,15 @@ def api_token_refresh_log():
 
 @app.post("/testmail")
 def testmail(
+    request: Request,
+    csrf_token: str = Form(""),
     to_addr: str = Form(...),
     from_addr: str = Form(...),
     subject: str = Form("Test"),
     body: str = Form("Does it work?"),
 ):
     # HTML fallback
+    require_csrf(request, csrf_token)
     from urllib.parse import quote
 
     out = send_test_mail(to_addr, from_addr, subject, body)

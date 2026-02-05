@@ -1119,6 +1119,7 @@
               <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Changes saved</div>
               <div class="mt-0.5">Not applied yet. Postfix is still running with the old config.</div>
               <form method="post" action="/apply" class="mt-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Applies saved settings: regenerate Postfix config + reload Postfix">
                   <i data-lucide="check-circle" class="h-4 w-4"></i>
                   Apply Changes
@@ -1140,6 +1141,7 @@
                   Diagnostics
                 </a>
                 <form method="post" action="/postfix/reload">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Reloads Postfix (keeps current config)">
                     <i data-lucide="rotate-cw" class="h-3.5 w-3.5"></i>
                     Reload Postfix
@@ -1247,6 +1249,7 @@
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Postfix and OAuth settings. Saved vs applied is explicit.</p>
 
           <form id="settingsForm" method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <div>
               <label class="text-sm font-medium">Hostname</label>
               <input name="hostname" value="{{ cfg.hostname }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
@@ -1360,6 +1363,7 @@
                     </div>
                     <div class="col-span-12 sm:col-span-4 flex justify-end">
                       <form method="post" action="/users/delete" class="inline-flex">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <input type="hidden" name="login" value="{{ u }}" />
                         <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/40" title="Delete user">
                           <i data-lucide="trash-2" class="h-4 w-4"></i>
@@ -1376,6 +1380,7 @@
 
           <div class="mt-4 grid grid-cols-1 gap-4">
             <form id="usersAddForm" method="post" action="/users/add" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Add / update user</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">These are SMTP AUTH credentials for clients connecting to this relay.</div>
               <input name="login" placeholder="username" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
@@ -1437,6 +1442,7 @@
                       <div class="flex flex-wrap gap-2">
                         {% for a in addrs %}
                           <form method="post" action="/from/disallow" class="inline-flex">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                             <input type="hidden" name="login" value="{{ login }}" />
                             <input type="hidden" name="from_addr" value="{{ a }}" />
                             <button type="submit" class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Click to remove">
@@ -1460,6 +1466,7 @@
 
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <form id="fromAllowForm" method="post" action="/from/allow" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Add allowed From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same login again to add more From addresses.</div>
               <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
@@ -1472,6 +1479,7 @@
             </form>
 
             <form id="defaultFromForm" method="post" action="/from/default" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Set fallback From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Stored per SMTP AUTH user (login). Used when clients don’t specify a From address.</div>
               <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
@@ -1536,12 +1544,14 @@
               </div>
               <div class="flex flex-col gap-2 sm:flex-row">
                 <form id="oauthRefreshForm" method="post" action="/token/refresh">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button id="oauthRefreshBtn" type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50" title="Manually refresh the OAuth token (uses existing refresh token)">
                     <i data-lucide="wand-2" class="h-4 w-4"></i>
                     Refresh token
                   </button>
                 </form>
                 <form id="oauthReauthForm" method="post" action="/token/start">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button id="oauthReauthBtn" type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Start a new OAuth device flow and overwrite the token in the shared volume">
                     <i data-lucide="refresh-cw" class="h-4 w-4"></i>
                     Restart device flow
@@ -1587,6 +1597,7 @@
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Sends via local <span class="mono">sendmail</span> in the Postfix container (so it goes through the configured relay).</p>
 
           <form id="testmailForm" method="post" action="/testmail" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <div class="sm:col-span-1">
               <label class="text-sm font-medium">From</label>
               <div class="mt-1 flex gap-2">
