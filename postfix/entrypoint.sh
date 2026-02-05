@@ -34,6 +34,15 @@ mkdir -p /etc/sasl2
 if [ -f "$DATA_DIR/sasl/sasldb2" ] && [ ! -s "$DATA_DIR/sasl/sasldb2" ]; then
   rm -f "$DATA_DIR/sasl/sasldb2" || true
 fi
+
+# If there's an existing sasldb2 but it's not readable by this image (db format mismatch), move it aside.
+if [ -f "$DATA_DIR/sasl/sasldb2" ]; then
+  if ! sasldblistusers2 -f "$DATA_DIR/sasl/sasldb2" >/dev/null 2>&1; then
+    ts=$(date +%s 2>/dev/null || echo 0)
+    mv "$DATA_DIR/sasl/sasldb2" "$DATA_DIR/sasl/sasldb2.bad.${ts}" 2>/dev/null || rm -f "$DATA_DIR/sasl/sasldb2" || true
+  fi
+fi
+
 if [ -f "$DATA_DIR/sasl/sasldb2" ]; then
   ln -sf "$DATA_DIR/sasl/sasldb2" /etc/sasl2/sasldb2
 fi
