@@ -50,6 +50,13 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"  # put behind reverse proxy + basic auth
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       UI_BIND: ${UI_BIND:-0.0.0.0}
       UI_PORT: ${UI_PORT:-8000}
