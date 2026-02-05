@@ -38,7 +38,7 @@ smtpd_tls_received_header = yes
 # TLS outbound (smtp)
 smtp_tls_security_level = encrypt
 smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
-smtp_tls_session_cache_database = btree:${{data_directory}}/smtp_scache
+smtp_tls_session_cache_database = lmdb:${{data_directory}}/smtp_scache
 smtp_tls_loglevel = 1
 smtp_always_send_ehlo = yes
 
@@ -49,12 +49,12 @@ smtpd_sasl_security_options = noanonymous
 broken_sasl_auth_clients = yes
 
 # Enforce "From" ownership for authenticated users (generated map)
-smtpd_sender_login_maps = hash:/etc/postfix/sender_login_maps
+smtpd_sender_login_maps = lmdb:/etc/postfix/sender_login_maps
 smtpd_sender_restrictions = reject_sender_login_mismatch
 
 # XOAUTH2 for outbound relay
 smtp_sasl_auth_enable = yes
-smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_password_maps = lmdb:/etc/postfix/sasl_passwd
 smtp_sasl_security_options =
 smtp_sasl_mechanism_filter = xoauth2
 
@@ -78,6 +78,8 @@ pickup    unix  n       -       n       60      1       pickup
 cleanup   unix  n       -       n       -       0       cleanup
 qmgr      unix  n       -       n       300     1       qmgr
 #qmgr     unix  n       -       n       300     1       oqmgr
+
+tlsmgr    unix  -       -       n       1000?   1       tlsmgr
 
 rewrite   unix  -       -       n       -       -       trivial-rewrite
 bounce    unix  -       -       n       -       0       bounce

@@ -45,6 +45,7 @@ RUN apk add --no-cache \
 # XOAUTH2 plugin + tool
 COPY --from=builder /usr/lib/sasl2/ /usr/lib/sasl2/
 COPY --from=builder /usr/bin/sasl-xoauth2-tool /usr/bin/sasl-xoauth2-tool
+COPY --from=builder /etc/sasl-xoauth2.conf /etc/sasl-xoauth2.conf
 
 WORKDIR /opt/ms365-relay
 COPY postfix/render.py /opt/ms365-relay/postfix/render.py
