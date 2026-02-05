@@ -43,11 +43,15 @@ python3 /opt/ms365-relay/postfix/render.py \
   --tls-key "$KEY_PATH"
 
 # Render sasl-xoauth2 config (used by the sasl-xoauth2 plugin for token refresh)
-# Device-flow apps are usually public clients -> no client_secret required.
-if [ -n "${MS365_CLIENT_ID:-}" ]; then
+# Match https://std.rocks/relay-ms365-oauth.html : client_secret may be empty but MUST exist.
+if [ -n "${MS365_CLIENT_ID:-}" ] && [ -n "${MS365_TENANT_ID:-}" ]; then
   cat > /etc/sasl-xoauth2.conf <<EOF
 {
-  "client_id": "${MS365_CLIENT_ID}"
+  "client_id": "${MS365_CLIENT_ID}",
+  "client_secret": "",
+  "token_endpoint": "https://login.microsoftonline.com/${MS365_TENANT_ID}/oauth2/v2.0/token",
+  "log_full_trace_on_failure": "yes",
+  "log_to_syslog_on_failure": "yes"
 }
 EOF
 fi
