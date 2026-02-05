@@ -26,7 +26,6 @@ services:
 
       MS365_TENANT_ID: ${MS365_TENANT_ID:-}
       MS365_CLIENT_ID: ${MS365_CLIENT_ID:-}
-      MS365_CLIENT_SECRET: ${MS365_CLIENT_SECRET:-}
 
       CONTROL_BIND: ${CONTROL_BIND:-0.0.0.0}
       CONTROL_PORT: ${CONTROL_PORT:-18080}
@@ -56,7 +55,6 @@ services:
       MS365_SMTP_USER: ${MS365_SMTP_USER:-postfix@example.com}
       MS365_TENANT_ID: ${MS365_TENANT_ID:-}
       MS365_CLIENT_ID: ${MS365_CLIENT_ID:-}
-      MS365_CLIENT_SECRET: ${MS365_CLIENT_SECRET:-}
     volumes:
       - ms365-relay-data:/data
     depends_on:
