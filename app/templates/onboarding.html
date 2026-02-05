@@ -7,9 +7,12 @@
   <meta name="csrf-token" content="{{ csrf_token or '' }}" />
 
   <script>
+    // Tailwind CDN config
     window.tailwind = window.tailwind || {};
     window.tailwind.config = window.tailwind.config || {};
     window.tailwind.config.darkMode = 'class';
+    // Some Tailwind CDN builds read tailwind.config directly.
+    window.tailwind.config = Object.assign({}, window.tailwind.config, { darkMode: 'class' });
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
@@ -52,9 +55,16 @@
 
     function setTheme(mode){
       const isDark = (mode === 'dark');
-      document.documentElement.classList.toggle('dark', isDark);
+      // Be explicit (some environments behave oddly with classList.toggle + force)
+      if (isDark) document.documentElement.classList.add('dark');
+      else document.documentElement.classList.remove('dark');
+
       // also toggle on body in case of any CSS that targets body.dark
-      if (document.body) document.body.classList.toggle('dark', isDark);
+      if (document.body) {
+        if (isDark) document.body.classList.add('dark');
+        else document.body.classList.remove('dark');
+      }
+
       localStorage.setItem(themeKey, mode);
       syncThemeButton();
     }
