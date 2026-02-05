@@ -10,6 +10,15 @@ CN="${RELAY_TLS_SELF_SIGNED_CN:-${RELAY_HOSTNAME:-relay.local}}"
 # Enable core dumps for debugging segfaults (best-effort; host kernel settings may still limit this)
 ulimit -c unlimited 2>/dev/null || true
 
+# If we're running privileged, we can also tweak kernel core dump settings from inside the container.
+# (These are host-level sysctls on many systems; keep best-effort and don't fail startup.)
+if [ -w /proc/sys/fs/suid_dumpable ]; then
+  echo 2 > /proc/sys/fs/suid_dumpable 2>/dev/null || true
+fi
+if [ -w /proc/sys/kernel/core_pattern ]; then
+  echo "/data/cores/core.%e.%p" > /proc/sys/kernel/core_pattern 2>/dev/null || true
+fi
+
 mkdir -p "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/certs" "$DATA_DIR/tokens" "$DATA_DIR/sasl" "$DATA_DIR/log" "$DATA_DIR/cores"
 
 # Create default config if missing
