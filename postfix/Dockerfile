@@ -42,6 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4 \
     libjsoncpp25 \
     busybox \
+    busybox-syslogd \
     gdb \
     python3 \
     python3-pip \
