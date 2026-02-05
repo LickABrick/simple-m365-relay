@@ -23,6 +23,7 @@ templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
 app = FastAPI(title="Simple M365 Relay")
 
 from . import auth  # noqa: E402
+from . import lockout  # noqa: E402
 from .security import get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
@@ -495,15 +496,32 @@ def login_post(
     if expected and csrf_token != expected:
         return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid CSRF token.", "csrf_token": expected})
 
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "")
+    rem = lockout.get_lock_remaining(ip)
+    if rem > 0:
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "title": "Sign in", "error": f"Too many failed attempts. Try again in {rem} seconds.", "csrf_token": expected},
+        )
+
     admin = auth.load_admin()
     if not admin:
         return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin.", "csrf_token": expected})
 
     username = (username or "").strip()
-    if username != admin.username:
-        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid username or password."})
-    if not auth.verify_password(password, admin.password_hash):
-        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid username or password."})
+    if username != admin.username or (not auth.verify_password(password, admin.password_hash)):
+        count, lock_for = lockout.record_failure(ip)
+        if lock_for:
+            return templates.TemplateResponse(
+                "login.html",
+                {"request": request, "title": "Sign in", "error": f"Too many failed attempts. Locked for {lock_for//60} minutes.", "csrf_token": expected},
+            )
+        return templates.TemplateResponse(
+            "login.html",
+            {"request": request, "title": "Sign in", "error": "Invalid username or password.", "csrf_token": expected},
+        )
+
+    lockout.clear(ip)
 
     resp = RedirectResponse(url="/", status_code=303)
     csrf = auth.new_csrf_token()
