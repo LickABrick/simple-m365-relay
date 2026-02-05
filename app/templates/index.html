@@ -295,6 +295,17 @@
       }
     }
 
+    function _extractLastRefresh(log){
+      // log lines look like: [YYYY-MM-DD HH:MM:SS] refresh_token\n...\nToken refresh succeeded.
+      const s = String(log || '');
+      const blocks = s.trim().split(/\n\[(?=\d{4}-\d{2}-\d{2} )/g);
+      const last = blocks[blocks.length-1] || '';
+      const m = last.match(/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
+      const ts = m ? m[1] : null;
+      const ok = /succeeded/i.test(last) && !/failed/i.test(last);
+      return { ts, ok, raw: last };
+    }
+
     async function refreshStatus(){
       try {
         const r = await fetch('/api/status', { cache: 'no-store' });
@@ -362,6 +373,17 @@
         // token refresh log (tail)
         const tr = document.getElementById('tokenRefreshLogPre');
         if (tr && typeof j.token_refresh_log !== 'undefined') tr.textContent = j.token_refresh_log || '';
+
+        // last refresh indicator
+        const lr = document.getElementById('oauthLastRefresh');
+        if (lr && typeof j.token_refresh_log !== 'undefined') {
+          const info = _extractLastRefresh(j.token_refresh_log || '');
+          if (info.ts) {
+            lr.textContent = info.ts + (info.ok ? ' (ok)' : ' (check log)');
+          } else {
+            lr.textContent = '(unknown)';
+          }
+        }
 
         // From identities: keep dropdown usable on refresh
         const sel = document.getElementById('fromSelect');
@@ -1293,6 +1315,9 @@
                 </div>
                 <div class="mt-2 text-xs text-slate-600 dark:text-slate-300">
                   You normally don’t need device flow unless you want to re-authenticate or rotate the token.
+                </div>
+                <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Last refresh: <span id="oauthLastRefresh" class="mono">(unknown)</span>
                 </div>
                 {% if not env.AUTO_TOKEN_REFRESH_MINUTES or env.AUTO_TOKEN_REFRESH_MINUTES == '0' %}
                 <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
