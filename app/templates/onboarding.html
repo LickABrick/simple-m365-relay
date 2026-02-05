@@ -144,6 +144,37 @@
       refreshCompletionFromForm();
       refreshTokenBits();
 
+      function _setProgress(n){
+        const stepNum = document.getElementById('stepNum');
+        if (stepNum) stepNum.textContent = String(n);
+
+        const p1 = document.getElementById('p1Dot');
+        const p2 = document.getElementById('p2Dot');
+        const p3 = document.getElementById('p3Dot');
+        const pb1 = document.getElementById('progressBar');
+        const pb2 = document.getElementById('progressBar2');
+
+        const done = (el) => {
+          el?.classList.remove('bg-slate-300','dark:bg-slate-700');
+          el?.classList.add('bg-emerald-500');
+        };
+        const active = (el) => {
+          el?.classList.remove('bg-slate-300','dark:bg-slate-700','bg-emerald-500');
+          el?.classList.add('bg-blue-600');
+        };
+        const todo = (el) => {
+          el?.classList.remove('bg-blue-600','bg-emerald-500');
+          el?.classList.add('bg-slate-300','dark:bg-slate-700');
+        };
+
+        if (n === 1) { active(p1); todo(p2); todo(p3); }
+        if (n === 2) { done(p1); active(p2); todo(p3); }
+        if (n === 3) { done(p1); done(p2); active(p3); }
+
+        if (pb1) pb1.style.width = (n >= 2) ? '100%' : '0%';
+        if (pb2) pb2.style.width = (n >= 3) ? '100%' : '0%';
+      }
+
       function showStep(n){
         const stepIds = ['step1','step2','step3'];
         for (let i=0;i<stepIds.length;i++){
@@ -151,25 +182,14 @@
           const el = document.getElementById(id);
           if (el) el.classList.toggle('hidden', (i+1)!==n);
         }
-        const btns = [{id:'step1Btn',n:1},{id:'step2Btn',n:2},{id:'step3Btn',n:3}];
-        for (const b of btns){
-          const x = document.getElementById(b.id);
-          if (!x) continue;
-          const active = (b.n===n);
-          x.classList.toggle('bg-blue-600', active);
-          x.classList.toggle('text-white', active);
-          x.classList.toggle('border', !active);
-        }
+        _setProgress(n);
         try { localStorage.setItem('sm365r_onboarding_step', String(n)); } catch(e) {}
       }
 
       const savedStep = parseInt(localStorage.getItem('sm365r_onboarding_step') || '1', 10) || 1;
       showStep(Math.min(3, Math.max(1, savedStep)));
 
-      document.getElementById('step1Btn')?.addEventListener('click', () => showStep(1));
-      document.getElementById('step2Btn')?.addEventListener('click', () => showStep(2));
-      document.getElementById('step3Btn')?.addEventListener('click', () => showStep(3));
-
+      // navigation only via next/previous buttons
       document.getElementById('step1Next')?.addEventListener('click', () => showStep(2));
       document.getElementById('step2Back')?.addEventListener('click', () => showStep(1));
       document.getElementById('step2Next')?.addEventListener('click', () => showStep(3));
@@ -342,22 +362,40 @@
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Fill in the required values, then click <b>Save</b>. This unlocks the dashboard.</p>
 
           <div class="mt-4">
-            <div class="mb-3 flex flex-wrap items-center gap-2">
-              <button type="button" id="step1Btn" class="stepBtn inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
-                <i data-lucide="settings" class="h-4 w-4"></i>
-                Step 1 · Relay
-              </button>
-              <button type="button" id="step2Btn" class="stepBtn inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
-                <i data-lucide="key-round" class="h-4 w-4"></i>
-                Step 2 · OAuth IDs
-              </button>
-              <button type="button" id="step3Btn" class="stepBtn inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
-                <i data-lucide="shield" class="h-4 w-4"></i>
-                Step 3 · OAuth login (optional)
-              </button>
+
+            <!-- Stepper progress (non-clickable) -->
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+              <div class="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <div class="flex items-center gap-2">
+                  <span id="p1Dot" class="h-3 w-3 rounded-full bg-blue-600"></span>
+                  <span>Relay</span>
+                </div>
+                <div class="flex-1 px-3">
+                  <div class="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800">
+                    <div id="progressBar" class="h-1.5 rounded-full bg-blue-600" style="width: 0%"></div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span id="p2Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+                  <span>OAuth IDs</span>
+                </div>
+                <div class="flex-1 px-3 hidden sm:block">
+                  <div class="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800">
+                    <div id="progressBar2" class="h-1.5 rounded-full bg-blue-600" style="width: 0%"></div>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span id="p3Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></span>
+                  <span>OAuth login</span>
+                  <span class="text-[10px] font-semibold text-slate-400">optional</span>
+                </div>
+              </div>
+              <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                Step <span id="stepNum">1</span> of 3
+              </div>
             </div>
 
-            <form id="settingsForm" method="post" action="/settings" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <form id="settingsForm" method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <section id="step1" class="stepSection sm:col-span-2">
                 <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                   <div class="text-sm font-semibold">Outbound relay</div>
