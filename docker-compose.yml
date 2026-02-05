@@ -34,10 +34,6 @@ services:
     expose:
       - "18080"
 
-    # Debug: allow core dumps from postfix daemons (signal 11 in smtp client)
-    ulimits:
-      core: -1
-
   ui:
     build:
       context: .
