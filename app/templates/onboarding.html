@@ -489,26 +489,33 @@
       </div>
 
       <div class="mt-4">
-        <div class="grid grid-cols-6 items-center gap-2">
-          {% for i in [1,2,3,4,5,6] %}
-          <div class="flex items-center">
-            <div id="p{{ i }}Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
-            {% if i < 6 %}
-            <div class="ml-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800">
-              <div id="p{{ i }}Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div>
-            </div>
-            {% endif %}
-          </div>
-          {% endfor %}
+        <!-- full-width stepper line -->
+        <div class="flex items-center">
+          <div id="p1Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p1Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p2Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p2Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p3Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p3Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p4Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p4Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p5Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
+          <div class="mx-2 h-1.5 flex-1 rounded-full bg-slate-200 dark:bg-slate-800"><div id="p5Bar" class="h-1.5 rounded-full bg-blue-600" style="width:0%"></div></div>
+
+          <div id="p6Dot" class="h-3 w-3 rounded-full bg-slate-300 dark:bg-slate-700"></div>
         </div>
 
         <div class="mt-3 grid grid-cols-6 gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
-          <div>Relay</div>
-          <div>OAuth IDs</div>
-          <div>OAuth login<br/><span class="font-normal">(optional)</span></div>
-          <div>Test mail<br/><span class="font-normal">(optional)</span></div>
-          <div>Add user<br/><span class="font-normal">(optional)</span></div>
-          <div>Finish</div>
+          <div class="text-left">Relay</div>
+          <div class="text-center">OAuth IDs</div>
+          <div class="text-center">OAuth login<br/><span class="font-normal">(optional)</span></div>
+          <div class="text-center">Test mail<br/><span class="font-normal">(optional)</span></div>
+          <div class="text-center">Add user<br/><span class="font-normal">(optional)</span></div>
+          <div class="text-right">Finish</div>
         </div>
       </div>
     </div>
