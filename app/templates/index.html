@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="h-full">
+<html lang="en" class="h-full scroll-smooth">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -27,14 +27,17 @@
     }
 
     function setTheme(mode){
-      document.documentElement.classList.toggle('dark', mode === 'dark');
+      const isDark = (mode === 'dark');
+      document.documentElement.classList.toggle('dark', isDark);
+      // also toggle on body in case of any CSS that targets body.dark
+      if (document.body) document.body.classList.toggle('dark', isDark);
       localStorage.setItem(themeKey, mode);
       syncThemeButton();
     }
 
     function toggleTheme(){
-      const nowDark = !document.documentElement.classList.contains('dark');
-      setTheme(nowDark ? 'dark' : 'light');
+      const isDark = document.documentElement.classList.contains('dark');
+      setTheme(isDark ? 'light' : 'dark');
     }
 
     function syncThemeButton(){
@@ -46,8 +49,8 @@
       btn.setAttribute('title', isDark ? 'Switch to light mode' : 'Switch to dark mode');
     }
 
-    function setActiveNav(){
-      const hash = (location.hash || '#status');
+    function setActiveNavById(id){
+      const hash = '#' + id;
       for (const a of document.querySelectorAll('a[data-nav]')) {
         const active = a.getAttribute('href') === hash;
         a.classList.toggle('bg-slate-100', active);
@@ -57,11 +60,53 @@
       }
     }
 
-    window.addEventListener('hashchange', setActiveNav);
+    function initScrollSpy(){
+      const sections = Array.from(document.querySelectorAll('section [id]'));
+      if (!sections.length) return;
+
+      const obs = new IntersectionObserver((entries) => {
+        // choose the most visible intersecting section
+        const visible = entries.filter(e => e.isIntersecting)
+          .sort((a,b) => (b.intersectionRatio || 0) - (a.intersectionRatio || 0));
+        if (visible[0] && visible[0].target && visible[0].target.id) {
+          setActiveNavById(visible[0].target.id);
+        }
+      }, {
+        // top bar is sticky; bias activation a bit below it
+        root: null,
+        threshold: [0.25, 0.5, 0.75],
+        rootMargin: '-20% 0px -70% 0px'
+      });
+
+      for (const el of sections) obs.observe(el);
+
+      // initial
+      const initial = (location.hash || '#status').slice(1);
+      setActiveNavById(initial || 'status');
+    }
+
+    // smooth scrolling for sidebar clicks (and update hash)
+    function initNavClicks(){
+      for (const a of document.querySelectorAll('a[data-nav]')) {
+        a.addEventListener('click', (e) => {
+          const href = a.getAttribute('href') || '';
+          if (!href.startsWith('#')) return;
+          const id = href.slice(1);
+          const target = document.getElementById(id);
+          if (!target) return;
+          e.preventDefault();
+          history.replaceState(null, '', href);
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          setActiveNavById(id);
+        });
+      }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       try { lucide.createIcons(); } catch(e) {}
       syncThemeButton();
-      setActiveNav();
+      initNavClicks();
+      initScrollSpy();
     });
   </script>
 
