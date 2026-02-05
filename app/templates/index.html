@@ -424,36 +424,13 @@
     }
 
     function initAutoRefresh(){
-      const key = 'simple-m365-relay-autorefresh';
-      const cb = document.getElementById('autoRefresh');
-      if (!cb) return;
-      cb.checked = (localStorage.getItem(key) === '1');
-      let timer = null;
-
-      function start(){
-        if (timer) return;
-        timer = window.setInterval(refreshStatus, 5000);
-      }
-      function stop(){
-        if (!timer) return;
-        window.clearInterval(timer);
-        timer = null;
-      }
-
-      cb.addEventListener('change', () => {
-        localStorage.setItem(key, cb.checked ? '1' : '0');
-        if (cb.checked) { refreshStatus(); start(); } else { stop(); }
-      });
-
-      const btn = document.getElementById('refreshBtn');
-      if (btn) btn.addEventListener('click', () => refreshStatus());
-
-      if (cb.checked) { refreshStatus(); start(); }
+      // Always-on auto refresh (15s)
+      refreshStatus();
+      window.setInterval(refreshStatus, 15000);
     }
 
     function syncPendingFromApi(pending){
-      const btn = document.getElementById('applyBtn');
-      if (btn) btn.disabled = !pending;
+      // Apply Changes button exists only in the pending banner now.
 
       const banner = document.getElementById('pendingBanner');
       if (banner) banner.classList.toggle('hidden', !pending);
@@ -1163,6 +1140,13 @@
                   <i data-lucide="download" class="h-3.5 w-3.5"></i>
                   Diagnostics
                 </a>
+
+                <form method="post" action="/postfix/reload">
+                  <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Reloads Postfix (keeps current config)">
+                    <i data-lucide="rotate-cw" class="h-3.5 w-3.5"></i>
+                    Reload Postfix
+                  </button>
+                </form>
               </div>
             </div>
           </div>
@@ -1191,28 +1175,7 @@
             </div>
 
             <div class="flex flex-wrap items-center gap-2">
-              <button type="button" id="refreshBtn" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
-                <i data-lucide="refresh-cw" class="h-4 w-4"></i>
-                Refresh
-              </button>
-
-              <label class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Auto refresh status + logs">
-                <input id="autoRefresh" type="checkbox" class="h-4 w-4" />
-                Auto refresh
-              </label>
-
-              <form method="post" action="/apply">
-                <button type="submit" id="applyBtn" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50" title="Applies saved settings: regenerate Postfix config + reload Postfix" {% if not pending %}disabled{% endif %}>
-                  <i data-lucide="check-circle" class="h-4 w-4"></i>
-                  Apply Changes
-                </button>
-              </form>
-              <form method="post" action="/postfix/reload">
-                <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Reloads Postfix (keeps current config)">
-                  <i data-lucide="rotate-cw" class="h-4 w-4"></i>
-                  Reload
-                </button>
-              </form>
+              <!-- auto-refresh is always on (15s). No manual refresh controls. -->
             </div>
           </div>
 
