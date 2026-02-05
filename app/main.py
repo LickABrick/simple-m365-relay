@@ -344,6 +344,7 @@ def index(request: Request):
             "postfix_ok": _best_effort_health(),
             "users": list_users(),
             "device_flow_log": device_flow_log(),
+            "token_refresh_log": get_token_refresh_log(),
             "token_exp_ts": token_exp_ts,
             "pending": pending,
             "from_identities": from_identities(cfg, ms365_user),
@@ -665,6 +666,7 @@ def api_status():
     mailq_out = (_control_get("/mailq").get("mailq") or "")
     qsize = parse_queue_size(mailq_out)
     mail_log = (_control_get("/maillog").get("maillog") or "")
+    token_refresh_log = get_token_refresh_log()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
@@ -682,6 +684,7 @@ def api_status():
         "mail_log": mail_log,
         "mail_log_warn": _extract_recent_warnings(mail_log),
         "token_exp_ts": token_exp_ts,
+        "token_refresh_log": token_refresh_log,
         "from_identities": from_identities(cfg, ms365_user),
         "env": {
             "MS365_SMTP_USER": ms365_user,
