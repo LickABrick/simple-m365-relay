@@ -21,6 +21,9 @@ fi
 
 mkdir -p "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/certs" "$DATA_DIR/tokens" "$DATA_DIR/sasl" "$DATA_DIR/log" "$DATA_DIR/cores"
 
+# Ensure Postfix daemons can update token files (sasl-xoauth2 refresh writes a temp file next to the token)
+chown -R postfix:postfix "$DATA_DIR/tokens" 2>/dev/null || true
+
 # Create default config if missing
 if [ ! -f "$CFG_JSON" ]; then
   cat > "$CFG_JSON" <<'EOF'
