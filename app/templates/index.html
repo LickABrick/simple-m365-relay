@@ -1239,12 +1239,17 @@
             </div>
 
             <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-              <div class="text-sm font-semibold">M365 note (Option A)</div>
+              <div class="text-sm font-semibold">Microsoft 365 “Send As” (meerdere From-adressen)</div>
               <div class="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                You authenticate as <span class="mono">{{ env.MS365_SMTP_USER }}</span> and set the <span class="font-semibold">From</span> address per mail.
+                De relay logt altijd in als <span class="mono">{{ env.MS365_SMTP_USER }}</span>. De <span class="font-semibold">From</span> die je mail gebruikt mag je per bericht kiezen, maar moet wél toegestaan zijn.
               </div>
               <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
-                Make sure the relay user has <span class="font-semibold">Send As</span> permissions for each From mailbox/alias.
+                <div class="font-semibold">Checklist</div>
+                <ul class="mt-2 list-disc pl-5 space-y-1">
+                  <li>In M365: geef deze relay-user <span class="font-semibold">Send As</span> rechten op elke mailbox/alias die je als From wilt gebruiken.</li>
+                  <li>In deze UI: voeg dezelfde From-adressen toe onder <span class="font-semibold">Allowed From addresses</span> voor de bijbehorende SMTP user.</li>
+                  <li>Na wijzigingen: <span class="font-semibold">Apply Changes</span> (anders blijven ze “pending”).</li>
+                </ul>
               </div>
             </div>
           </div>
