@@ -481,11 +481,9 @@
         try {
           const r = await fetch('/api/device-flow-log', { cache: 'no-store' });
           const j = await r.json();
-          const log = j.log || '';
-          const m = log.match(/open the page\s+(https?:\/\/\S+)\s+and enter the code\s+([A-Z0-9]+)/i);
-          if (m) {
-            const url = m[1];
-            const code = m[2];
+          const url = j.url;
+          const code = j.code;
+          if (url && code) {
             const a = document.getElementById('deviceFlowUrl');
             const c = document.getElementById('deviceFlowCode');
             if (a) { a.href = url; a.textContent = url; }

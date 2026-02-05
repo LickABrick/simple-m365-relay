@@ -1275,8 +1275,64 @@ def api_token_refresh():
 
 
 @app.get("/api/device-flow-log")
+def _parse_device_flow_log(log: str) -> dict:
+    import re
+
+    txt = (log or "")
+
+    # URL
+    url = None
+    m = re.search(r"https?://\S*devicelogin\S*", txt, re.IGNORECASE)
+    if m:
+        url = m.group(0).rstrip(').,;')
+    else:
+        m2 = re.search(r"microsoft\.com/devicelogin", txt, re.IGNORECASE)
+        if m2:
+            url = "https://microsoft.com/devicelogin"
+
+    # Code (best effort)
+    code = None
+    m = re.search(r"\b([A-Z0-9]{4,}-[A-Z0-9]{4,})\b", txt)
+    if m:
+        code = m.group(1)
+    else:
+        m2 = re.search(r"code\s*[: ]\s*([A-Z0-9]{8,})\b", txt, re.IGNORECASE)
+        if m2:
+            code = m2.group(1)
+
+    # Exit code
+    exit_code = None
+    m = re.search(r"\[exit\s+(\d+)\]", txt)
+    if m:
+        try:
+            exit_code = int(m.group(1))
+        except Exception:
+            exit_code = None
+
+    done = exit_code is not None
+    ok = (exit_code == 0) if done else False
+
+    # Error hint
+    err = None
+    if done and exit_code != 0:
+        # pick a helpful last non-empty line
+        lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
+        if lines:
+            err = lines[-1][:200]
+
+    return {
+        "url": url,
+        "code": code,
+        "done": done,
+        "ok": ok,
+        "exit": exit_code,
+        "error": err,
+    }
+
+
 def api_device_flow_log():
-    return {"log": get_device_flow_log()}
+    log = get_device_flow_log()
+    return {"log": log, **_parse_device_flow_log(log)}
 
 
 @app.get("/api/token-refresh-log")
