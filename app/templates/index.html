@@ -9,8 +9,7 @@
   <script>
     // IMPORTANT: Tailwind CDN defaults to darkMode: 'media'. Force class-based.
     // Must be defined BEFORE loading the CDN script.
-    tailwind = tailwind || {};
-    tailwind.config = { darkMode: 'class' };
+    window.tailwind = { config: { darkMode: 'class' } };
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -61,24 +60,25 @@
     }
 
     function initScrollSpy(){
-      const sections = Array.from(document.querySelectorAll('section [id]'));
-      if (!sections.length) return;
+      const ids = ['status','settings','users','senders','oauth','logs'];
+      const els = ids.map(id => document.getElementById(id)).filter(Boolean);
+      if (!els.length) return;
 
       const obs = new IntersectionObserver((entries) => {
-        // choose the most visible intersecting section
-        const visible = entries.filter(e => e.isIntersecting)
-          .sort((a,b) => (b.intersectionRatio || 0) - (a.intersectionRatio || 0));
-        if (visible[0] && visible[0].target && visible[0].target.id) {
-          setActiveNavById(visible[0].target.id);
-        }
+        // pick the entry closest to the top that is intersecting
+        const intersecting = entries.filter(e => e.isIntersecting);
+        if (!intersecting.length) return;
+        intersecting.sort((a,b) => Math.abs(a.boundingClientRect.top) - Math.abs(b.boundingClientRect.top));
+        const id = intersecting[0].target && intersecting[0].target.id;
+        if (id) setActiveNavById(id);
       }, {
-        // top bar is sticky; bias activation a bit below it
         root: null,
-        threshold: [0.25, 0.5, 0.75],
-        rootMargin: '-20% 0px -70% 0px'
+        // activate when the section passes under the sticky header
+        rootMargin: '-96px 0px -70% 0px',
+        threshold: [0.01, 0.1, 0.25]
       });
 
-      for (const el of sections) obs.observe(el);
+      for (const el of els) obs.observe(el);
 
       // initial
       const initial = (location.hash || '#status').slice(1);
