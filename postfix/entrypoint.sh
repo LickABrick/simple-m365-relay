@@ -12,6 +12,17 @@ mkdir -p "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/certs" "$DATA_DIR/token
 # Ensure Postfix daemons can update token files (sasl-xoauth2 refresh writes a temp file next to the token)
 chown -R postfix:postfix "$DATA_DIR/tokens" 2>/dev/null || true
 
+# Allow the UI container (non-root) to write its state/config in the shared volume.
+# UI runs as uid:gid 10001:10001.
+UI_UID=${UI_UID:-10001}
+UI_GID=${UI_GID:-10001}
+
+for p in "$DATA_DIR/config" "$DATA_DIR/state"; do
+  mkdir -p "$p" || true
+  chown -R "$UI_UID:$UI_GID" "$p" 2>/dev/null || true
+  chmod -R u+rwX "$p" 2>/dev/null || true
+done
+
 # Create default config if missing
 if [ ! -f "$CFG_JSON" ]; then
   cat > "$CFG_JSON" <<'EOF'

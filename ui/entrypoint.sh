@@ -1,12 +1,11 @@
 #!/bin/sh
 set -eu
 
+# Non-root runtime. /data permissions are prepared by the postfix container.
+export PYTHONDONTWRITEBYTECODE=1
+export XDG_CACHE_HOME=/tmp
+
 BIND="${UI_BIND:-0.0.0.0}"
 PORT="${UI_PORT:-8000}"
 
-# Ensure /data is writable for the non-root user (shared volume)
-if [ -d /data ]; then
-  chown -R app:app /data || true
-fi
-
-exec su-exec app uvicorn app.main:app --host "$BIND" --port "$PORT"
+exec uvicorn app.main:app --host "$BIND" --port "$PORT"

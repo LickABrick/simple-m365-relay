@@ -5,14 +5,13 @@ RUN apk add --no-cache \
     ca-certificates \
     curl \
     nodejs npm \
-    su-exec \
   && python3 -m venv /opt/venv \
   && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
   && /opt/venv/bin/pip install --no-cache-dir fastapi uvicorn jinja2 python-multipart pyyaml itsdangerous argon2-cffi
 
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN addgroup -S app && adduser -S -G app -h /home/app app
+RUN addgroup -S -g 10001 app && adduser -S -D -u 10001 -G app -h /home/app app
 
 WORKDIR /opt/ms365-relay
 COPY app/ /opt/ms365-relay/app/
@@ -31,6 +30,7 @@ RUN npm install --no-audit --no-fund --silent tailwindcss@3.4.10 \
 COPY ui/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+USER 10001:10001
 EXPOSE 8000
 VOLUME ["/data"]
 
