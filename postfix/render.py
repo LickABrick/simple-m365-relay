@@ -122,7 +122,9 @@ submission inet n       -       n       -       -       smtpd
 
 
 def postmap(path: Path):
-    subprocess.check_call(["postmap", str(path)])
+    # We configure Postfix to use lmdb: maps; ensure postmap generates the right DB type.
+    # (On Debian the default database type is usually hash, which would create .db files.)
+    subprocess.check_call(["postmap", f"lmdb:{path}"])
 
 
 def main():
