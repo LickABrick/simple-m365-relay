@@ -454,7 +454,6 @@ def update_settings(
     return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#settings", status_code=303)
 
 
-@app.post("/api/settings")
 def _validate_tls_level(v: str, default: str) -> str:
     v = (v or "").strip().lower()
     if v in ("none", "may", "encrypt"):
@@ -475,6 +474,7 @@ def _validate_int(v: str, default: int, lo: int = 0, hi: int = 1440) -> int:
     return max(lo, min(hi, n))
 
 
+@app.post("/api/settings")
 def api_settings_save(
     hostname: str = Form(...),
     domain: str = Form(...),
