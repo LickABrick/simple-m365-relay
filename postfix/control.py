@@ -160,7 +160,10 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/device-flow-log":
             return self._json(200, {"log": tail(DEVICE_FLOW_LOG, 200)})
         if self.path == "/users":
-            out = sh(["sasldblistusers2", "-f", str(DATA_DIR / "sasl" / "sasldb2")], check=False)
+            db = DATA_DIR / "sasl" / "sasldb2"
+            if not db.exists():
+                return self._json(200, {"users": ""})
+            out = sh(["sasldblistusers2", "-f", str(db)], check=False)
             return self._json(200, {"users": out})
         self._json(404, {"error": "not_found"})
 
