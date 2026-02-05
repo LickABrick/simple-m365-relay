@@ -211,6 +211,19 @@
     let _tokenValid = false;
     let _tokenVerified = false;
 
+    function _fmtTsLocal(ts){
+      let t = Number(ts || 0);
+      if (!t) return { text: 'Missing/unknown', valid: false };
+      // Defensive: if someone feeds ms, normalize.
+      if (t > 1e12) t = Math.floor(t / 1000);
+
+      const now = Math.floor(Date.now() / 1000);
+      const valid = (t > (now + 60));
+      const dt = new Date(t * 1000);
+      const text = dt.toLocaleString();
+      return { text, valid, ts: t };
+    }
+
     async function refreshTokenBits(){
       const tokenChip = document.getElementById('tokenChip');
       const tokenText = document.getElementById('tokenText');
@@ -222,11 +235,10 @@
       try {
         const r = await fetch('/api/status', { cache: 'no-store' });
         const j = await r.json();
-        const ts = Number(j.token_exp_ts || 0);
-        if (tokenExp) tokenExp.textContent = ts ? (new Date(ts * 1000)).toLocaleString() : 'Missing/unknown';
+        const info = _fmtTsLocal(j.token_exp_ts);
+        if (tokenExp) tokenExp.textContent = info.text;
 
-        const now = Math.floor(Date.now() / 1000);
-        _tokenValid = !!ts && (ts > (now + 60));
+        _tokenValid = !!info.valid;
 
         if (!_tokenValid) {
           _tokenVerified = false;
@@ -276,6 +288,14 @@
         el.addEventListener('input', refreshCompletionChips);
       }
       refreshCompletionChips();
+
+      // show initial token expiry from server-rendered data-ts immediately
+      const te = document.getElementById('tokenExp');
+      if (te) {
+        const info = _fmtTsLocal(te.getAttribute('data-ts'));
+        te.textContent = info.text;
+      }
+
       refreshTokenBits();
 
       // Step navigation handlers
@@ -722,7 +742,7 @@
             <i data-lucide="badge-check" class="h-4 w-4"></i>
             Verify token
           </button>
-          <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp">{{ token_exp_ts or '' }}</span> · <span id="tokenVerifyHint">Not verified</span></div>
+          <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp" data-ts="{{ token_exp_ts or '' }}"></span> · <span id="tokenVerifyHint">Not verified</span></div>
         </div>
 
         <pre id="deviceFlowLog" class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ device_flow_log or '' }}</pre>
