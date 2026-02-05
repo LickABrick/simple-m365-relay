@@ -698,8 +698,8 @@ def _validate_int(v: str, default: int, lo: int = 0, hi: int = 1440) -> int:
 
 @app.post("/api/settings")
 def api_settings_save(
-    hostname: str = Form(...),
-    domain: str = Form(...),
+    hostname: str = Form(""),
+    domain: str = Form(""),
     mynetworks: str = Form(""),
     relayhost: str = Form(""),
     tls_25: str = Form("may"),
@@ -708,12 +708,19 @@ def api_settings_save(
     client_id: str = Form(""),
     auto_refresh_minutes: str = Form("30"),
 ):
-    """AJAX endpoint: save settings without reload."""
+    """AJAX endpoint: save settings without reload.
+
+    Note: fields are optional so onboarding can save partial configuration.
+    """
     cfg = load_cfg()
-    cfg["hostname"] = hostname.strip()
-    cfg["domain"] = domain.strip()
-    nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
-    cfg["mynetworks"] = nets
+
+    if hostname.strip():
+        cfg["hostname"] = hostname.strip()
+    if domain.strip():
+        cfg["domain"] = domain.strip()
+    if mynetworks.strip():
+        nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
+        cfg["mynetworks"] = nets
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
     cfg.setdefault("tls", {})

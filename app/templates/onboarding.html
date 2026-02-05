@@ -144,6 +144,37 @@
       refreshCompletionFromForm();
       refreshTokenBits();
 
+      function showStep(n){
+        const stepIds = ['step1','step2','step3'];
+        for (let i=0;i<stepIds.length;i++){
+          const id = stepIds[i];
+          const el = document.getElementById(id);
+          if (el) el.classList.toggle('hidden', (i+1)!==n);
+        }
+        const btns = [{id:'step1Btn',n:1},{id:'step2Btn',n:2},{id:'step3Btn',n:3}];
+        for (const b of btns){
+          const x = document.getElementById(b.id);
+          if (!x) continue;
+          const active = (b.n===n);
+          x.classList.toggle('bg-blue-600', active);
+          x.classList.toggle('text-white', active);
+          x.classList.toggle('border', !active);
+        }
+        try { localStorage.setItem('sm365r_onboarding_step', String(n)); } catch(e) {}
+      }
+
+      const savedStep = parseInt(localStorage.getItem('sm365r_onboarding_step') || '1', 10) || 1;
+      showStep(Math.min(3, Math.max(1, savedStep)));
+
+      document.getElementById('step1Btn')?.addEventListener('click', () => showStep(1));
+      document.getElementById('step2Btn')?.addEventListener('click', () => showStep(2));
+      document.getElementById('step3Btn')?.addEventListener('click', () => showStep(3));
+
+      document.getElementById('step1Next')?.addEventListener('click', () => showStep(2));
+      document.getElementById('step2Back')?.addEventListener('click', () => showStep(1));
+      document.getElementById('step2Next')?.addEventListener('click', () => showStep(3));
+      document.getElementById('step3Back')?.addEventListener('click', () => showStep(2));
+
       const form = document.getElementById('settingsForm');
       if (form) {
         form.addEventListener('submit', async (e) => {
@@ -151,15 +182,17 @@
           try {
             const data = new FormData(form);
             const r = await apiFetch('/api/settings', { method: 'POST', body: data });
-            const j = await r.json();
-            if (!r.ok || !j.ok) {
-              showToast(j.detail || 'Save failed.', 'error');
+            let j = null;
+            try { j = await r.json(); } catch(e) {}
+            if (!r.ok || !j || !j.ok) {
+              const detail = (j && (j.detail || j.error)) ? (j.detail || j.error) : (await r.text().catch(()=>''));
+              showToast(detail || `Save failed (HTTP ${r.status}).`, 'error');
               return;
             }
-            showToast('Saved. You can continue.', 'ok');
+            showToast('Saved.', 'ok');
             refreshCompletionFromForm();
           } catch (err) {
-            showToast('Save failed.', 'error');
+            showToast(String(err?.message || 'Save failed.'), 'error');
           }
         });
       }
@@ -308,63 +341,154 @@
           </div>
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Fill in the required values, then click <b>Save</b>. This unlocks the dashboard.</p>
 
-          <form id="settingsForm" method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div class="sm:col-span-2">
-              <div class="text-sm font-semibold">Outbound relay</div>
-            </div>
-            <div class="sm:col-span-2">
-              <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
-              <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
-            </div>
-
-            <div class="sm:col-span-2">
-              <div class="text-sm font-semibold">Inbound TLS</div>
-              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Port 25 and 587 encryption requirements.</div>
-            </div>
-            <div>
-              <label class="text-sm font-medium">Port 25 (smtp)</label>
-              <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
-                {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
-                <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
-                <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
-                <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-sm font-medium">Port 587 (submission)</label>
-              <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
-                {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
-                <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
-                <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
-                <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
-              </select>
-            </div>
-
-            <div class="sm:col-span-2">
-              <div class="text-sm font-semibold">OAuth (Microsoft 365)</div>
-            </div>
-            <div>
-              <label class="text-sm font-medium">Tenant ID <span class="text-xs text-slate-500">(required)</span></label>
-              <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
-            </div>
-            <div>
-              <label class="text-sm font-medium">Client ID <span class="text-xs text-slate-500">(required)</span></label>
-              <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
-            </div>
-            <div>
-              <label class="text-sm font-medium">Auto refresh (minutes)</label>
-              <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
-              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
-            </div>
-            <div class="hidden sm:block"></div>
-
-            <div class="sm:col-span-2 flex justify-end">
-              <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
-                <i data-lucide="save" class="h-4 w-4"></i>
-                Save
+          <div class="mt-4">
+            <div class="mb-3 flex flex-wrap items-center gap-2">
+              <button type="button" id="step1Btn" class="stepBtn inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                <i data-lucide="settings" class="h-4 w-4"></i>
+                Step 1 · Relay
+              </button>
+              <button type="button" id="step2Btn" class="stepBtn inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+                <i data-lucide="key-round" class="h-4 w-4"></i>
+                Step 2 · OAuth IDs
+              </button>
+              <button type="button" id="step3Btn" class="stepBtn inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+                <i data-lucide="shield" class="h-4 w-4"></i>
+                Step 3 · OAuth login (optional)
               </button>
             </div>
-          </form>
+
+            <form id="settingsForm" method="post" action="/settings" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <section id="step1" class="stepSection sm:col-span-2">
+                <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="text-sm font-semibold">Outbound relay</div>
+                  <div class="mt-2">
+                    <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
+                    <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+                    <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Example: <span class="mono">[smtp.office365.com]:587</span></div>
+                  </div>
+
+                  <div class="mt-4 text-sm font-semibold">Inbound TLS</div>
+                  <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Port 25 and 587 encryption requirements.</div>
+
+                  <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label class="text-sm font-medium">Port 25 (smtp)</label>
+                      <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900">
+                        {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
+                        <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+                        <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+                        <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="text-sm font-medium">Port 587 (submission)</label>
+                      <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900">
+                        {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
+                        <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
+                        <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
+                        <option value="encrypt" {% if v=='encrypt' %}selected{% endif %}>encrypt</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="mt-4 flex justify-between">
+                    <div></div>
+                    <button type="button" id="step1Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                      Next
+                      <i data-lucide="arrow-right" class="h-4 w-4"></i>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section id="step2" class="stepSection sm:col-span-2 hidden">
+                <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="text-sm font-semibold">OAuth application</div>
+                  <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Set the Azure app IDs used for device flow (no client secret).</div>
+
+                  <div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <label class="text-sm font-medium">Tenant ID <span class="text-xs text-slate-500">(required)</span></label>
+                      <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+                    </div>
+                    <div>
+                      <label class="text-sm font-medium">Client ID <span class="text-xs text-slate-500">(required)</span></label>
+                      <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+                    </div>
+                    <div>
+                      <label class="text-sm font-medium">Auto refresh (minutes)</label>
+                      <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
+                    </div>
+                  </div>
+
+                  <div class="mt-4 flex justify-between">
+                    <button type="button" id="step2Back" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+                      <i data-lucide="arrow-left" class="h-4 w-4"></i>
+                      Back
+                    </button>
+                    <button type="button" id="step2Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                      Next
+                      <i data-lucide="arrow-right" class="h-4 w-4"></i>
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section id="step3" class="stepSection sm:col-span-2 hidden">
+                <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="flex items-center justify-between">
+                    <div class="text-sm font-semibold">OAuth device flow (optional)</div>
+                    <span id="tokenChip" class="inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold bg-amber-100 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                      <span id="tokenText">Token not set (optional)</span>
+                    </span>
+                  </div>
+
+                  <div class="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
+                    <div class="flex items-start gap-2">
+                      <i data-lucide="shield-alert" class="mt-0.5 h-4 w-4"></i>
+                      <div>
+                        You can skip this step. But until a token exists, mail delivery will not work.
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <button id="startDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+                      <i data-lucide="play" class="h-4 w-4"></i>
+                      Start device flow
+                    </button>
+                    <button id="refreshDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+                      <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                      Refresh
+                    </button>
+                    <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp">{{ token_exp_ts or '' }}</span></div>
+                  </div>
+
+                  <pre id="deviceFlowLog" class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-900">{{ device_flow_log or '' }}</pre>
+
+                  <div class="mt-4 flex justify-between">
+                    <button type="button" id="step3Back" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+                      <i data-lucide="arrow-left" class="h-4 w-4"></i>
+                      Back
+                    </button>
+                    <a href="/" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
+                      Finish
+                      <i data-lucide="layout-dashboard" class="h-4 w-4"></i>
+                    </a>
+                  </div>
+
+                </div>
+              </section>
+
+              <div class="sm:col-span-2 flex justify-end">
+                <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+                  <i data-lucide="save" class="h-4 w-4"></i>
+                  Save (this step)
+                </button>
+              </div>
+            </form>
+          </div>
 
           <div class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200">
             <div class="flex items-start gap-2">
