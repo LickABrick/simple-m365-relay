@@ -4,6 +4,7 @@
   <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">First run: set up a single admin user.</p>
 
   <form method="post" action="/setup" class="mt-6 space-y-3">
+    {% include 'partials_csrf.html' %}
     <div>
       <label class="text-sm font-medium">Username</label>
       <input name="username" autocomplete="username" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />

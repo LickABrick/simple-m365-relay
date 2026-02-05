@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import threading
 import time
@@ -414,7 +415,12 @@ async def auth_middleware(request: Request, call_next):
 def setup_get(request: Request):
     if auth.admin_exists():
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": None, "csrf_token": ""})
+
+    # First-run CSRF for setup screen
+    tok = secrets.token_urlsafe(24)
+    resp = templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": None, "csrf_token": tok})
+    resp.set_cookie("sm365r_setup_csrf", tok, httponly=True, samesite="lax", secure=is_https_request(request), max_age=3600, path="/")
+    return resp
 
 
 @app.post("/setup")
@@ -423,9 +429,14 @@ def setup_post(
     username: str = Form(""),
     password: str = Form(""),
     password2: str = Form(""),
+    csrf_token: str = Form(""),
 ):
     if auth.admin_exists():
         return RedirectResponse(url="/", status_code=303)
+
+    expected = request.cookies.get("sm365r_setup_csrf", "")
+    if expected and csrf_token != expected:
+        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Invalid CSRF token.", "csrf_token": expected})
 
     username = (username or "").strip()
     if not username:
@@ -464,7 +475,10 @@ def login_get(request: Request):
     if auth.session_user(request.cookies.get(auth.SESSION_COOKIE, "")):
         return RedirectResponse(url="/", status_code=303)
 
-    return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": None, "csrf_token": ""})
+    tok = secrets.token_urlsafe(24)
+    resp = templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": None, "csrf_token": tok})
+    resp.set_cookie("sm365r_login_csrf", tok, httponly=True, samesite="lax", secure=is_https_request(request), max_age=3600, path="/")
+    return resp
 
 
 @app.post("/login")
@@ -472,13 +486,18 @@ def login_post(
     request: Request,
     username: str = Form(""),
     password: str = Form(""),
+    csrf_token: str = Form(""),
 ):
     if not auth.admin_exists():
         return RedirectResponse(url="/setup", status_code=303)
 
+    expected = request.cookies.get("sm365r_login_csrf", "")
+    if expected and csrf_token != expected:
+        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid CSRF token.", "csrf_token": expected})
+
     admin = auth.load_admin()
     if not admin:
-        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin.", "csrf_token": ""})
+        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin.", "csrf_token": expected})
 
     username = (username or "").strip()
     if username != admin.username:
