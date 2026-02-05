@@ -197,34 +197,74 @@
       }
     }
 
-    function setOauthStatus(ts){
-      const iconWrap = document.getElementById('oauthStatusIcon');
-      const text = document.getElementById('oauthStatusText');
-      if (!text || !iconWrap) return;
-
+    function _tokenStatus(ts){
       const n = Number(ts || 0);
-      // unknown
-      if (!n || Number.isNaN(n)) {
-        text.textContent = 'Unknown';
-        iconWrap.innerHTML = '<i data-lucide="help-circle" class="h-5 w-5"></i>';
-        try { lucide.createIcons(); } catch(e) {}
-        return;
-      }
+      if (!n || Number.isNaN(n)) return { state: 'unknown' };
 
       const now = Date.now();
       const exp = n * 1000;
       const mins = Math.round((exp - now) / 60000);
 
-      if (exp <= now) {
+      if (exp <= now) return { state: 'expired', mins };
+      if (mins <= 30) return { state: 'soon', mins };
+      return { state: 'valid', mins };
+    }
+
+    function setOauthStatus(ts){
+      const iconWrap = document.getElementById('oauthStatusIcon');
+      const text = document.getElementById('oauthStatusText');
+      if (!text || !iconWrap) return;
+
+      const st = _tokenStatus(ts);
+      if (st.state === 'unknown') {
+        text.textContent = 'Unknown';
+        iconWrap.innerHTML = '<i data-lucide="help-circle" class="h-5 w-5"></i>';
+      } else if (st.state === 'expired') {
         text.textContent = 'Expired';
         iconWrap.innerHTML = '<i data-lucide="badge-alert" class="h-5 w-5 text-red-600"></i>';
-      } else if (mins <= 30) {
-        text.textContent = `Expiring soon (${mins} min)`;
+      } else if (st.state === 'soon') {
+        text.textContent = `Expiring soon (${st.mins} min)`;
         iconWrap.innerHTML = '<i data-lucide="badge-alert" class="h-5 w-5 text-amber-500"></i>';
       } else {
-        text.textContent = `Valid (${mins} min)`;
+        text.textContent = `Valid (${st.mins} min)`;
         iconWrap.innerHTML = '<i data-lucide="badge-check" class="h-5 w-5 text-emerald-600"></i>';
       }
+
+      try { lucide.createIcons(); } catch(e) {}
+    }
+
+    function setTokenCardStatus(ts){
+      const card = document.getElementById('tokenCard');
+      const hint = document.getElementById('tokenHint');
+      const icon = document.getElementById('tokenCardIcon');
+      if (!card || !hint || !icon) return;
+
+      const st = _tokenStatus(ts);
+
+      // reset
+      card.classList.remove('bg-red-50','border-red-200','bg-amber-50','border-amber-200');
+      card.classList.remove('dark:bg-red-950/30','dark:border-red-900/40','dark:bg-amber-950/25','dark:border-amber-900/40');
+      hint.classList.remove('text-red-700','text-amber-700');
+      icon.innerHTML = '<i data-lucide="key-round" class="h-4 w-4"></i>';
+
+      if (st.state === 'expired') {
+        card.classList.add('bg-red-50','border-red-200','dark:bg-red-950/30','dark:border-red-900/40');
+        hint.classList.add('text-red-700');
+        hint.textContent = 'Token expired — re-authenticate via OAuth device flow.';
+        icon.innerHTML = '<i data-lucide="triangle-alert" class="h-4 w-4 text-red-600"></i>';
+      } else if (st.state === 'soon') {
+        card.classList.add('bg-amber-50','border-amber-200','dark:bg-amber-950/25','dark:border-amber-900/40');
+        hint.classList.add('text-amber-700');
+        hint.textContent = `Token expiring soon (${st.mins} min) — consider refreshing.`;
+        icon.innerHTML = '<i data-lucide="triangle-alert" class="h-4 w-4 text-amber-500"></i>';
+      } else if (st.state === 'valid') {
+        hint.textContent = `Token valid (${st.mins} min left) — shown in your local time.`;
+        icon.innerHTML = '<i data-lucide="badge-check" class="h-4 w-4 text-emerald-600"></i>';
+      } else {
+        hint.textContent = 'shown in your local time';
+        icon.innerHTML = '<i data-lucide="help-circle" class="h-4 w-4"></i>';
+      }
+
       try { lucide.createIcons(); } catch(e) {}
     }
 
@@ -233,6 +273,7 @@
       if (te) {
         const ts = te.getAttribute('data-ts');
         te.textContent = formatTokenExpiryLocal(ts);
+        setTokenCardStatus(ts);
       }
       const oe = document.getElementById('oauthTokenExp');
       if (oe) {
@@ -267,6 +308,7 @@
         if (te) {
           te.setAttribute('data-ts', j.token_exp_ts || '');
           te.textContent = formatTokenExpiryLocal(j.token_exp_ts);
+          setTokenCardStatus(j.token_exp_ts);
         }
         const oe = document.getElementById('oauthTokenExp');
         if (oe) {
@@ -569,24 +611,36 @@
 
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Queue</div>
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Queue</div>
+                <i data-lucide="inbox" class="h-4 w-4 text-slate-400"></i>
+              </div>
               <div class="mt-1 text-2xl font-semibold" id="queueSize">{{ queue_size }}</div>
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">messages waiting</div>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Relayhost</div>
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Relayhost</div>
+                <i data-lucide="server" class="h-4 w-4 text-slate-400"></i>
+              </div>
               <div class="mt-1 truncate text-sm font-semibold" id="relayhost" title="{{ env.RELAYHOST }}">{{ env.RELAYHOST }}</div>
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">M365 SMTP endpoint</div>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">M365 user</div>
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">M365 user</div>
+                <i data-lucide="user-round" class="h-4 w-4 text-slate-400"></i>
+              </div>
               <div class="mt-1 truncate text-sm font-semibold" id="ms365User" title="{{ env.MS365_SMTP_USER }}">{{ env.MS365_SMTP_USER }}</div>
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">authenticated sender</div>
             </div>
-            <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Token expiry</div>
+            <div id="tokenCard" class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Token expiry</div>
+                <span id="tokenCardIcon" class="text-slate-400"><i data-lucide="key-round" class="h-4 w-4"></i></span>
+              </div>
               <div class="mt-1 text-sm font-semibold" id="tokenExp" data-ts="{{ token_exp_ts or '' }}">(loading…)</div>
-              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">shown in your local time</div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400" id="tokenHint">shown in your local time</div>
             </div>
           </div>
 
