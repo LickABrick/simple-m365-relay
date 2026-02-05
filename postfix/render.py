@@ -71,6 +71,9 @@ MASTER_CF = r"""
 #               (yes)   (yes)   (yes)   (never) (100)
 # ====================================================================
 
+# Postfix 3.8+ uses the postlog service for internal logging.
+postlog   unix-dgram n       -       n       -       1       postlogd
+
 smtp      inet  n       -       n       -       -       smtpd
   -o smtpd_tls_security_level={tls_25}
 

@@ -1,50 +1,57 @@
 # syntax=docker/dockerfile:1
 
 ############################
-# Builder: build sasl-xoauth2
+# Builder: build sasl-xoauth2 (Debian/glibc)
 ############################
-FROM alpine:3.20 AS builder
+FROM debian:12-slim AS builder
 
 ARG SASL_XOAUTH2_VERSION=0.25
 
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl wget tar \
-    build-base cmake pkgconf \
-    jsoncpp-dev cyrus-sasl-dev curl-dev \
+    build-essential cmake pkg-config \
+    libjsoncpp-dev libsasl2-dev libcurl4-openssl-dev \
     pandoc \
-    git
+    git \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
   wget -O /tmp/sasl-xoauth2.tar.gz "https://github.com/tarickb/sasl-xoauth2/archive/refs/tags/release-${SASL_XOAUTH2_VERSION}.tar.gz"; \
   tar -xzf /tmp/sasl-xoauth2.tar.gz -C /tmp; \
   cd "/tmp/sasl-xoauth2-release-${SASL_XOAUTH2_VERSION}"; \
-  # Alpine/musl: ensure basename() is declared for test_config build
-  if ! grep -q "libgen.h" src/test_config.cc; then sed -i '1i#include <libgen.h>' src/test_config.cc; fi; \
   mkdir -p build; cd build; \
   cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_SYSCONFDIR=/etc; \
   make -j"$(nproc)"; \
   make install
 
 ############################
-# Runtime: postfix relay
+# Runtime: postfix relay (Debian 12)
 ############################
-FROM alpine:3.20
+FROM debian:12-slim
 
-RUN apk add --no-cache \
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     postfix \
-    cyrus-sasl \
+    postfix-lmdb \
+    libsasl2-modules \
+    libsasl2-modules-db \
+    sasl2-bin \
     openssl \
+    libcurl4 \
+    libjsoncpp25 \
+    busybox \
     python3 \
-    py3-pip \
-    busybox-suid \
-    libcurl \
-    jsoncpp \
+    python3-pip \
   && python3 -m pip install --no-cache-dir --break-system-packages msal \
-  && mkdir -p /data
+  && mkdir -p /data \
+  && rm -rf /var/lib/apt/lists/*
 
-# XOAUTH2 plugin + tool
-COPY --from=builder /usr/lib/sasl2/ /usr/lib/sasl2/
+# XOAUTH2 plugin + tool (Debian installs into /usr/lib/x86_64-linux-gnu)
+COPY --from=builder /usr/lib/x86_64-linux-gnu/sasl2/ /usr/lib/x86_64-linux-gnu/sasl2/
 COPY --from=builder /usr/bin/sasl-xoauth2-tool /usr/bin/sasl-xoauth2-tool
+COPY --from=builder /usr/lib/x86_64-linux-gnu/sasl-xoauth2/ /usr/lib/x86_64-linux-gnu/sasl-xoauth2/
 COPY --from=builder /etc/sasl-xoauth2.conf /etc/sasl-xoauth2.conf
 
 WORKDIR /opt/ms365-relay
