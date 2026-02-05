@@ -52,6 +52,10 @@ services:
       UI_BIND: ${UI_BIND:-0.0.0.0}
       UI_PORT: ${UI_PORT:-8000}
       UI_BASE_URL: ${UI_BASE_URL:-}
+      # If behind a TLS-terminating reverse proxy, you likely want:
+      #   FORCE_SECURE_COOKIES=1 and TRUST_PROXY_HEADERS=1
+      FORCE_SECURE_COOKIES: ${FORCE_SECURE_COOKIES:-}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-}
       POSTFIX_CONTROL_URL: ${POSTFIX_CONTROL_URL:-http://postfix:18080}
       CONTROL_TOKEN: ${CONTROL_TOKEN:-}
       RELAY_DOMAIN: ${RELAY_DOMAIN:-local}

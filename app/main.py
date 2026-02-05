@@ -24,7 +24,7 @@ app = FastAPI(title="Simple M365 Relay")
 
 from . import auth  # noqa: E402
 from . import lockout  # noqa: E402
-from .security import get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
+from .security import client_ip, get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
 
@@ -544,7 +544,7 @@ def login_post(
     if expected and csrf_token != expected:
         return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid CSRF token.", "csrf_token": expected})
 
-    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "")
+    ip = client_ip(request)
     rem = lockout.get_lock_remaining(ip)
     if rem > 0:
         return templates.TemplateResponse(
