@@ -378,6 +378,8 @@
       const reauthCode = document.getElementById('reauthCode');
       const reauthCopy = document.getElementById('reauthCopy');
       const reauthStart = document.getElementById('reauthStart');
+      const reauthErrorBox = document.getElementById('reauthErrorBox');
+      const reauthErrorText = document.getElementById('reauthErrorText');
       const log = document.getElementById('deviceFlowLog');
 
       let _reauthTimer = null;
@@ -393,9 +395,17 @@
 
         if (reauthCode) reauthCode.textContent = j.code || '—';
 
+        if (reauthErrorBox) reauthErrorBox.classList.add('hidden');
+
         if (reauthStatus) {
           if (j.done) {
-            reauthStatus.textContent = j.ok ? 'Completed (token written). Click Verify token.' : ('Failed (exit ' + String(j.exit) + '). ' + (j.error || ''));
+            if (j.ok) {
+              reauthStatus.textContent = 'Completed. Verifying token…';
+            } else {
+              reauthStatus.textContent = 'Failed (exit ' + String(j.exit) + ').';
+              if (reauthErrorText) reauthErrorText.textContent = (j.error || 'Unknown error.');
+              if (reauthErrorBox) reauthErrorBox.classList.remove('hidden');
+            }
           } else {
             reauthStatus.textContent = (j.code ? 'Waiting for sign-in…' : 'Starting…');
           }
@@ -413,6 +423,20 @@
               window.clearInterval(_reauthTimer);
               _reauthTimer = null;
               await refreshTokenBits();
+              if (j.ok) {
+                // auto-verify
+                if (_tokenValid) {
+                  _tokenVerified = true;
+                  const hint = document.getElementById('tokenVerifyHint');
+                  if (hint) hint.textContent = 'Verified';
+                  showToast('Token verified.', 'ok');
+                } else {
+                  _tokenVerified = false;
+                  const hint = document.getElementById('tokenVerifyHint');
+                  if (hint) hint.textContent = 'Not verified';
+                  showToast('Token written but appears invalid/expired. Check logs.', 'error');
+                }
+              }
             }
           } catch(e) {}
         }, 1500);
@@ -886,6 +910,19 @@
               <i data-lucide="play" class="h-4 w-4"></i>
               Start / Restart
             </button>
+          </div>
+
+          <div id="reauthErrorBox" class="hidden mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-900 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+            <div class="flex items-start gap-2">
+              <i data-lucide="triangle-alert" class="mt-0.5 h-4 w-4"></i>
+              <div>
+                <div class="font-semibold">Re-auth failed</div>
+                <div id="reauthErrorText" class="mt-0.5"></div>
+                <div class="mt-2 text-red-800/90 dark:text-red-200/90">
+                  Usual fixes: check Tenant ID + Client ID, ensure the Azure app has the right permissions for SMTP AUTH / Outlook, then retry.
+                </div>
+              </div>
+            </div>
           </div>
 
           <pre id="deviceFlowLog" class="mono mt-3 max-h-60 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-900/40">{{ device_flow_log or '' }}</pre>
