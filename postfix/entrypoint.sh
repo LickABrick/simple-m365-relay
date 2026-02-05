@@ -119,8 +119,8 @@ if [ -n "${client_id:-}" ] && [ -n "${tenant_id:-}" ]; then
   "client_id": "${client_id}",
   "client_secret": "",
   "token_endpoint": "https://login.microsoftonline.com/${tenant_id}/oauth2/v2.0/token",
-  "log_full_trace_on_failure": "yes",
-  "log_to_syslog_on_failure": "yes"
+  "log_full_trace_on_failure": "${OAUTH_LOG_FULL_TRACE:-no}",
+  "log_to_syslog_on_failure": "${OAUTH_LOG_TO_SYSLOG:-yes}"
 }
 EOF
 fi

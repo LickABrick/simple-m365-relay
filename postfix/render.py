@@ -185,7 +185,13 @@ def main():
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
     sasl_passwd = outdir / "sasl_passwd"
     if ms365_user:
-        token_file = str(Path(args.token_dir) / ms365_user)
+        # token file path must be a safe filename
+        import re as _re
+        safe = _re.sub(r"[^A-Za-z0-9_.@+\-]", "_", ms365_user.strip())
+        while ".." in safe:
+            safe = safe.replace("..", "__")
+        safe = safe.strip("._-")[:128]
+        token_file = str(Path(args.token_dir) / safe)
         sasl_passwd.write_text(f"{relayhost} {ms365_user}:{token_file}\n", encoding="utf-8")
         os.chmod(sasl_passwd, 0o600)
         postmap(sasl_passwd)
@@ -193,10 +199,18 @@ def main():
     # Sender login map (envelope sender -> sasl login)
     allowed_from = cfg.get("allowed_from", {}) or {}
     lines = []
+
+    def _safe_map_token(s: str) -> str:
+        s = str(s or "").strip()
+        if not s or _has_ctl(s) or any(ch.isspace() for ch in s) or "/" in s or "\\" in s:
+            raise ValueError("invalid map token")
+        return s
+
     # allowed_from can be {"user": ["from1", "from2"]}
     for login, from_list in allowed_from.items():
+        login = _safe_map_token(login)
         for addr in from_list or []:
-            addr = addr.strip().lower()
+            addr = _safe_map_token(str(addr).strip().lower())
             if addr:
                 lines.append(f"{addr} {login}\n")
 

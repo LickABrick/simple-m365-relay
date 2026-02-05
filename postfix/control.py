@@ -97,6 +97,39 @@ def _timing_safe_eq(a: str, b: str) -> bool:
         return a == b
 
 
+def _safe_token_filename(user: str) -> str:
+    import re
+
+    u = (user or "").strip()
+    if not u:
+        return ""
+    u2 = re.sub(r"[^A-Za-z0-9_.@+\-]", "_", u)
+    while ".." in u2:
+        u2 = u2.replace("..", "__")
+    u2 = u2.strip("._-")
+    return u2[:128]
+
+
+def _token_path_for_user(user: str) -> str:
+    safe = _safe_token_filename(user)
+    if not safe:
+        return str(DATA_DIR / "tokens" / "token")
+    return str(DATA_DIR / "tokens" / safe)
+
+
+def _redact_sensitive(text: str) -> str:
+    import re
+
+    t = text or ""
+    # redact jwt-ish tokens
+    t = re.sub(r"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b", "[REDACTED_JWT]", t)
+    # redact common fields
+    t = re.sub(r"(?i)(refresh_token|access_token|id_token|authorization)\s*[:=]\s*[^\s\"']+", r"\1=[REDACTED]", t)
+    # device codes
+    t = re.sub(r"(?i)(code\s*[:=]\s*)([A-Z0-9-]{8,})", r"\1[REDACTED_CODE]", t)
+    return t
+
+
 def sh(cmd, check=False):
     return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=check).stdout
 
@@ -179,7 +212,7 @@ def refresh_token() -> str:
     user = os.environ.get("MS365_SMTP_USER", "")
     if not user:
         return "Missing MS365_SMTP_USER"
-    tok_path = str(DATA_DIR / "tokens" / user)
+    tok_path = _token_path_for_user(user)
     if not Path(tok_path).exists():
         return f"Token file not found: {tok_path}"
 
@@ -197,7 +230,7 @@ def refresh_token() -> str:
     # store a short log record
     import time as _time
 
-    _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{out}\n")
+    _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
     return out or "ok"
 
 
@@ -248,7 +281,7 @@ def start_device_flow_background() -> None:
             if not (tenant and client_id and user):
                 DEVICE_FLOW_LOG.write_text("Missing tenant_id/client_id (OAuth settings) or MS365_SMTP_USER\n", encoding="utf-8")
                 return
-            tok_path = str(DATA_DIR / "tokens" / user)
+            tok_path = _token_path_for_user(user)
             Path(tok_path).parent.mkdir(parents=True, exist_ok=True)
 
             cmd = [
@@ -263,7 +296,7 @@ def start_device_flow_background() -> None:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             with open(DEVICE_FLOW_LOG, "a", encoding="utf-8") as f:
                 for line in proc.stdout or []:
-                    f.write(line)
+                    f.write(_redact_sensitive(line))
                     f.flush()
             proc.wait()
             with open(DEVICE_FLOW_LOG, "a", encoding="utf-8") as f:
@@ -325,9 +358,9 @@ class H(BaseHTTPRequestHandler):
             out = tail(DATA_DIR / "log" / "maillog", 200)
             return self._json(200, {"maillog": out})
         if self.path == "/device-flow-log":
-            return self._json(200, {"log": tail(DEVICE_FLOW_LOG, 200)})
+            return self._json(200, {"log": _redact_sensitive(tail(DEVICE_FLOW_LOG, 200))})
         if self.path == "/token/refresh-log":
-            return self._json(200, {"log": tail(TOKEN_REFRESH_LOG, 200)})
+            return self._json(200, {"log": _redact_sensitive(tail(TOKEN_REFRESH_LOG, 200))})
         if self.path == "/users":
             db = DATA_DIR / "sasl" / "sasldb2"
             if not db.exists():

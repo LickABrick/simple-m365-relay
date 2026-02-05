@@ -34,9 +34,16 @@ def is_https_request(request: Request) -> bool:
     except Exception:
         pass
 
-    xf = (request.headers.get("x-forwarded-proto") or "").lower().strip()
-    if xf == "https":
-        return True
+    # Only trust forwarded proto when explicitly enabled.
+    try:
+        import os
+
+        if _truthy(os.environ.get("TRUST_PROXY_HEADERS", "")):
+            xf = (request.headers.get("x-forwarded-proto") or "").lower().strip()
+            if xf == "https":
+                return True
+    except Exception:
+        pass
     # Starlette's request.url.scheme may be correct when running behind proxy_headers middleware.
     try:
         return (request.url.scheme or "").lower() == "https"

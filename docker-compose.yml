@@ -37,6 +37,10 @@ services:
 
       # Background token refresh (uses existing refresh token)
       AUTO_TOKEN_REFRESH_MINUTES: ${AUTO_TOKEN_REFRESH_MINUTES:-30}
+
+      # Reduce chance of secrets in logs by default
+      OAUTH_LOG_FULL_TRACE: ${OAUTH_LOG_FULL_TRACE:-no}
+      OAUTH_LOG_TO_SYSLOG: ${OAUTH_LOG_TO_SYSLOG:-yes}
     volumes:
       - simple-m365-relay-data:/data
     expose:

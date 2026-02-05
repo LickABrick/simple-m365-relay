@@ -204,6 +204,44 @@ def token_expiry_ts_best_effort(token_path: Path) -> Optional[int]:
     return None
 
 
+def safe_token_filename(user: str) -> str:
+    """Derive a safe filename for token storage.
+
+    Token filenames must not allow path traversal or separators.
+    """
+    u = (user or "").strip()
+    if not u:
+        return ""
+    # Replace anything not in a safe set.
+    u2 = re.sub(r"[^A-Za-z0-9_.@+\-]", "_", u)
+    # Disallow traversal artifacts.
+    while ".." in u2:
+        u2 = u2.replace("..", "__")
+    u2 = u2.strip("._-")
+    return u2[:128]
+
+
+def token_file_for_ms365_user(ms365_user: str) -> Optional[Path]:
+    if not ms365_user:
+        return None
+    safe = safe_token_filename(ms365_user)
+    if not safe:
+        return None
+    p = DATA_DIR / "tokens" / safe
+
+    # legacy support: if the old filename exists and is safe-ish (no separators), use it.
+    legacy = (DATA_DIR / "tokens" / ms365_user.strip())
+    try:
+        if not p.exists():
+            leg_name = ms365_user.strip()
+            if "/" not in leg_name and "\\" not in leg_name and ".." not in leg_name and legacy.exists():
+                return legacy
+    except Exception:
+        pass
+
+    return p
+
+
 def token_expiry_best_effort(token_path: Path) -> Optional[str]:
     ts = token_expiry_ts_best_effort(token_path)
     if ts is None:
@@ -476,17 +514,51 @@ def _extract_recent_warnings(mail_log: str, limit: int = 6) -> str:
     return "\n".join(reversed(interesting))
 
 
+def _validate_login(v: str) -> str:
+    """Conservative login validation (stored as key in allowed_from/default_from).
+
+    Allow only email-ish logins (no whitespace/control chars).
+    """
+    v = _reject_ctl(v)
+    v = v.strip()
+    if not v or len(v) > 254:
+        raise ValueError("invalid login")
+    if re.search(r"\s", v):
+        raise ValueError("invalid login")
+    if not re.fullmatch(r"[A-Za-z0-9._%+\-@]+", v):
+        raise ValueError("invalid login")
+    return v
+
+
+def _validate_emailish(v: str) -> str:
+    v = _reject_ctl(v)
+    v = v.strip().lower()
+    if not v or len(v) > 254:
+        raise ValueError("invalid address")
+    if re.search(r"\s", v):
+        raise ValueError("invalid address")
+    # very small sanity check
+    if "@" not in v or v.startswith("@") or v.endswith("@"):  # noqa: PLR1714
+        raise ValueError("invalid address")
+    if not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+", v):
+        raise ValueError("invalid address")
+    return v
+
+
 def parse_addr_list(text: str) -> list[str]:
     # accepts comma/space/newline separated
     raw = (text or "").replace(",", " ")
     parts = []
     for ln in raw.splitlines():
         parts.extend([p.strip() for p in ln.split() if p.strip()])
-    # normalize + unique
+    # normalize + unique (email-ish)
     seen = set()
     out = []
     for a in parts:
-        aa = a.strip().lower()
+        try:
+            aa = _validate_emailish(a)
+        except Exception:
+            continue
         if aa and aa not in seen:
             seen.add(aa)
             out.append(aa)
@@ -713,7 +785,7 @@ def onboarding_get(request: Request):
     cfg = load_cfg()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     return templates.TemplateResponse(
@@ -748,7 +820,7 @@ def index(request: Request):
     warn_tail = _extract_recent_warnings(mail_log)
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     user = getattr(request.state, "user", "")
@@ -991,7 +1063,7 @@ def allow_from(request: Request, csrf_token: str = Form(""), login: str = Form(.
     # HTML fallback
     require_csrf(request, csrf_token)
     cfg = load_cfg()
-    login = login.strip()
+    login = _validate_login(login)
     addrs = parse_addr_list(from_addr)
     cfg.setdefault("allowed_from", {})
     cfg["allowed_from"].setdefault(login, [])
@@ -1034,7 +1106,9 @@ def set_default_from(request: Request, csrf_token: str = Form(""), login: str = 
     cfg.setdefault("default_from", {})
     from urllib.parse import quote
 
-    cfg["default_from"][login.strip()] = from_addr.strip()
+    login2 = _validate_login(login)
+    addr2 = _validate_emailish(from_addr) if (from_addr or '').strip() else ''
+    cfg["default_from"][login2] = addr2
     save_cfg(cfg)
     return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#senders", status_code=303)
 
@@ -1060,7 +1134,7 @@ def api_senders_get():
 @app.post("/api/from/allow")
 def api_from_allow(login: str = Form(...), from_addr: str = Form(...)):
     cfg = load_cfg()
-    login = login.strip()
+    login = _validate_login(login)
     addrs = parse_addr_list(from_addr)
     cfg.setdefault("allowed_from", {})
     cfg["allowed_from"].setdefault(login, [])
@@ -1106,7 +1180,9 @@ def api_from_disallow(login: str = Form(...), from_addr: str = Form(...)):
 def api_from_default(login: str = Form(...), from_addr: str = Form(...)):
     cfg = load_cfg()
     cfg.setdefault("default_from", {})
-    cfg["default_from"][login.strip()] = from_addr.strip()
+    login2 = _validate_login(login)
+    addr2 = _validate_emailish(from_addr) if (from_addr or '').strip() else ''
+    cfg["default_from"][login2] = addr2
     save_cfg(cfg)
 
     current_hash = cfg_hash(cfg)
@@ -1192,7 +1268,7 @@ def api_token_refresh():
 
     # recompute expiry after refresh
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     return {"ok": True, "output": out, "token_exp_ts": token_exp_ts}
@@ -1254,7 +1330,7 @@ def api_status():
     token_refresh_log = get_token_refresh_log()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     current_hash = cfg_hash(cfg)
@@ -1300,7 +1376,7 @@ def diagnostics_txt():
     mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     parts = []
