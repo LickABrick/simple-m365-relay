@@ -398,18 +398,38 @@ def api_settings_save(
 
 @app.post("/users/add")
 def users_add(login: str = Form(...), password: str = Form(...)):
+    # HTML fallback
     ensure_user(login.strip(), password)
     return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/users/delete")
 def users_del(login: str = Form(...)):
+    # HTML fallback
     delete_user(login.strip())
     return RedirectResponse(url="/", status_code=303)
 
 
+@app.get("/api/users")
+def api_users_list():
+    return {"ok": True, "users": list_users()}
+
+
+@app.post("/api/users/add")
+def api_users_add(login: str = Form(...), password: str = Form(...)):
+    ensure_user(login.strip(), password)
+    return {"ok": True, "users": list_users()}
+
+
+@app.post("/api/users/delete")
+def api_users_delete(login: str = Form(...)):
+    delete_user(login.strip())
+    return {"ok": True, "users": list_users()}
+
+
 @app.post("/from/allow")
 def allow_from(login: str = Form(...), from_addr: str = Form(...)):
+    # HTML fallback
     cfg = load_cfg()
     login = login.strip()
     addr = from_addr.strip().lower()
@@ -425,6 +445,7 @@ def allow_from(login: str = Form(...), from_addr: str = Form(...)):
 
 @app.post("/from/disallow")
 def disallow_from(login: str = Form(...), from_addr: str = Form(...)):
+    # HTML fallback
     cfg = load_cfg()
     login = login.strip()
     addr = from_addr.strip().lower()
@@ -438,6 +459,7 @@ def disallow_from(login: str = Form(...), from_addr: str = Form(...)):
 
 @app.post("/from/default")
 def set_default_from(login: str = Form(...), from_addr: str = Form(...)):
+    # HTML fallback
     cfg = load_cfg()
     cfg.setdefault("default_from", {})
     from urllib.parse import quote
@@ -445,6 +467,73 @@ def set_default_from(login: str = Form(...), from_addr: str = Form(...)):
     cfg["default_from"][login.strip()] = from_addr.strip()
     save_cfg(cfg)
     return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#senders", status_code=303)
+
+
+@app.get("/api/senders")
+def api_senders_get():
+    cfg = load_cfg()
+    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+
+    current_hash = cfg_hash(cfg)
+    applied_hash = get_applied_hash()
+    pending = bool(applied_hash) and (current_hash != applied_hash)
+
+    return {
+        "ok": True,
+        "pending": pending,
+        "allowed_from": (cfg.get("allowed_from") or {}),
+        "default_from": (cfg.get("default_from") or {}),
+        "from_identities": from_identities(cfg, ms365_user),
+    }
+
+
+@app.post("/api/from/allow")
+def api_from_allow(login: str = Form(...), from_addr: str = Form(...)):
+    cfg = load_cfg()
+    login = login.strip()
+    addr = from_addr.strip().lower()
+    cfg.setdefault("allowed_from", {})
+    cfg["allowed_from"].setdefault(login, [])
+    if addr and addr not in cfg["allowed_from"][login]:
+        cfg["allowed_from"][login].append(addr)
+    save_cfg(cfg)
+
+    current_hash = cfg_hash(cfg)
+    applied_hash = get_applied_hash()
+    pending = bool(applied_hash) and (current_hash != applied_hash)
+
+    return {"ok": True, "pending": pending}
+
+
+@app.post("/api/from/disallow")
+def api_from_disallow(login: str = Form(...), from_addr: str = Form(...)):
+    cfg = load_cfg()
+    login = login.strip()
+    addr = from_addr.strip().lower()
+
+    if login in (cfg.get("allowed_from") or {}):
+        cfg["allowed_from"][login] = [a for a in cfg["allowed_from"][login] if a != addr]
+    save_cfg(cfg)
+
+    current_hash = cfg_hash(cfg)
+    applied_hash = get_applied_hash()
+    pending = bool(applied_hash) and (current_hash != applied_hash)
+
+    return {"ok": True, "pending": pending}
+
+
+@app.post("/api/from/default")
+def api_from_default(login: str = Form(...), from_addr: str = Form(...)):
+    cfg = load_cfg()
+    cfg.setdefault("default_from", {})
+    cfg["default_from"][login.strip()] = from_addr.strip()
+    save_cfg(cfg)
+
+    current_hash = cfg_hash(cfg)
+    applied_hash = get_applied_hash()
+    pending = bool(applied_hash) and (current_hash != applied_hash)
+
+    return {"ok": True, "pending": pending}
 
 
 @app.post("/postfix/reload")
