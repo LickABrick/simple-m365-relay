@@ -29,6 +29,9 @@ services:
 
       CONTROL_BIND: ${CONTROL_BIND:-0.0.0.0}
       CONTROL_PORT: ${CONTROL_PORT:-18080}
+
+      # Background token refresh (uses existing refresh token)
+      AUTO_TOKEN_REFRESH_MINUTES: ${AUTO_TOKEN_REFRESH_MINUTES:-30}
     volumes:
       - ms365-relay-data:/data
     expose:

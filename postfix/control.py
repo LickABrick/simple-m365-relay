@@ -9,6 +9,11 @@ from pathlib import Path
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
+TOKEN_REFRESH_LOG = DATA_DIR / "state" / "token_refresh.log"
+
+AUTO_REFRESH_MIN = int(os.environ.get("AUTO_TOKEN_REFRESH_MINUTES", "0") or "0")
+TEST_CONFIG = os.environ.get("SASL_XOAUTH2_TEST_CONFIG", "/usr/lib/x86_64-linux-gnu/sasl-xoauth2/test-config")
+SASL_XOAUTH2_CONFIG = os.environ.get("SASL_XOAUTH2_CONFIG", "/etc/sasl-xoauth2.conf")
 
 BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
 PORT = int(os.environ.get("CONTROL_PORT", "18080"))
@@ -77,6 +82,47 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
     out = (p.stdout or "").strip()
     if p.returncode != 0:
         return f"sendmail exit {p.returncode}\n" + out
+    return out or "ok"
+
+
+def _append_log(path: Path, text: str, max_bytes: int = 200_000) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if path.exists() and path.stat().st_size > max_bytes:
+            # truncate older content
+            tail_txt = tail(path, 400)
+            path.write_text(tail_txt + "\n[truncated]\n", encoding="utf-8")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text)
+            if not text.endswith("\n"):
+                f.write("\n")
+    except Exception:
+        pass
+
+
+def refresh_token() -> str:
+    user = os.environ.get("MS365_SMTP_USER", "")
+    if not user:
+        return "Missing MS365_SMTP_USER"
+    tok_path = str(DATA_DIR / "tokens" / user)
+    if not Path(tok_path).exists():
+        return f"Token file not found: {tok_path}"
+
+    if not Path(TEST_CONFIG).exists():
+        return f"test-config not found: {TEST_CONFIG}"
+
+    cmd = [
+        TEST_CONFIG,
+        "--config",
+        SASL_XOAUTH2_CONFIG,
+        "--token",
+        tok_path,
+    ]
+    out = sh(cmd, check=False).strip()
+    # store a short log record
+    import time as _time
+
+    _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{out}\n")
     return out or "ok"
 
 
@@ -159,6 +205,8 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"maillog": out})
         if self.path == "/device-flow-log":
             return self._json(200, {"log": tail(DEVICE_FLOW_LOG, 200)})
+        if self.path == "/token/refresh-log":
+            return self._json(200, {"log": tail(TOKEN_REFRESH_LOG, 200)})
         if self.path == "/users":
             db = DATA_DIR / "sasl" / "sasldb2"
             if not db.exists():
@@ -177,6 +225,9 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/token/start":
             start_device_flow_background()
             return self._json(200, {"ok": True})
+        if self.path == "/token/refresh":
+            out = refresh_token()
+            return self._json(200, {"output": out})
         if self.path == "/users/add":
             body = self._read_json()
             login = (body.get("login") or "").strip()
@@ -216,7 +267,23 @@ class H(BaseHTTPRequestHandler):
         self._json(404, {"error": "not_found"})
 
 
+def _auto_refresh_loop():
+    if AUTO_REFRESH_MIN <= 0:
+        return
+    import time as _time
+
+    while True:
+        try:
+            # refresh token in the background
+            refresh_token()
+        except Exception as e:
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] auto-refresh error: {e}\n")
+        _time.sleep(max(60, AUTO_REFRESH_MIN * 60))
+
+
 def main():
+    if AUTO_REFRESH_MIN > 0:
+        threading.Thread(target=_auto_refresh_loop, daemon=True).start()
     httpd = HTTPServer((BIND, PORT), H)
     httpd.serve_forever()
 
