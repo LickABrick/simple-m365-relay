@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ms365-relay</title>
+  <title>Simple M365 Relay</title>
 
   <!-- Tailwind (CDN) -->
   <script>
@@ -20,7 +20,7 @@
 
   <script>
     // Theme (persisted)
-    const themeKey = 'ms365-relay-theme';
+    const themeKey = 'simple-m365-relay-theme';
     const saved = localStorage.getItem(themeKey);
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     if ((saved === 'dark') || (!saved && prefersDark)) {
@@ -399,7 +399,7 @@
     }
 
     function initAutoRefresh(){
-      const key = 'ms365-relay-autorefresh';
+      const key = 'simple-m365-relay-autorefresh';
       const cb = document.getElementById('autoRefresh');
       if (!cb) return;
       cb.checked = (localStorage.getItem(key) === '1');
@@ -1029,7 +1029,7 @@
             <i data-lucide="mail" class="h-5 w-5"></i>
           </div>
           <div>
-            <div class="text-sm font-semibold leading-5">ms365-relay</div>
+            <div class="text-sm font-semibold leading-5">Simple M365 Relay</div>
             <div class="text-xs text-slate-500 dark:text-slate-400">Postfix → Microsoft 365 (XOAUTH2)</div>
           </div>
         </div>

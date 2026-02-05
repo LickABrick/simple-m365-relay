@@ -1,4 +1,4 @@
-# ms365-relay (Postfix → Microsoft 365 via OAuth2 / XOAUTH2)
+# Simple M365 Relay (Postfix → Microsoft 365 via OAuth2 / XOAUTH2)
 
 Reusable Docker Compose stack that:
 
@@ -14,7 +14,7 @@ This is based on the approach described here:
 ## Quick start
 
 ```bash
-cd ms365-relay
+cd simple-m365-relay  # (or whatever your folder is named)
 cp env.example .env
 # edit .env
 docker compose up -d --build
@@ -43,7 +43,7 @@ Put it behind a reverse proxy and protect it with basic auth (or SSO). The UI do
 3. Complete the login in a browser as the configured `MS365_SMTP_USER`.
 
 Token file location (persisted):
-- `ms365-relay-data:/data/tokens/<MS365_SMTP_USER>`
+- `simple-m365-relay-data:/data/tokens/<MS365_SMTP_USER>` (backed by Docker volume name `ms365-relay-data` to preserve data)
 
 ## Client configuration
 
@@ -108,9 +108,9 @@ To use your own cert, mount/replace the files in the volume and set:
 - Check UI “Mail log (tail)” for errors.
 - Verify token refresh works (inside container):
   ```bash
-  docker exec -it ms365-relay sasl-xoauth2-tool test-token-refresh /data/tokens/$MS365_SMTP_USER
+  docker exec -it simple-m365-relay-postfix sasl-xoauth2-tool test-token-refresh /data/tokens/$MS365_SMTP_USER
   ```
 - Queue inspection:
   ```bash
-  docker exec -it ms365-relay mailq
+  docker exec -it simple-m365-relay-postfix mailq
   ```

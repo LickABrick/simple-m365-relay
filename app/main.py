@@ -17,7 +17,7 @@ CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
 templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
-app = FastAPI(title="ms365-relay")
+app = FastAPI(title="Simple M365 Relay")
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
 
@@ -159,7 +159,7 @@ def _control_get(path: str) -> dict:
     import ssl
 
     url = POSTFIX_CONTROL_URL + path
-    req = urllib.request.Request(url, headers={"User-Agent": "ms365-relay-ui"})
+    req = urllib.request.Request(url, headers={"User-Agent": "simple-m365-relay-ui"})
     with urllib.request.urlopen(req, timeout=10, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -169,7 +169,7 @@ def _control_post(path: str) -> dict:
     import ssl
 
     url = POSTFIX_CONTROL_URL + path
-    req = urllib.request.Request(url, method="POST", data=b"", headers={"User-Agent": "ms365-relay-ui"})
+    req = urllib.request.Request(url, method="POST", data=b"", headers={"User-Agent": "simple-m365-relay-ui"})
     with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -190,7 +190,7 @@ def ensure_user(login: str, password: str) -> str:
         POSTFIX_CONTROL_URL + "/users/add",
         method="POST",
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "ms365-relay-ui"},
+        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
     )
     with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"
@@ -204,7 +204,7 @@ def delete_user(login: str) -> str:
         POSTFIX_CONTROL_URL + "/users/delete",
         method="POST",
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "ms365-relay-ui"},
+        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
     )
     with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"
@@ -257,7 +257,7 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         POSTFIX_CONTROL_URL + "/testmail",
         method="POST",
         data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "ms365-relay-ui"},
+        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
     )
     with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"
@@ -779,7 +779,7 @@ def diagnostics_txt():
     token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
 
     parts = []
-    parts.append("# ms365-relay diagnostics\n")
+    parts.append("# Simple M365 Relay diagnostics\n")
     parts.append(f"timestamp: {time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime())}\n")
     parts.append("\n## env\n")
     parts.append(f"RELAYHOST={os.environ.get('RELAYHOST','')}\n")

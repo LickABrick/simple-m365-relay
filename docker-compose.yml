@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: postfix/Dockerfile
-    container_name: ms365-relay-postfix
+    container_name: simple-m365-relay-postfix
     restart: unless-stopped
     ports:
       - "25:25"
@@ -33,7 +33,7 @@ services:
       # Background token refresh (uses existing refresh token)
       AUTO_TOKEN_REFRESH_MINUTES: ${AUTO_TOKEN_REFRESH_MINUTES:-30}
     volumes:
-      - ms365-relay-data:/data
+      - simple-m365-relay-data:/data
     expose:
       - "18080"
 
@@ -41,7 +41,7 @@ services:
     build:
       context: .
       dockerfile: ui/Dockerfile
-    container_name: ms365-relay-ui
+    container_name: simple-m365-relay-ui
     restart: unless-stopped
     ports:
       - "8000:8000"  # put behind reverse proxy + basic auth
@@ -60,9 +60,11 @@ services:
       MS365_CLIENT_ID: ${MS365_CLIENT_ID:-}
       AUTO_TOKEN_REFRESH_MINUTES: ${AUTO_TOKEN_REFRESH_MINUTES:-30}
     volumes:
-      - ms365-relay-data:/data
+      - simple-m365-relay-data:/data
     depends_on:
       - postfix
 
 volumes:
-  ms365-relay-data:
+  # Keep the underlying Docker volume name to preserve existing data
+  simple-m365-relay-data:
+    name: ms365-relay-data
