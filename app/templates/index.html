@@ -107,16 +107,54 @@
       }
     }
 
+    function showToastFromUrl(){
+      const url = new URL(window.location.href);
+      const msg = url.searchParams.get('toast');
+      if (!msg) return;
+      const level = (url.searchParams.get('toastLevel') || 'ok');
+
+      const box = document.getElementById('toast');
+      const text = document.getElementById('toastText');
+      if (!box || !text) return;
+
+      text.textContent = msg;
+      box.classList.remove('hidden');
+      box.classList.toggle('toast-error', level === 'error');
+
+      // remove params so refresh doesn't keep re-toasting
+      url.searchParams.delete('toast');
+      url.searchParams.delete('toastLevel');
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+
+      // auto-hide
+      window.setTimeout(() => {
+        box.classList.add('hidden');
+      }, 8000);
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       try { lucide.createIcons(); } catch(e) {}
       syncThemeButton();
       initNavClicks();
       initScrollSpy();
+      showToastFromUrl();
     });
   </script>
 
   <style>
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+    /* toast */
+    #toast {
+      box-shadow: 0 12px 30px var(--shadow);
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--fg);
+    }
+    #toast.toast-error {
+      border-color: color-mix(in oklab, #ef4444 35%, var(--border));
+      background: color-mix(in oklab, #ef4444 10%, var(--card));
+    }
 
     /*
       Tailwind CDN config isn't reliably applied in some setups (tailwind.config ends up {}).
@@ -185,6 +223,22 @@
   <div class="min-h-full">
 
     <!-- Top bar -->
+    <!-- Toast -->
+    <div id="toast" class="hidden fixed right-4 top-20 z-50 max-w-xl rounded-2xl px-4 py-3 text-sm">
+      <div class="flex items-start gap-3">
+        <div class="mt-0.5">
+          <i data-lucide="info" class="h-4 w-4"></i>
+        </div>
+        <div class="flex-1">
+          <div class="font-semibold">Test mail</div>
+          <div id="toastText" class="mt-0.5 whitespace-pre-wrap text-xs opacity-90"></div>
+        </div>
+        <button type="button" onclick="document.getElementById('toast').classList.add('hidden')" class="rounded-lg px-2 py-1 opacity-70 hover:opacity-100">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </div>
+    </div>
+
     <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/80 backdrop-blur dark:border-slate-800 dark:bg-slate-950/70">
       <div class="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
         <div class="flex items-center gap-3">

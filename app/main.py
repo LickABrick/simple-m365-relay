@@ -299,6 +299,22 @@ def token_start():
 
 
 @app.post("/testmail")
-def testmail(to_addr: str = Form(...), from_addr: str = Form(...), subject: str = Form("Test"), body: str = Form("Does it work?")):
+def testmail(
+    to_addr: str = Form(...),
+    from_addr: str = Form(...),
+    subject: str = Form("Test"),
+    body: str = Form("Does it work?"),
+):
+    # Return to the dashboard with a toast message.
+    from urllib.parse import quote
+
     out = send_test_mail(to_addr, from_addr, subject, body)
-    return PlainTextResponse(out)
+
+    # keep it short for the URL
+    msg = (out or "ok").strip()
+    if len(msg) > 600:
+        msg = msg[:600] + "…"
+
+    level = "error" if "exit" in msg.lower() else "ok"
+
+    return RedirectResponse(url=f"/?toast={quote(msg)}&toastLevel={level}#status", status_code=303)
