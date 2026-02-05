@@ -186,12 +186,59 @@ def device_flow_log() -> str:
         return ""
 
 
+def _best_effort_health() -> bool:
+    try:
+        return bool(_control_get("/health").get("ok"))
+    except Exception:
+        return False
+
+
+def _extract_recent_warnings(mail_log: str, limit: int = 6) -> str:
+    lines = [ln for ln in (mail_log or "").splitlines() if ln]
+    interesting = []
+    for ln in reversed(lines):
+        ll = ln.lower()
+        if (" warn " in ll) or (" err " in ll) or (" fatal" in ll) or ("panic" in ll):
+            interesting.append(ln)
+        if len(interesting) >= limit:
+            break
+    return "\n".join(reversed(interesting))
+
+
+def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
+    addrs = []
+
+    # configured defaults
+    for v in (cfg.get("default_from") or {}).values():
+        if v:
+            addrs.append(str(v).strip().lower())
+
+    # configured allowed_from lists
+    for lst in (cfg.get("allowed_from") or {}).values():
+        for a in (lst or []):
+            if a:
+                addrs.append(str(a).strip().lower())
+
+    if ms365_user:
+        addrs.append(ms365_user.strip().lower())
+
+    # unique but stable ordering
+    seen = set()
+    out = []
+    for a in addrs:
+        if a and a not in seen:
+            seen.add(a)
+            out.append(a)
+    return out
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request):
     cfg = load_cfg()
     mailq_out = (_control_get("/mailq").get("mailq") or "")
     qsize = parse_queue_size(mailq_out)
     mail_log = (_control_get("/maillog").get("maillog") or "")
+    warn_tail = _extract_recent_warnings(mail_log)
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
     token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
@@ -203,10 +250,14 @@ def index(request: Request):
             "request": request,
             "cfg": cfg,
             "queue_size": qsize,
+            "mailq": mailq_out,
             "mail_log": mail_log,
+            "mail_log_warn": warn_tail,
+            "postfix_ok": _best_effort_health(),
             "users": list_users(),
             "device_flow_log": device_flow_log(),
             "token_exp": token_exp,
+            "from_identities": from_identities(cfg, ms365_user),
             "env": {
                 "MS365_SMTP_USER": ms365_user,
                 "MS365_TENANT_ID": os.environ.get("MS365_TENANT_ID", ""),
@@ -317,4 +368,61 @@ def testmail(
 
     level = "error" if "exit" in msg.lower() else "ok"
 
-    return RedirectResponse(url=f"/?toast={quote(msg)}&toastLevel={level}#status", status_code=303)
+    return RedirectResponse(url=f"/?toast={quote(msg)}&toastLevel={level}#testmail", status_code=303)
+
+
+@app.get("/api/status")
+def api_status():
+    cfg = load_cfg()
+    mailq_out = (_control_get("/mailq").get("mailq") or "")
+    qsize = parse_queue_size(mailq_out)
+    mail_log = (_control_get("/maillog").get("maillog") or "")
+
+    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_exp = token_expiry_best_effort(token_path) if token_path else None
+
+    return {
+        "ok": _best_effort_health(),
+        "queue_size": qsize,
+        "mailq": mailq_out,
+        "mail_log": mail_log,
+        "mail_log_warn": _extract_recent_warnings(mail_log),
+        "token_exp": token_exp,
+        "from_identities": from_identities(cfg, ms365_user),
+        "env": {
+            "MS365_SMTP_USER": ms365_user,
+            "RELAYHOST": os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
+        },
+    }
+
+
+@app.get("/diagnostics.txt")
+def diagnostics_txt():
+    # No secrets: we do NOT include token files.
+    cfg = load_cfg()
+    mailq_out = (_control_get("/mailq").get("mailq") or "")
+    mail_log = (_control_get("/maillog").get("maillog") or "")
+
+    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_exp = token_expiry_best_effort(token_path) if token_path else None
+
+    parts = []
+    parts.append("# ms365-relay diagnostics\n")
+    parts.append(f"timestamp: {time.strftime('%Y-%m-%d %H:%M:%S %Z', time.localtime())}\n")
+    parts.append("\n## env\n")
+    parts.append(f"RELAYHOST={os.environ.get('RELAYHOST','')}\n")
+    parts.append(f"MS365_SMTP_USER={ms365_user}\n")
+    parts.append(f"token_expiry={token_exp or ''}\n")
+
+    parts.append("\n## config.json\n")
+    parts.append(json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+
+    parts.append("\n## mailq\n")
+    parts.append(mailq_out.strip() + "\n")
+
+    parts.append("\n## maillog (tail)\n")
+    parts.append(mail_log.strip() + "\n")
+
+    return PlainTextResponse("".join(parts))

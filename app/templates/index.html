@@ -132,12 +132,145 @@
       }, 8000);
     }
 
+    function copyText(elId){
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const text = el.innerText || el.textContent || '';
+      navigator.clipboard?.writeText(text);
+    }
+
+    function syncFromSelect(){
+      const sel = document.getElementById('fromSelect');
+      const inp = document.getElementById('fromInput');
+      if (!sel || !inp) return;
+      if (sel.value) inp.value = sel.value;
+    }
+
+    function fillToMyself(){
+      const inp = document.getElementById('toInput');
+      if (!inp) return;
+      inp.value = '{{ env.MS365_SMTP_USER }}';
+    }
+
+    function applyLogFilter(){
+      const pre = document.getElementById('mailLogPre');
+      if (!pre) return;
+      const full = pre.getAttribute('data-fulltext') || pre.textContent || '';
+      const q = (document.getElementById('logSearch')?.value || '').toLowerCase();
+      const only = !!document.getElementById('logOnlyProblems')?.checked;
+      const lines = full.split('\n');
+      const out = [];
+      for (const ln of lines){
+        const ll = ln.toLowerCase();
+        if (only && !(ll.includes(' warn ') || ll.includes(' err ') || ll.includes(' fatal') || ll.includes('panic'))) continue;
+        if (q && !ll.includes(q)) continue;
+        out.push(ln);
+      }
+      pre.textContent = out.join('\n');
+    }
+
+    function clearLogFilter(){
+      const s = document.getElementById('logSearch');
+      const o = document.getElementById('logOnlyProblems');
+      if (s) s.value = '';
+      if (o) o.checked = false;
+      applyLogFilter();
+    }
+
+    async function refreshStatus(){
+      try {
+        const r = await fetch('/api/status', { cache: 'no-store' });
+        const j = await r.json();
+
+        // health
+        const dot = document.getElementById('healthDot');
+        const lbl = document.getElementById('healthLabel');
+        if (dot) {
+          dot.classList.toggle('bg-emerald-500', !!j.ok);
+          dot.classList.toggle('bg-red-500', !j.ok);
+        }
+        if (lbl) lbl.textContent = j.ok ? 'Postfix OK' : 'Postfix not reachable';
+
+        // cards
+        const qs = document.getElementById('queueSize');
+        if (qs && typeof j.queue_size !== 'undefined') qs.textContent = String(j.queue_size);
+        const rh = document.getElementById('relayhost');
+        if (rh && j.env?.RELAYHOST) rh.textContent = j.env.RELAYHOST;
+        const mu = document.getElementById('ms365User');
+        if (mu && j.env?.MS365_SMTP_USER) mu.textContent = j.env.MS365_SMTP_USER;
+        const te = document.getElementById('tokenExp');
+        if (te) te.textContent = j.token_exp || '(unknown)';
+
+        // warn tail
+        const wt = document.getElementById('warnTail');
+        if (wt) wt.textContent = j.mail_log_warn || '(none)';
+
+        // queue
+        const mq1 = document.getElementById('mailqPre');
+        const mq2 = document.getElementById('mailqPre2');
+        if (mq1) mq1.textContent = j.mailq || '';
+        if (mq2) mq2.textContent = j.mailq || '';
+
+        // mail log (keep fulltext for filtering)
+        const ml = document.getElementById('mailLogPre');
+        if (ml) {
+          ml.setAttribute('data-fulltext', j.mail_log || '');
+          applyLogFilter();
+        }
+
+        // From identities: keep dropdown usable on refresh
+        const sel = document.getElementById('fromSelect');
+        if (sel && Array.isArray(j.from_identities)) {
+          const current = sel.value;
+          // Rebuild options
+          sel.innerHTML = '<option value="">Custom…</option>' + j.from_identities.map(a => `<option value="${a}">${a}</option>`).join('');
+          // try restore
+          for (const opt of sel.options) {
+            if (opt.value === current) { sel.value = current; break; }
+          }
+        }
+
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    function initAutoRefresh(){
+      const key = 'ms365-relay-autorefresh';
+      const cb = document.getElementById('autoRefresh');
+      if (!cb) return;
+      cb.checked = (localStorage.getItem(key) === '1');
+      let timer = null;
+
+      function start(){
+        if (timer) return;
+        timer = window.setInterval(refreshStatus, 5000);
+      }
+      function stop(){
+        if (!timer) return;
+        window.clearInterval(timer);
+        timer = null;
+      }
+
+      cb.addEventListener('change', () => {
+        localStorage.setItem(key, cb.checked ? '1' : '0');
+        if (cb.checked) { refreshStatus(); start(); } else { stop(); }
+      });
+
+      const btn = document.getElementById('refreshBtn');
+      if (btn) btn.addEventListener('click', () => refreshStatus());
+
+      if (cb.checked) { refreshStatus(); start(); }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       try { lucide.createIcons(); } catch(e) {}
       syncThemeButton();
       initNavClicks();
       initScrollSpy();
       showToastFromUrl();
+      initAutoRefresh();
+      applyLogFilter();
     });
   </script>
 
@@ -291,8 +424,23 @@
         </nav>
 
         <div class="mt-6 rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-          <div class="font-semibold text-slate-700 dark:text-slate-200">Security note</div>
-          <div class="mt-1">This UI has no auth by design. Keep it behind a reverse proxy with basic auth.</div>
+          <div class="flex items-start gap-2">
+            <i data-lucide="shield-alert" class="mt-0.5 h-4 w-4"></i>
+            <div>
+              <div class="font-semibold text-slate-700 dark:text-slate-200">Security</div>
+              <div class="mt-1">This UI intentionally has <span class="font-semibold">no built-in auth</span>. Put it behind a reverse proxy (basic auth / SSO / VPN).</div>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <a href="#settings" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+                  <i data-lucide="settings" class="h-3.5 w-3.5"></i>
+                  Check trusted subnets
+                </a>
+                <a href="/diagnostics.txt" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+                  <i data-lucide="download" class="h-3.5 w-3.5"></i>
+                  Diagnostics
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
         </div>
       </aside>
@@ -302,9 +450,32 @@
 
         <!-- STATUS -->
         <div id="status" class="scroll-mt-24">
-          <div class="flex items-center justify-between">
-            <h2 class="text-lg font-semibold">Status</h2>
-            <div class="flex gap-2">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-lg font-semibold">Status</h2>
+              <div class="mt-1 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span class="inline-flex items-center gap-2">
+                  <span id="healthDot" class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if postfix_ok else 'bg-red-500' }}"></span>
+                  <span id="healthLabel">{{ 'Postfix OK' if postfix_ok else 'Postfix not reachable' }}</span>
+                </span>
+                <span class="opacity-40">•</span>
+                <a href="/diagnostics.txt" class="inline-flex items-center gap-1 hover:underline" title="Download diagnostics (no tokens)">
+                  <i data-lucide="download" class="h-3.5 w-3.5"></i> Diagnostics
+                </a>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" id="refreshBtn" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800">
+                <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+                Refresh
+              </button>
+
+              <label class="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Auto refresh status + logs">
+                <input id="autoRefresh" type="checkbox" class="h-4 w-4" />
+                Auto refresh
+              </label>
+
               <form method="post" action="/postfix/render_reload">
                 <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
                   <i data-lucide="sparkles" class="h-4 w-4"></i>
@@ -323,19 +494,47 @@
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Queue</div>
-              <div class="mt-1 text-2xl font-semibold">{{ queue_size }}</div>
+              <div class="mt-1 text-2xl font-semibold" id="queueSize">{{ queue_size }}</div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">messages waiting</div>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Relayhost</div>
-              <div class="mt-1 truncate text-sm font-semibold" title="{{ env.RELAYHOST }}">{{ env.RELAYHOST }}</div>
+              <div class="mt-1 truncate text-sm font-semibold" id="relayhost" title="{{ env.RELAYHOST }}">{{ env.RELAYHOST }}</div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">M365 SMTP endpoint</div>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">M365 user</div>
-              <div class="mt-1 truncate text-sm font-semibold" title="{{ env.MS365_SMTP_USER }}">{{ env.MS365_SMTP_USER }}</div>
+              <div class="mt-1 truncate text-sm font-semibold" id="ms365User" title="{{ env.MS365_SMTP_USER }}">{{ env.MS365_SMTP_USER }}</div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">authenticated sender</div>
             </div>
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Token expiry</div>
-              <div class="mt-1 text-sm font-semibold">{{ token_exp or "(unknown)" }}</div>
+              <div class="mt-1 text-sm font-semibold" id="tokenExp">{{ token_exp or "(unknown)" }}</div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">best effort</div>
+            </div>
+          </div>
+
+          <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div class="flex items-center justify-between">
+                <div class="text-sm font-semibold">Recent warnings / errors</div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('warnTail')">
+                  <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                  Copy
+                </button>
+              </div>
+              <pre id="warnTail" class="mono mt-2 max-h-48 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ mail_log_warn or "(none)" }}</pre>
+            </div>
+
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div class="flex items-center justify-between">
+                <div class="text-sm font-semibold">Queue (mailq)</div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailqPre')">
+                  <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                  Copy
+                </button>
+              </div>
+              <pre id="mailqPre" class="mono mt-2 max-h-48 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ mailq or "" }}</pre>
             </div>
           </div>
 
@@ -418,30 +617,68 @@
             Enforced via <span class="mono">smtpd_sender_login_maps</span> + <span class="mono">reject_sender_login_mismatch</span>.
           </p>
 
-          <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-            <pre class="mono max-h-64 overflow-auto text-xs">{{ (cfg.allowed_from or {}) | tojson(indent=2) }}</pre>
+          <div class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+            <div class="grid grid-cols-12 border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+              <div class="col-span-4">SMTP user</div>
+              <div class="col-span-8">Allowed From addresses</div>
+            </div>
+            <div class="divide-y divide-slate-200 dark:divide-slate-800">
+              {% for login, addrs in (cfg.allowed_from or {}).items() %}
+                <div class="grid grid-cols-12 gap-2 px-3 py-3">
+                  <div class="col-span-12 sm:col-span-4">
+                    <div class="text-sm font-semibold">{{ login }}</div>
+                    {% if (cfg.default_from or {}).get(login) %}
+                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Default From: <span class="mono">{{ (cfg.default_from or {}).get(login) }}</span></div>
+                    {% endif %}
+                  </div>
+                  <div class="col-span-12 sm:col-span-8">
+                    {% if (addrs or [])|length == 0 %}
+                      <div class="text-sm text-slate-500 dark:text-slate-400">(none)</div>
+                    {% else %}
+                      <div class="flex flex-wrap gap-2">
+                        {% for a in addrs %}
+                          <form method="post" action="/from/disallow" class="inline-flex">
+                            <input type="hidden" name="login" value="{{ login }}" />
+                            <input type="hidden" name="from_addr" value="{{ a }}" />
+                            <button type="submit" class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Click to remove">
+                              <i data-lucide="x" class="h-3.5 w-3.5"></i>
+                              <span class="mono">{{ a }}</span>
+                            </button>
+                          </form>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+
+              {% if (cfg.allowed_from or {})|length == 0 %}
+                <div class="px-3 py-4 text-sm text-slate-500 dark:text-slate-400">No sender rules configured yet.</div>
+              {% endif %}
+            </div>
           </div>
 
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <form method="post" action="/from/allow" class="space-y-2">
-              <div class="text-sm font-medium">Allow sender</div>
-              <input name="login" placeholder="login" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
-              <input name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <form method="post" action="/from/allow" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+              <div class="text-sm font-semibold">Add allowed From</div>
+              <div class="text-xs text-slate-500 dark:text-slate-400">This applies to authenticated clients (SMTP AUTH).</div>
+              <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <input name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="plus" class="h-4 w-4"></i>
-                Allow
+                Add
               </button>
             </form>
 
-            <form method="post" action="/from/disallow" class="space-y-2">
-              <div class="text-sm font-medium">Disallow sender</div>
-              <input name="login" placeholder="login" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
-              <input name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
-              <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
-                <i data-lucide="minus" class="h-4 w-4"></i>
-                Disallow
-              </button>
-            </form>
+            <div class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+              <div class="text-sm font-semibold">M365 note (Option A)</div>
+              <div class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                You authenticate as <span class="mono">{{ env.MS365_SMTP_USER }}</span> and set the <span class="font-semibold">From</span> address per mail.
+              </div>
+              <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-300">
+                Make sure the relay user has <span class="font-semibold">Send As</span> permissions for each From mailbox/alias.
+              </div>
+            </div>
           </div>
         </div>
 
@@ -479,11 +716,26 @@
           <form method="post" action="/testmail" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div class="sm:col-span-1">
               <label class="text-sm font-medium">From</label>
-              <input name="from_addr" placeholder="from@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <div class="mt-1 flex gap-2">
+                <select id="fromSelect" class="w-44 shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" onchange="syncFromSelect()">
+                  <option value="">Custom…</option>
+                  {% for a in from_identities %}
+                  <option value="{{ a }}">{{ a }}</option>
+                  {% endfor %}
+                </select>
+                <input id="fromInput" name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              </div>
+              <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Tip: M365 must allow “Send As” for this From address.</div>
             </div>
             <div class="sm:col-span-1">
               <label class="text-sm font-medium">To</label>
-              <input name="to_addr" placeholder="to@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <div class="mt-1 flex gap-2">
+                <input id="toInput" name="to_addr" placeholder="to@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="fillToMyself()" title="Send to M365 user">
+                  <i data-lucide="user" class="h-4 w-4"></i>
+                  Myself
+                </button>
+              </div>
             </div>
             <div class="sm:col-span-2">
               <label class="text-sm font-medium">Subject</label>
@@ -493,25 +745,59 @@
               <label class="text-sm font-medium">Body</label>
               <textarea name="body" rows="5" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">Does it work?</textarea>
             </div>
-            <div class="sm:col-span-2 flex justify-end">
+            <div class="sm:col-span-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div class="text-xs text-slate-500 dark:text-slate-400">If this errors: check “Recent warnings / errors” and “Queue (mailq)”.</div>
               <button type="submit" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
                 <i data-lucide="send" class="h-4 w-4"></i>
                 Send test mail
               </button>
             </div>
           </form>
-          <div class="mt-3 text-xs text-slate-500 dark:text-slate-400">Tip: if this errors, check the mail log and the Postfix queue.</div>
         </div>
 
         <!-- LOGS -->
         <div id="logs" class="scroll-mt-24 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div class="flex items-center gap-2">
             <i data-lucide="scroll-text" class="h-5 w-5 text-slate-500"></i>
-            <h2 class="text-lg font-semibold">Mail log (tail)</h2>
+            <h2 class="text-lg font-semibold">Logs</h2>
           </div>
-          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Recent Postfix activity.</p>
-          <div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
-            <pre class="mono max-h-[36rem] overflow-auto text-xs">{{ mail_log }}</pre>
+          <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Queue + recent Postfix activity (client-side filtering).</p>
+
+          <div class="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div>
+              <div class="flex items-center justify-between">
+                <div class="text-sm font-semibold">Queue (mailq)</div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailqPre2')">
+                  <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                  Copy
+                </button>
+              </div>
+              <pre id="mailqPre2" class="mono mt-2 max-h-[28rem] overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ mailq or "" }}</pre>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between">
+                <div class="text-sm font-semibold">Mail log (tail)</div>
+                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailLogPre')">
+                  <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                  Copy
+                </button>
+              </div>
+
+              <div class="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label class="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                  <input id="logOnlyProblems" type="checkbox" class="h-4 w-4" onchange="applyLogFilter()" />
+                  Show only warnings/errors
+                </label>
+                <input id="logSearch" placeholder="Filter… (e.g. sasl-xoauth2, deferred, sent)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" oninput="applyLogFilter()" />
+                <button type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="clearLogFilter()">
+                  <i data-lucide="eraser" class="h-4 w-4"></i>
+                  Clear
+                </button>
+              </div>
+
+              <pre id="mailLogPre" class="mono mt-2 max-h-[28rem] overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950" data-fulltext="{{ mail_log | e }}">{{ mail_log }}</pre>
+            </div>
           </div>
         </div>
 
