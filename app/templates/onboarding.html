@@ -29,7 +29,22 @@
 
     // theme (persisted)
     const themeKey = 'simple-m365-relay-theme';
-    const saved = localStorage.getItem(themeKey);
+    const legacyThemeKeys = ['simple-ms365-relay-theme', 'ms365-relay-theme'];
+
+    // migrate legacy keys (read first one we find)
+    let saved = localStorage.getItem(themeKey);
+    if (!saved) {
+      for (const k of legacyThemeKeys) {
+        const v = localStorage.getItem(k);
+        if (v) { saved = v; break; }
+      }
+    }
+    if (saved) {
+      try {
+        localStorage.setItem(themeKey, saved);
+        for (const k of legacyThemeKeys) localStorage.removeItem(k);
+      } catch(e) {}
+    }
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     if ((saved === 'dark') || (!saved && prefersDark)) {
       document.documentElement.classList.add('dark');
@@ -129,7 +144,11 @@
         if (el) el.classList.toggle('hidden', i !== step);
       }
       _setProgress(step);
-      try { localStorage.setItem('sm365r_onboarding_step', String(step)); } catch(e) {}
+      try {
+        localStorage.setItem('simple-m365-relay-onboarding-step', String(step));
+        // remove legacy key
+        localStorage.removeItem('sm365r_onboarding_step');
+      } catch(e) {}
     }
 
     function _getCoreFields(){
@@ -277,7 +296,12 @@
       // theme toggle handled via inline onclick on the button
 
       // initial step
-      const savedStep = parseInt(localStorage.getItem('sm365r_onboarding_step') || '1', 10) || 1;
+      const savedStep = parseInt(
+        localStorage.getItem('simple-m365-relay-onboarding-step') ||
+        localStorage.getItem('sm365r_onboarding_step') ||
+        '1',
+        10,
+      ) || 1;
       showStep(Math.min(7, Math.max(1, savedStep)));
 
       // live validation chips
