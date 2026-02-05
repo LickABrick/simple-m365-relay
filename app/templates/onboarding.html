@@ -301,6 +301,8 @@
       // Step navigation handlers
       document.getElementById('getStartedBtn')?.addEventListener('click', () => showStep(2));
 
+      document.getElementById('s1Prev')?.addEventListener('click', () => showStep(1));
+
       document.getElementById('s1Next')?.addEventListener('click', async () => {
         try {
           await saveCoreStep();
@@ -672,7 +674,11 @@
           </div>
         </div>
 
-        <div class="mt-6 flex justify-end">
+        <div class="mt-6 flex justify-between">
+          <button type="button" id="s1Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
+            <i data-lucide="arrow-left" class="h-4 w-4"></i>
+            Previous
+          </button>
           <button type="button" id="s1Next" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
             Next
             <i data-lucide="arrow-right" class="h-4 w-4"></i>
