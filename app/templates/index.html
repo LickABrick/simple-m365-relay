@@ -5,15 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Simple M365 Relay</title>
 
-  <!-- Tailwind (CDN) -->
-  <script>
-    // IMPORTANT: Tailwind CDN defaults to darkMode: 'media'. Force class-based.
-    // Must be defined BEFORE loading the CDN script.
-    window.tailwind = window.tailwind || {};
-    window.tailwind.config = window.tailwind.config || {};
-    window.tailwind.config.darkMode = 'class';
-  </script>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind (self-hosted; compiled at build time) -->
+  <link rel="stylesheet" href="/static/tailwind.css" />
 
   <!-- Lucide icons -->
   <script src="/static/lucide.min.js"></script>
