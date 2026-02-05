@@ -1,0 +1,289 @@
+import json
+import os
+import re
+import subprocess
+import threading
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi.templating import Jinja2Templates
+
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+CFG_JSON = DATA_DIR / "config" / "config.json"
+DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
+
+templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
+app = FastAPI(title="ms365-relay")
+
+POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
+
+_device_flow_lock = threading.Lock()
+_device_flow_running = False
+
+
+def load_cfg() -> Dict[str, Any]:
+    if not CFG_JSON.exists():
+        return {"hostname": "relay.local", "domain": "local", "mynetworks": ["127.0.0.0/8"], "allowed_from": {}, "default_from": {}}
+    return json.loads(CFG_JSON.read_text(encoding="utf-8"))
+
+
+def save_cfg(cfg: Dict[str, Any]) -> None:
+    CFG_JSON.parent.mkdir(parents=True, exist_ok=True)
+    CFG_JSON.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def sh(cmd, check=True) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=check)
+
+
+def tail(path: Path, n: int = 200) -> str:
+    if not path.exists():
+        return ""
+    try:
+        return sh(["tail", "-n", str(n), str(path)], check=False).stdout
+    except Exception:
+        return path.read_text(encoding="utf-8", errors="ignore")[-8000:]
+
+
+def parse_queue_size(mailq_out: str) -> int:
+    # crude: count queue ids (hex) in mailq output
+    # Postfix prints like: ABCDEF1234*  ...
+    ids = re.findall(r"^[A-F0-9]{5,}(?:\*|!)?\s", mailq_out, flags=re.M)
+    return len(ids)
+
+
+def token_expiry_best_effort(token_path: Path) -> Optional[str]:
+    if not token_path.exists():
+        return None
+    try:
+        data = json.loads(token_path.read_text(encoding="utf-8"))
+    except Exception:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(token_path.stat().st_mtime)) + " (mtime)"
+
+    # try common MSAL/cache fields
+    def walk(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                lk = str(k).lower()
+                if lk in ("expires_on", "expiresat", "expires_at", "expireson"):
+                    yield v
+                yield from walk(v)
+        elif isinstance(obj, list):
+            for it in obj:
+                yield from walk(it)
+
+    for v in walk(data):
+        try:
+            ts = int(str(v))
+            if ts > 10_000_000_000:
+                ts //= 1000
+            return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+        except Exception:
+            pass
+    return None
+
+
+def _control_get(path: str) -> dict:
+    import urllib.request
+    import ssl
+
+    url = POSTFIX_CONTROL_URL + path
+    req = urllib.request.Request(url, headers={"User-Agent": "ms365-relay-ui"})
+    with urllib.request.urlopen(req, timeout=10, context=ssl.create_default_context()) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _control_post(path: str) -> dict:
+    import urllib.request
+    import ssl
+
+    url = POSTFIX_CONTROL_URL + path
+    req = urllib.request.Request(url, method="POST", data=b"", headers={"User-Agent": "ms365-relay-ui"})
+    with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def postfix_reload() -> str:
+    return (_control_post("/reload").get("output") or "ok")
+
+
+def render_and_reload() -> str:
+    return (_control_post("/render-reload").get("output") or "ok")
+
+
+def ensure_user(login: str, password: str) -> str:
+    import urllib.request, ssl
+
+    data = json.dumps({"login": login, "password": password}).encode("utf-8")
+    req = urllib.request.Request(
+        POSTFIX_CONTROL_URL + "/users/add",
+        method="POST",
+        data=data,
+        headers={"Content-Type": "application/json", "User-Agent": "ms365-relay-ui"},
+    )
+    with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context()) as r:
+        return json.loads(r.read().decode("utf-8")).get("output") or "ok"
+
+
+def delete_user(login: str) -> str:
+    import urllib.request, ssl
+
+    data = json.dumps({"login": login}).encode("utf-8")
+    req = urllib.request.Request(
+        POSTFIX_CONTROL_URL + "/users/delete",
+        method="POST",
+        data=data,
+        headers={"Content-Type": "application/json", "User-Agent": "ms365-relay-ui"},
+    )
+    with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context()) as r:
+        return json.loads(r.read().decode("utf-8")).get("output") or "ok"
+
+
+def _sasldb_path() -> str:
+    # Persisted sasldb2 shared with postfix container
+    return str(DATA_DIR / "sasl" / "sasldb2")
+
+
+def list_users() -> str:
+    try:
+        return (_control_get("/users").get("users") or "")
+    except Exception:
+        return ""
+
+
+def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str:
+    # Not implemented in UI-only container yet; keep UI responsive.
+    return "Not supported in UI container (yet). Use Postfix container or implement /send_test endpoint."
+
+
+def start_device_flow_background() -> None:
+    # Delegate to postfix control API
+    _control_post("/token/start")
+
+
+def device_flow_log() -> str:
+    try:
+        return (_control_get("/device-flow-log").get("log") or "")
+    except Exception:
+        return ""
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request):
+    cfg = load_cfg()
+    mailq_out = (_control_get("/mailq").get("mailq") or "")
+    qsize = parse_queue_size(mailq_out)
+    mail_log = (_control_get("/maillog").get("maillog") or "")
+
+    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
+    token_exp = token_expiry_best_effort(token_path) if token_path else None
+
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "cfg": cfg,
+            "queue_size": qsize,
+            "mail_log": mail_log,
+            "users": list_users(),
+            "device_flow_log": device_flow_log(),
+            "token_exp": token_exp,
+            "env": {
+                "MS365_SMTP_USER": ms365_user,
+                "MS365_TENANT_ID": os.environ.get("MS365_TENANT_ID", ""),
+                "MS365_CLIENT_ID": os.environ.get("MS365_CLIENT_ID", ""),
+                "RELAYHOST": os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
+            },
+        },
+    )
+
+
+@app.post("/settings")
+def update_settings(
+    hostname: str = Form(...),
+    domain: str = Form(...),
+    mynetworks: str = Form(""),
+):
+    cfg = load_cfg()
+    cfg["hostname"] = hostname.strip()
+    cfg["domain"] = domain.strip()
+    nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
+    cfg["mynetworks"] = nets
+    save_cfg(cfg)
+    render_and_reload()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/users/add")
+def users_add(login: str = Form(...), password: str = Form(...)):
+    ensure_user(login.strip(), password)
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/users/delete")
+def users_del(login: str = Form(...)):
+    delete_user(login.strip())
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/from/allow")
+def allow_from(login: str = Form(...), from_addr: str = Form(...)):
+    cfg = load_cfg()
+    login = login.strip()
+    addr = from_addr.strip().lower()
+    cfg.setdefault("allowed_from", {})
+    cfg["allowed_from"].setdefault(login, [])
+    if addr and addr not in cfg["allowed_from"][login]:
+        cfg["allowed_from"][login].append(addr)
+    save_cfg(cfg)
+    render_and_reload()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/from/disallow")
+def disallow_from(login: str = Form(...), from_addr: str = Form(...)):
+    cfg = load_cfg()
+    login = login.strip()
+    addr = from_addr.strip().lower()
+    if login in (cfg.get("allowed_from") or {}):
+        cfg["allowed_from"][login] = [a for a in cfg["allowed_from"][login] if a != addr]
+    save_cfg(cfg)
+    render_and_reload()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/from/default")
+def set_default_from(login: str = Form(...), from_addr: str = Form(...)):
+    cfg = load_cfg()
+    cfg.setdefault("default_from", {})
+    cfg["default_from"][login.strip()] = from_addr.strip()
+    save_cfg(cfg)
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/postfix/reload")
+def btn_reload():
+    out = postfix_reload()
+    return PlainTextResponse(out)
+
+
+@app.post("/postfix/render_reload")
+def btn_render_reload():
+    out = render_and_reload()
+    return PlainTextResponse(out)
+
+
+@app.post("/token/start")
+def token_start():
+    start_device_flow_background()
+    return RedirectResponse(url="/", status_code=303)
+
+
+@app.post("/testmail")
+def testmail(to_addr: str = Form(...), from_addr: str = Form(...), subject: str = Form("Test"), body: str = Form("Does it work?")):
+    out = send_test_mail(to_addr, from_addr, subject, body)
+    return PlainTextResponse(out)

@@ -1,0 +1,21 @@
+# secrets / local overrides
+.env
+.env.*
+*.env
+
+# runtime data volume (if mapped locally)
+data/
+
+# certs / tokens (can be regenerated)
+certs/
+tokens/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

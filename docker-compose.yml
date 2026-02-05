@@ -1,0 +1,58 @@
+services:
+  postfix:
+    build:
+      context: .
+      dockerfile: postfix/Dockerfile
+    container_name: ms365-relay-postfix
+    restart: unless-stopped
+    ports:
+      - "25:25"
+      - "587:587"
+    environment:
+      RELAY_HOSTNAME: ${RELAY_HOSTNAME:-relay.local}
+      RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
+      RELAY_MYNETWORKS: ${RELAY_MYNETWORKS:-127.0.0.0/8}
+
+      RELAY_SMTPD_TLS_LEVEL_25: ${RELAY_SMTPD_TLS_LEVEL_25:-may}
+      RELAY_SMTPD_TLS_LEVEL_587: ${RELAY_SMTPD_TLS_LEVEL_587:-encrypt}
+
+      RELAY_TLS_GENERATE_SELF_SIGNED: ${RELAY_TLS_GENERATE_SELF_SIGNED:-true}
+      RELAY_TLS_CERT_PATH: ${RELAY_TLS_CERT_PATH:-/data/certs/tls.crt}
+      RELAY_TLS_KEY_PATH: ${RELAY_TLS_KEY_PATH:-/data/certs/tls.key}
+      RELAY_TLS_SELF_SIGNED_CN: ${RELAY_TLS_SELF_SIGNED_CN:-relay.local}
+
+      RELAYHOST: ${RELAYHOST:-[smtp.office365.com]:587}
+      MS365_SMTP_USER: ${MS365_SMTP_USER:-postfix@example.com}
+
+      MS365_TENANT_ID: ${MS365_TENANT_ID:-}
+      MS365_CLIENT_ID: ${MS365_CLIENT_ID:-}
+
+      CONTROL_BIND: ${CONTROL_BIND:-0.0.0.0}
+      CONTROL_PORT: ${CONTROL_PORT:-18080}
+    volumes:
+      - ms365-relay-data:/data
+    expose:
+      - "18080"
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    container_name: ms365-relay-ui
+    restart: unless-stopped
+    ports:
+      - "8000:8000"  # put behind reverse proxy + basic auth
+    environment:
+      UI_BIND: ${UI_BIND:-0.0.0.0}
+      UI_PORT: ${UI_PORT:-8000}
+      UI_BASE_URL: ${UI_BASE_URL:-}
+      POSTFIX_CONTROL_URL: ${POSTFIX_CONTROL_URL:-http://postfix:18080}
+      RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
+      DATA_DIR: ${DATA_DIR:-/data}
+    volumes:
+      - ms365-relay-data:/data
+    depends_on:
+      - postfix
+
+volumes:
+  ms365-relay-data:
