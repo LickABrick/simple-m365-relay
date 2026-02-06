@@ -1268,7 +1268,6 @@ def api_token_refresh():
     return {"ok": True, "output": out, "token_exp_ts": token_exp_ts}
 
 
-@app.get("/api/device-flow-log")
 def _parse_device_flow_log(log: str) -> dict:
     import re
 
@@ -1329,6 +1328,7 @@ def _parse_device_flow_log(log: str) -> dict:
     }
 
 
+@app.get("/api/device-flow-log")
 def api_device_flow_log():
     log = get_device_flow_log()
     return {"log": log, **_parse_device_flow_log(log)}
