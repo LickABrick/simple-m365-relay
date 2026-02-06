@@ -182,7 +182,7 @@ def main():
     (outdir / "master.cf").write_text(MASTER_CF.format(tls_25=tls_25, tls_587=tls_587), encoding="utf-8")
 
     # Outbound xoauth2 token file mapping
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = os.environ.get("MS365_SMTP_USER", "").strip() or str((cfg or {}).get("ms365_smtp_user") or "").strip()
     sasl_passwd = outdir / "sasl_passwd"
     if ms365_user:
         # token file path must be a safe filename

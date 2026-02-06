@@ -195,9 +195,10 @@
 
     function _getCoreFields(){
       const relayhost = document.querySelector('input[name="relayhost"]')?.value || '';
+      const ms365_smtp_user = document.querySelector('input[name="ms365_smtp_user"]')?.value || '';
       const tls25 = document.querySelector('select[name="tls_25"]')?.value || 'may';
       const tls587 = document.querySelector('select[name="tls_587"]')?.value || 'encrypt';
-      return { relayhost, tls_25: tls25, tls_587: tls587 };
+      return { relayhost, ms365_smtp_user, tls_25: tls25, tls_587: tls587 };
     }
 
     function _getOauthFields(){
@@ -211,7 +212,7 @@
       const core = _getCoreFields();
       const oauth = _getOauthFields();
 
-      const okCore = _fieldOk(core.relayhost);
+      const okCore = _fieldOk(core.relayhost) && _fieldOk(core.ms365_smtp_user);
       const okOAuth = _fieldOk(oauth.tenant_id) && _fieldOk(oauth.client_id);
 
       const chip = document.getElementById('coreReadyChip');
@@ -234,9 +235,11 @@
     async function saveCoreStep(){
       const core = _getCoreFields();
       if (!_fieldOk(core.relayhost)) throw new Error('Relayhost is required.');
+      if (!_fieldOk(core.ms365_smtp_user)) throw new Error('Microsoft 365 SMTP user is required.');
 
       const data = new FormData();
       data.append('relayhost', core.relayhost);
+      data.append('ms365_smtp_user', core.ms365_smtp_user);
       data.append('tls_25', core.tls_25);
       data.append('tls_587', core.tls_587);
 
@@ -353,7 +356,7 @@
       showStep(Math.min(7, Math.max(1, savedStep)));
 
       // live validation chips
-      for (const el of document.querySelectorAll('input[name="relayhost"],input[name="tenant_id"],input[name="client_id"]')) {
+      for (const el of document.querySelectorAll('input[name="relayhost"],input[name="ms365_smtp_user"],input[name="tenant_id"],input[name="client_id"]')) {
         el.addEventListener('input', refreshCompletionChips);
       }
       refreshCompletionChips();
@@ -905,6 +908,12 @@
             <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
             <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Example: <span class="mono">[smtp.office365.com]:587</span></div>
+          </div>
+
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">Microsoft 365 SMTP user <span class="text-xs text-slate-500">(required)</span></label>
+            <input name="ms365_smtp_user" value="{{ cfg.ms365_smtp_user or '' }}" placeholder="postfix@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">This is the authenticated account used for OAuth token storage and identity.</div>
           </div>
 
           <div class="sm:col-span-2">

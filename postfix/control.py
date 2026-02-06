@@ -229,8 +229,16 @@ def _jwt_exp_best_effort(jwt: str):
         return None
 
 
+def _ms365_user(cfg: dict) -> str:
+    u = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    if u:
+        return u
+    return str((cfg or {}).get("ms365_smtp_user") or "").strip()
+
+
 def token_status() -> dict:
-    user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    cfg = load_cfg()
+    user = _ms365_user(cfg)
     if not user:
         return {"ok": False, "error": "MS365_SMTP_USER_not_set"}
     p = _token_path_for_user(user)
@@ -304,7 +312,8 @@ def refresh_token() -> str:
     import urllib.request
 
     with _refresh_lock:
-        user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+        cfg = load_cfg()
+        user = _ms365_user(cfg)
         if not user:
             return "Missing MS365_SMTP_USER"
 
@@ -452,7 +461,7 @@ def start_device_flow_background() -> None:
             cfg = load_cfg()
             tenant = (cfg.get("oauth") or {}).get("tenant_id") or os.environ.get("MS365_TENANT_ID", "")
             client_id = (cfg.get("oauth") or {}).get("client_id") or os.environ.get("MS365_CLIENT_ID", "")
-            user = os.environ.get("MS365_SMTP_USER", "")
+            user = _ms365_user(cfg)
             if not (tenant and client_id and user):
                 DEVICE_FLOW_LOG.write_text("Missing tenant_id/client_id (OAuth settings) or MS365_SMTP_USER\n", encoding="utf-8")
                 return

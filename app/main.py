@@ -61,6 +61,7 @@ def _default_cfg() -> Dict[str, Any]:
         "domain": "local",
         "mynetworks": ["127.0.0.0/8"],
         "relayhost": "[smtp.office365.com]:587",
+        "ms365_smtp_user": "",
         "tls": {"smtpd_25": "may", "smtpd_587": "encrypt"},
         "oauth": {"tenant_id": "", "client_id": "", "auto_refresh_minutes": 30},
         "allowed_from": {},
@@ -79,6 +80,8 @@ def load_cfg() -> Dict[str, Any]:
     base.setdefault("oauth", _default_cfg()["oauth"])
     base.setdefault("allowed_from", {})
     base.setdefault("default_from", {})
+    # ensure new keys exist
+    base.setdefault("ms365_smtp_user", "")
     return base
 
 
@@ -559,6 +562,14 @@ def parse_addr_list(text: str) -> list[str]:
     return out
 
 
+def effective_ms365_user(cfg: Dict[str, Any]) -> str:
+    # Prefer env for backwards compatibility, fallback to config for v1.1.0+
+    env_u = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    if env_u:
+        return env_u
+    return str((cfg or {}).get("ms365_smtp_user") or "").strip()
+
+
 def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
     addrs = []
 
@@ -596,10 +607,11 @@ def _is_public_path(path: str) -> bool:
 
 def onboarding_complete(cfg: Dict[str, Any]) -> bool:
     relayhost = str((cfg or {}).get("relayhost") or "").strip()
+    ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip()
     oauth = (cfg or {}).get("oauth") or {}
     tenant_id = str((oauth or {}).get("tenant_id") or "").strip()
     client_id = str((oauth or {}).get("client_id") or "").strip()
-    return bool(relayhost and tenant_id and client_id)
+    return bool(relayhost and ms365_user and tenant_id and client_id)
 
 
 @app.middleware("http")
@@ -787,7 +799,7 @@ def logout_post(request: Request, csrf_token: str = Form("")):
 def onboarding_get(request: Request):
     cfg = load_cfg()
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -825,7 +837,7 @@ def index(request: Request):
     mail_log = (_control_get("/maillog").get("maillog") or "")
     warn_tail = _extract_recent_warnings(mail_log)
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -873,6 +885,7 @@ def update_settings(
     domain: str = Form(...),
     mynetworks: str = Form(""),
     relayhost: str = Form(""),
+    ms365_smtp_user: str = Form(""),
     tls_25: str = Form("may"),
     tls_587: str = Form("encrypt"),
     tenant_id: str = Form(""),
@@ -889,6 +902,8 @@ def update_settings(
     cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
+    if (ms365_smtp_user or "").strip():
+        cfg["ms365_smtp_user"] = _reject_ctl(ms365_smtp_user or "")
     cfg.setdefault("tls", {})
     cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
     cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
@@ -993,6 +1008,7 @@ def api_settings_save(
     domain: str = Form(""),
     mynetworks: str = Form(""),
     relayhost: str = Form(""),
+    ms365_smtp_user: str = Form(""),
     tls_25: str = Form("may"),
     tls_587: str = Form("encrypt"),
     tenant_id: str = Form(""),
@@ -1013,6 +1029,8 @@ def api_settings_save(
         cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
+    if (ms365_smtp_user or "").strip():
+        cfg["ms365_smtp_user"] = _reject_ctl(ms365_smtp_user or "")
     cfg.setdefault("tls", {})
     cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
     cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
@@ -1125,7 +1143,7 @@ def set_default_from(request: Request, csrf_token: str = Form(""), login: str = 
 @app.get("/api/senders")
 def api_senders_get():
     cfg = load_cfg()
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
 
     current_hash = cfg_hash(cfg)
     applied_hash = get_applied_hash()
@@ -1401,7 +1419,7 @@ def api_status():
     mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
     token_refresh_log = get_token_refresh_log()
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -1456,7 +1474,7 @@ def diagnostics_txt():
     mailq_out = (_control_get("/mailq").get("mailq") or "")
     mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -1469,6 +1487,7 @@ def diagnostics_txt():
     parts.append("\n## env\n")
     parts.append(f"RELAYHOST={os.environ.get('RELAYHOST','')}\n")
     parts.append(f"MS365_SMTP_USER={ms365_user}\n")
+    parts.append(f"CFG_MS365_SMTP_USER={str((cfg or {}).get('ms365_smtp_user') or '')}\n")
     parts.append(f"token_expiry_ts={token_exp_ts or ''}\n")
 
     parts.append("\n## config.json\n")
