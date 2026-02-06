@@ -142,10 +142,10 @@
       }
 
       const r = await fetch(url, o);
-      if (r.status === 403) {
+      if (r.status === 401 || r.status === 403) {
         showToast('Session expired or invalid. Please refresh and sign in again.', 'error');
         window.setTimeout(() => { window.location.href = '/login'; }, 1200);
-        throw new Error('forbidden');
+        throw new Error('auth');
       }
       return r;
     }
