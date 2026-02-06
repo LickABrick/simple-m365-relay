@@ -89,6 +89,44 @@
       }, 8000);
     }
 
+    async function copyText(elId, btn){
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const text = (el.innerText || el.textContent || '').trim();
+      if (!text) return;
+
+      async function setBtnOk(){
+        if (!btn) return;
+        if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="check" class="h-3.5 w-3.5"></i> Copied';
+        try { lucide.createIcons(); } catch(e) {}
+        await new Promise(r => setTimeout(r, 900));
+        btn.innerHTML = btn.dataset.origHtml;
+        try { lucide.createIcons(); } catch(e) {}
+      }
+
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          ta.style.left = '-1000px';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        showToast('Copied to clipboard.', 'ok');
+        await setBtnOk();
+      } catch (e) {
+        showToast('Copy failed. (Browser blocked clipboard access)', 'error');
+      }
+    }
+
     function getCsrf(){
       return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     }
@@ -568,9 +606,7 @@
       });
 
       reauthCopy?.addEventListener('click', async () => {
-        const txt = (reauthCode?.textContent || '').trim();
-        if (!txt || txt === '—') return;
-        try { await navigator.clipboard.writeText(txt); showToast('Code copied.', 'ok'); } catch(e) {}
+        await copyText('reauthCode', reauthCopy);
       });
 
       document.getElementById('refreshDeviceFlowBtn')?.addEventListener('click', async () => {
