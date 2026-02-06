@@ -48,6 +48,8 @@ CONTROL_TOKEN_FILE = DATA_DIR / "state" / "control.token"
 _device_lock = threading.Lock()
 _device_running = False
 
+_refresh_lock = threading.Lock()
+
 
 def _get_control_token() -> str:
     """Return the shared control token.
@@ -290,109 +292,121 @@ def refresh_token() -> str:
     Notes:
     - sasl-xoauth2-tool has a 'test-token-refresh' command, but it does not update
       the token file. The UI expects a refresh to update expiry.
-    - We therefore call the Entra token endpoint directly using the stored refresh_token.
+    - We call the Entra token endpoint directly using the stored refresh_token.
+    - We serialize refreshes because an auto-refresh thread may run concurrently.
 
     Token file format (what sasl-xoauth2-tool writes):
       {"access_token": "...", "refresh_token": "...", "expiry": <epoch_seconds>}
     """
 
-    user = (os.environ.get("MS365_SMTP_USER") or "").strip()
-    if not user:
-        return "Missing MS365_SMTP_USER"
-
-    tok_path = _token_path_for_user(user)
-    p = Path(tok_path)
-    if not p.exists():
-        return f"Token file not found: {tok_path}"
-
-    # Load OAuth app settings
-    cfg = load_cfg()
-    tenant = (cfg.get("oauth") or {}).get("tenant_id") or os.environ.get("MS365_TENANT_ID", "")
-    client_id = (cfg.get("oauth") or {}).get("client_id") or os.environ.get("MS365_CLIENT_ID", "")
-    tenant = str(tenant or "").strip()
-    client_id = str(client_id or "").strip()
-    if not (tenant and client_id):
-        return "Missing OAuth tenant_id/client_id (configure in UI or env)"
-
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        return "Token file unreadable (invalid JSON)"
-
-    rt = (data.get("refresh_token") or "").strip() if isinstance(data, dict) else ""
-    if not rt:
-        return "Token file missing refresh_token"
-
     import time as _time
     import urllib.parse
     import urllib.request
 
-    endpoint = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+    with _refresh_lock:
+        user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+        if not user:
+            return "Missing MS365_SMTP_USER"
 
-    # Outlook/SMTP AUTH: use outlook resource default scope.
-    # Keep offline_access so a refresh_token continues to be issued.
-    scope = "https://outlook.office365.com/.default offline_access"
+        tok_path = _token_path_for_user(user)
+        p = Path(tok_path)
+        if not p.exists():
+            return f"Token file not found: {tok_path}"
 
-    form = {
-        "client_id": client_id,
-        "grant_type": "refresh_token",
-        "refresh_token": rt,
-        "scope": scope,
-    }
+        # Load OAuth app settings
+        cfg = load_cfg()
+        tenant = (cfg.get("oauth") or {}).get("tenant_id") or os.environ.get("MS365_TENANT_ID", "")
+        client_id = (cfg.get("oauth") or {}).get("client_id") or os.environ.get("MS365_CLIENT_ID", "")
+        tenant = str(tenant or "").strip()
+        client_id = str(client_id or "").strip()
+        if not (tenant and client_id):
+            return "Missing OAuth tenant_id/client_id (configure in UI or env)"
 
-    body = urllib.parse.urlencode(form).encode("utf-8")
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return "Token file unreadable (invalid JSON)"
 
-    try:
-        req = urllib.request.Request(endpoint, data=body, method="POST")
-        req.add_header("Content-Type", "application/x-www-form-urlencoded")
-        with urllib.request.urlopen(req, timeout=20) as r:
-            resp_raw = r.read().decode("utf-8", errors="ignore")
-            resp = json.loads(resp_raw)
-    except Exception as e:
-        out = f"Token refresh failed: {type(e).__name__}: {e}"
-        import time as _time
+        rt = (data.get("refresh_token") or "").strip() if isinstance(data, dict) else ""
+        if not rt:
+            return "Token file missing refresh_token"
 
+        endpoint = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+
+        # Outlook/SMTP AUTH: use outlook resource default scope.
+        # Keep offline_access so a refresh_token continues to be issued.
+        scope = "https://outlook.office365.com/.default offline_access"
+
+        form = {
+            "client_id": client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": rt,
+            "scope": scope,
+        }
+
+        body = urllib.parse.urlencode(form).encode("utf-8")
+
+        try:
+            req = urllib.request.Request(endpoint, data=body, method="POST")
+            req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            with urllib.request.urlopen(req, timeout=20) as r:
+                resp_raw = r.read().decode("utf-8", errors="ignore")
+                resp = json.loads(resp_raw)
+        except Exception as e:
+            out = f"Token refresh failed: {type(e).__name__}: {e}"
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
+            return out
+
+        at = (resp.get("access_token") or "").strip()
+        if not at:
+            out = "Token refresh failed: no access_token in response"
+            _append_log(
+                TOKEN_REFRESH_LOG,
+                f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(json.dumps(resp)[:1000])}\n",
+            )
+            return out
+
+        now = int(_time.time())
+        try:
+            expires_in = int(resp.get("expires_in") or 0)
+        except Exception:
+            expires_in = 0
+
+        # Safety buffer so UI doesn't show "expiring" immediately.
+        new_expiry = now + max(0, expires_in - 60) if expires_in else (now + 3600)
+
+        # Monotonic expiry: if multiple refreshes happen close together, don't allow expiry to go backwards.
+        try:
+            old_expiry = int((data or {}).get("expiry") or 0)
+        except Exception:
+            old_expiry = 0
+        expiry = max(old_expiry, int(new_expiry))
+
+        new = dict(data) if isinstance(data, dict) else {}
+        new["access_token"] = at
+        new["expiry"] = int(expiry)
+        if resp.get("refresh_token"):
+            new["refresh_token"] = resp.get("refresh_token")
+
+        # Atomic-ish write
+        tmp = p.with_name(p.name + ".tmp")
+        try:
+            tmp.write_text(json.dumps(new, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            tmp.replace(p)
+            os.chmod(p, 0o600)
+        except Exception as e:
+            out = f"Token refresh failed: cannot write token file: {type(e).__name__}: {e}"
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return out
+
+        out = f"Token refresh succeeded. New expiry={expiry}"
         _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
         return out
-
-    at = (resp.get("access_token") or "").strip()
-    if not at:
-        out = "Token refresh failed: no access_token in response"
-        import time as _time
-
-        _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(json.dumps(resp)[:1000])}\n")
-        return out
-
-    now = int(_time.time())
-    try:
-        expires_in = int(resp.get("expires_in") or 0)
-    except Exception:
-        expires_in = 0
-
-    # Safety buffer so UI doesn't show "expiring" immediately.
-    expiry = now + max(0, expires_in - 60) if expires_in else (now + 3600)
-
-    new = dict(data) if isinstance(data, dict) else {}
-    new["access_token"] = at
-    new["expiry"] = int(expiry)
-    if resp.get("refresh_token"):
-        new["refresh_token"] = resp.get("refresh_token")
-
-    try:
-        p.write_text(json.dumps(new, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        os.chmod(p, 0o600)
-    except Exception as e:
-        out = f"Token refresh failed: cannot write token file: {type(e).__name__}: {e}"
-        import time as _time
-
-        _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
-        return out
-
-    out = f"Token refresh succeeded. New expiry={expiry}"
-    import time as _time
-
-    _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
-    return out
 
 
 def _ensure_sasldb_ok() -> None:
