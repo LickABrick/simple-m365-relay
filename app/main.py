@@ -21,13 +21,7 @@ CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
 templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
-app = FastAPI(
-    title="Simple M365 Relay",
-    # Basic hardening: lock down where scripts can load from.
-    # Note: we still allow inline scripts (template uses inline JS).
-    # If you run behind a reverse proxy, you may want to add/override headers there too.
-    default_response_class=Response,
-)
+app = FastAPI(title="Simple M365 Relay")
 app.mount("/static", StaticFiles(directory="/opt/ms365-relay/app/static"), name="static")
 
 
