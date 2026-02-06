@@ -779,8 +779,11 @@ def onboarding_get(request: Request):
     cfg = load_cfg()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     return templates.TemplateResponse(
         "onboarding.html",
@@ -814,8 +817,11 @@ def index(request: Request):
     warn_tail = _extract_recent_warnings(mail_log)
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     user = getattr(request.state, "user", "")
     csrf_token = getattr(request.state, "csrf", "")
@@ -1260,10 +1266,12 @@ def api_token_start():
 def api_token_refresh():
     out = refresh_token_now()
 
-    # recompute expiry after refresh
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    # recompute expiry after refresh via postfix control (UI container can't read token file)
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     return {"ok": True, "output": out, "token_exp_ts": token_exp_ts}
 
@@ -1385,8 +1393,11 @@ def api_status():
     token_refresh_log = get_token_refresh_log()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     current_hash = cfg_hash(cfg)
     applied_hash = get_applied_hash()
@@ -1431,8 +1442,11 @@ def diagnostics_txt():
     mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = token_file_for_ms365_user(ms365_user) if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     parts = []
     parts.append("# Simple M365 Relay diagnostics\n")

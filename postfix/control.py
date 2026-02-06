@@ -208,6 +208,82 @@ def _append_log(path: Path, text: str, max_bytes: int = 200_000) -> None:
         pass
 
 
+def _jwt_exp_best_effort(jwt: str):
+    try:
+        parts = (jwt or "").split(".")
+        if len(parts) < 2:
+            return None
+        import base64
+
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        raw = base64.urlsafe_b64decode(payload.encode("utf-8"))
+        obj = json.loads(raw.decode("utf-8", errors="ignore"))
+        exp = obj.get("exp")
+        if exp is None:
+            return None
+        return int(exp)
+    except Exception:
+        return None
+
+
+def token_status() -> dict:
+    user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    if not user:
+        return {"ok": False, "error": "MS365_SMTP_USER_not_set"}
+    p = _token_path_for_user(user)
+    try:
+        txt = Path(p).read_text(encoding="utf-8")
+        data = json.loads(txt)
+    except Exception as e:
+        # we only return mtime as a last resort
+        try:
+            st = os.stat(p)
+            return {"ok": True, "token_exp_ts": int(st.st_mtime), "warning": "fallback_mtime"}
+        except Exception:
+            return {"ok": False, "error": f"cannot_read_token: {type(e).__name__}"}
+
+    # common field
+    exp = None
+    try:
+        exp0 = int(str(data.get("expiry", "") or 0))
+        if exp0 > 0:
+            exp = exp0
+    except Exception:
+        pass
+
+    if not exp:
+        jwt_exp = _jwt_exp_best_effort((data or {}).get("access_token", ""))
+        if jwt_exp:
+            exp = jwt_exp
+
+    if not exp:
+        # nested fields
+        def walk(obj):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    lk = str(k).lower()
+                    if lk in ("expires_on", "expiresat", "expires_at", "expireson", "expiry"):
+                        yield v
+                    yield from walk(v)
+            elif isinstance(obj, list):
+                for it in obj:
+                    yield from walk(it)
+
+        for v in walk(data):
+            try:
+                ts = int(str(v))
+                if ts > 10_000_000_000:
+                    ts //= 1000
+                if ts > 0:
+                    exp = ts
+                    break
+            except Exception:
+                pass
+
+    return {"ok": True, "token_exp_ts": exp}
+
+
 def refresh_token() -> str:
     user = os.environ.get("MS365_SMTP_USER", "")
     if not user:
@@ -370,6 +446,8 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"maillog": out})
         if self.path == "/device-flow-log":
             return self._json(200, {"log": _redact_sensitive(tail(DEVICE_FLOW_LOG, 200))})
+        if self.path == "/token/status":
+            return self._json(200, token_status())
         if self.path == "/token/refresh-log":
             return self._json(200, {"log": _redact_sensitive(tail(TOKEN_REFRESH_LOG, 200))})
         if self.path == "/users":

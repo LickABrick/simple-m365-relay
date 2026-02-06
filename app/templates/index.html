@@ -502,6 +502,30 @@
             document.getElementById('deviceFlowCallout')?.classList.remove('hidden');
             showToast('Device flow started. Use the code shown in OAuth section.', 'ok');
             try { lucide.createIcons(); } catch(e) {}
+
+            // Also poll for completion so the user gets feedback when the token is acquired.
+            (async () => {
+              const until = Date.now() + 5 * 60 * 1000;
+              while (Date.now() < until) {
+                try {
+                  const rr = await apiFetch('/api/device-flow-log', { method: 'GET', cache: 'no-store' });
+                  const ctt = (rr.headers.get('content-type') || '');
+                  if (!ctt.includes('application/json')) break;
+                  const jj = await rr.json().catch(()=>({}));
+                  if (jj && jj.done) {
+                    if (jj.ok) {
+                      showToast('Token acquired. Updating status…', 'ok');
+                      try { await refreshStatus(); } catch(e) {}
+                    } else {
+                      showToast('Device flow finished but token acquisition failed. See log.', 'error');
+                    }
+                    return;
+                  }
+                } catch(e) {}
+                await new Promise(res => setTimeout(res, 1500));
+              }
+            })();
+
             return;
           }
         } catch (e) {}
