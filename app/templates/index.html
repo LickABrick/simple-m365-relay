@@ -357,6 +357,7 @@
       // [YYYY-MM-DD HH:MM:SS] refresh_token
       // Config check passed.
       // Token refresh succeeded.
+      // NOTE: timestamps come from the postfix container and are effectively UTC.
       const s = String(log || '');
       const re = /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*refresh_token[\s\S]*?(?=(\n\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\s*refresh_token)|$)/g;
       let lastTs = null;
@@ -366,7 +367,17 @@
         lastBlock = m[0] || '';
       }
       const ok = /succeeded/i.test(lastBlock) && !/failed/i.test(lastBlock);
-      return { ts: lastTs, ok, raw: lastBlock };
+
+      let local = null;
+      try {
+        if (lastTs) {
+          const iso = lastTs.replace(' ', 'T') + 'Z';
+          const d = new Date(iso);
+          if (!Number.isNaN(d.getTime())) local = d.toLocaleString();
+        }
+      } catch(e) {}
+
+      return { ts: lastTs, local, ok, raw: lastBlock };
     }
 
     async function refreshStatus(){
@@ -438,7 +449,8 @@
         if (lr && typeof j.token_refresh_log !== 'undefined') {
           const info = _extractLastRefresh(j.token_refresh_log || '');
           if (info.ts) {
-            lr.textContent = info.ts + (info.ok ? ' (ok)' : ' (check log)');
+            const shown = info.local || info.ts;
+            lr.textContent = shown + (info.ok ? ' (ok)' : ' (check log)');
           } else {
             lr.textContent = '(unknown)';
           }
