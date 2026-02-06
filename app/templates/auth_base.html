@@ -4,15 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ title or 'Simple M365 Relay' }}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="shortcut icon" href="/static/favicon.svg" />
   <meta name="csrf-token" content="{{ csrf_token or '' }}" />
 
-  <script>
-    window.tailwind = window.tailwind || {};
-    window.tailwind.config = window.tailwind.config || {};
-    window.tailwind.config.darkMode = 'class';
-  </script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/static/tailwind.css" />
+  <script src="/static/lucide.min.js"></script>
 
   <script>
     const themeKey = 'simple-m365-relay-theme';

@@ -1434,6 +1434,12 @@ def _redact_mail_log(text: str) -> str:
     return "\n".join(out_lines)
 
 
+@app.get("/favicon.ico")
+def favicon_ico():
+    # Browsers often request /favicon.ico by default; we serve the SVG.
+    return RedirectResponse(url="/static/favicon.svg", status_code=307)
+
+
 @app.get("/diagnostics.txt")
 def diagnostics_txt():
     # No secrets: we do NOT include token files, and we redact token-like content from logs.
