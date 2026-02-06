@@ -472,6 +472,9 @@
       }
 
       async function runDeviceFlowWizard(){
+        // Hide the main token status/actions while device flow runs
+        document.getElementById('onboardingOauthMain')?.classList.add('hidden');
+
         if (reauthBox) reauthBox.classList.remove('hidden');
         document.getElementById('reauthErrorBox')?.classList.add('hidden');
         _setOdfStep(1);
@@ -484,6 +487,7 @@
         } catch(e) {
           showToast('Could not start device flow.', 'error');
           _setOdfState('Failed to start', false);
+          document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
           if (reauthStart) reauthStart.removeAttribute('disabled');
           return;
         }
@@ -517,14 +521,17 @@
                   const hint = document.getElementById('tokenVerifyHint');
                   if (hint) hint.textContent = 'Verified';
                   _setOdfStep(5);
+                  document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
                   showToast('Success. Token verified.', 'ok');
                 } else {
                   _tokenVerified = false;
                   const hint = document.getElementById('tokenVerifyHint');
                   if (hint) hint.textContent = 'Not verified';
+                  document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
                   showToast('Token written but appears invalid/expired. Check logs.', 'error');
                 }
               } else {
+                document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
                 showToast('Device flow finished but token acquisition failed.', 'error');
               }
 
@@ -543,6 +550,7 @@
         }
 
         _setOdfState('Timed out', false);
+        document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
         if (reauthStart) reauthStart.removeAttribute('disabled');
         showToast('Device flow timed out. Check the log.', 'error');
       }
@@ -947,7 +955,7 @@
           </div>
         </div>
 
-        <div class="mt-4 flex flex-wrap gap-2">
+        <div class="mt-4 flex flex-wrap gap-2" id="onboardingOauthMain">
           <button id="startDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
             <i data-lucide="key-round" class="h-4 w-4"></i>
             Re-auth wizard
