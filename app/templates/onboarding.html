@@ -386,6 +386,12 @@
 
       async function refreshDeviceFlowStatus(){
         const r = await apiFetch('/api/device-flow-log', { method: 'GET', cache: 'no-store' });
+        const ct = (r.headers.get('content-type') || '');
+        if (!ct.includes('application/json')) {
+          showToast('Session expired or invalid. Please sign in again.', 'error');
+          window.setTimeout(() => { window.location.href = '/login'; }, 800);
+          return {};
+        }
         const j = await r.json().catch(()=>({}));
         if (log) log.textContent = j.log || '';
 
