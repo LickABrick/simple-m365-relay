@@ -54,9 +54,8 @@ services:
       - "25:25"
       - "587:587"
     environment:
-      RELAYHOST: "[smtp.office365.com]:587"
+      # Required for a working setup (used for token storage/identity):
       MS365_SMTP_USER: "postfix@example.com"
-      AUTO_TOKEN_REFRESH_MINUTES: "30"
     volumes:
       - simple-m365-relay-data:/data
 
@@ -67,10 +66,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      POSTFIX_CONTROL_SOCKET: /data/state/control.sock
+      # Use TCP within the Docker network (recommended; avoids brittle unix-socket setups):
+      POSTFIX_CONTROL_URL: http://postfix:18080
       DATA_DIR: /data
-      MS365_SMTP_USER: "postfix@example.com"
-      AUTO_TOKEN_REFRESH_MINUTES: "30"
     volumes:
       - simple-m365-relay-data:/data
     depends_on:
