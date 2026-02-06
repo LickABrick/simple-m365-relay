@@ -47,8 +47,10 @@ if [ ! -f "$CFG_JSON" ]; then
   "default_from": {}
 }
 EOF
+fi
 
-  # Ensure the UI can update this file later.
+# Ensure the UI can always update this file (covers upgrades from older versions).
+if [ -f "$CFG_JSON" ]; then
   chown "$UI_UID:$UI_GID" "$CFG_JSON" 2>/dev/null || true
   chmod 600 "$CFG_JSON" 2>/dev/null || true
 fi
