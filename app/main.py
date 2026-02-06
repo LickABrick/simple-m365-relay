@@ -614,9 +614,17 @@ async def auth_middleware(request: Request, call_next):
     # If admin exists, require login for everything except login/setup/logout
     if auth.admin_exists() and (not _is_public_path(path)):
         tok = request.cookies.get(auth.SESSION_COOKIE, "")
-        sess = auth.read_session(tok)
+        try:
+            sess = auth.read_session(tok)
+        except Exception:
+            sess = None
+
         if not sess:
+            # For API calls, do not redirect (fetch() will follow and break JSON parsing).
+            if path.startswith("/api/"):
+                return Response(content="Unauthorized", status_code=401)
             return RedirectResponse(url="/login", status_code=303)
+
         request.state.user = sess.get("u")
         request.state.csrf = sess.get("c")
 

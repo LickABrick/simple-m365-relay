@@ -47,6 +47,10 @@ if [ ! -f "$CFG_JSON" ]; then
   "default_from": {}
 }
 EOF
+
+  # Ensure the UI can update this file later.
+  chown "$UI_UID:$UI_GID" "$CFG_JSON" 2>/dev/null || true
+  chmod 600 "$CFG_JSON" 2>/dev/null || true
 fi
 
 # generate self-signed cert if requested and missing
