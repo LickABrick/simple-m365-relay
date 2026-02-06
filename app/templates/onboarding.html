@@ -4,18 +4,12 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ title or 'Onboarding' }} · Simple M365 Relay</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="shortcut icon" href="/static/favicon.svg" />
   <meta name="csrf-token" content="{{ csrf_token or '' }}" />
 
-  <script>
-    // Tailwind CDN config
-    window.tailwind = window.tailwind || {};
-    window.tailwind.config = window.tailwind.config || {};
-    window.tailwind.config.darkMode = 'class';
-    // Some Tailwind CDN builds read tailwind.config directly.
-    window.tailwind.config = Object.assign({}, window.tailwind.config, { darkMode: 'class' });
-  </script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/static/tailwind.css" />
+  <script src="/static/lucide.min.js"></script>
 
   <style>
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
@@ -95,6 +89,44 @@
       window.setTimeout(() => {
         box.classList.add('hidden');
       }, 8000);
+    }
+
+    async function copyText(elId, btn){
+      const el = document.getElementById(elId);
+      if (!el) return;
+      const text = (el.innerText || el.textContent || '').trim();
+      if (!text) return;
+
+      async function setBtnOk(){
+        if (!btn) return;
+        if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
+        btn.innerHTML = '<i data-lucide="check" class="h-3.5 w-3.5"></i> Copied';
+        try { lucide.createIcons(); } catch(e) {}
+        await new Promise(r => setTimeout(r, 900));
+        btn.innerHTML = btn.dataset.origHtml;
+        try { lucide.createIcons(); } catch(e) {}
+      }
+
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          ta.style.left = '-1000px';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        showToast('Copied to clipboard.', 'ok');
+        await setBtnOk();
+      } catch (e) {
+        showToast('Copy failed. (Browser blocked clipboard access)', 'error');
+      }
     }
 
     function getCsrf(){
@@ -261,7 +293,13 @@
       const sendHint = document.getElementById('testDisabledHint');
 
       try {
-        const r = await fetch('/api/status', { cache: 'no-store' });
+        const r = await apiFetch('/api/status', { method: 'GET', cache: 'no-store' });
+        const ct = (r.headers.get('content-type') || '');
+        if (!ct.includes('application/json')) {
+          showToast('Session expired or invalid. Please sign in again.', 'error');
+          window.setTimeout(() => { window.location.href = '/login'; }, 800);
+          return;
+        }
         const j = await r.json();
         const info = _fmtTsLocal(j.token_exp_ts);
         if (tokenExp) tokenExp.textContent = info.text;
@@ -379,28 +417,203 @@
 
       document.getElementById('s7Prev')?.addEventListener('click', () => showStep(6));
 
-      // Step 3: device flow
-      const start = document.getElementById('startDeviceFlowBtn');
+      // Step 3: device flow (reauth wizard)
+      const reauthBox = document.getElementById('reauthBox');
+      const reauthStatus = document.getElementById('reauthStatus');
+      const reauthUrl = document.getElementById('reauthUrl');
+      const reauthCode = document.getElementById('reauthCode');
+      const reauthCopy = document.getElementById('reauthCopy');
+      // reauthStart removed (device flow starts via the wizard entry button)
+      const reauthErrorBox = document.getElementById('reauthErrorBox');
+      const reauthErrorText = document.getElementById('reauthErrorText');
       const log = document.getElementById('deviceFlowLog');
-      const refreshLog = async () => {
-        if (!log) return;
-        const r = await fetch('/api/device-flow-log', { cache: 'no-store' });
-        const j = await r.json();
-        log.textContent = j.log || '';
-      };
-      if (start) {
-        start.addEventListener('click', async () => {
-          try {
-            await apiFetch('/api/token/start', { method: 'POST' });
-            showToast('Device flow started. Follow the instructions below.', 'ok');
-            await refreshLog();
-            await refreshTokenBits();
-          } catch(e) {
-            showToast('Could not start device flow.', 'error');
+
+      let _reauthTimer = null;
+
+      async function refreshDeviceFlowStatus(){
+        const r = await apiFetch('/api/device-flow-log', { method: 'GET', cache: 'no-store' });
+        const ct = (r.headers.get('content-type') || '');
+        if (!ct.includes('application/json')) {
+          showToast('Session expired or invalid. Please sign in again.', 'error');
+          window.setTimeout(() => { window.location.href = '/login'; }, 800);
+          return {};
+        }
+        const j = await r.json().catch(()=>({}));
+        if (log) log.textContent = j.log || '';
+
+        const url = j.url || 'https://microsoft.com/devicelogin';
+        if (reauthUrl) reauthUrl.setAttribute('href', url);
+        if (reauthUrl) reauthUrl.querySelector('span')?.replaceChildren(document.createTextNode(url.replace('https://','')));
+
+        if (reauthCode) reauthCode.textContent = j.code || '—';
+
+        if (reauthErrorBox) reauthErrorBox.classList.add('hidden');
+
+        if (reauthStatus) {
+          if (j.done) {
+            if (j.ok) {
+              reauthStatus.textContent = 'Completed. Verifying token…';
+            } else {
+              reauthStatus.textContent = 'Failed (exit ' + String(j.exit) + ').';
+              if (reauthErrorText) reauthErrorText.textContent = (j.error || 'Unknown error.');
+              if (reauthErrorBox) reauthErrorBox.classList.remove('hidden');
+            }
+          } else {
+            reauthStatus.textContent = (j.code ? 'Waiting for sign-in…' : 'Starting…');
           }
-        });
+        }
+
+        return j;
       }
-      document.getElementById('refreshDeviceFlowBtn')?.addEventListener('click', async () => { await refreshLog(); await refreshTokenBits(); });
+
+      function startPolling(){
+        if (_reauthTimer) window.clearInterval(_reauthTimer);
+        _reauthTimer = window.setInterval(async () => {
+          try {
+            const j = await refreshDeviceFlowStatus();
+            if (j && j.done) {
+              window.clearInterval(_reauthTimer);
+              _reauthTimer = null;
+              await refreshTokenBits();
+              if (j.ok) {
+                showToast('Token acquired. Verifying…', 'ok');
+                // auto-verify
+                if (_tokenValid) {
+                  _tokenVerified = true;
+                  const hint = document.getElementById('tokenVerifyHint');
+                  if (hint) hint.textContent = 'Verified';
+                  showToast('Token verified.', 'ok');
+                } else {
+                  _tokenVerified = false;
+                  const hint = document.getElementById('tokenVerifyHint');
+                  if (hint) hint.textContent = 'Not verified';
+                  showToast('Token written but appears invalid/expired. Check logs.', 'error');
+                }
+              }
+            }
+          } catch(e) {}
+        }, 1500);
+      }
+
+      function _setOdfStep(n){
+        for (let i=1;i<=5;i++) {
+          const el = document.getElementById('odfStep'+i);
+          if (!el) continue;
+          el.classList.toggle('opacity-70', i !== n);
+          el.classList.toggle('font-semibold', i === n);
+        }
+      }
+
+      function _setOdfState(txt, spinning){
+        const s = document.getElementById('reauthStatus');
+        const sp = document.getElementById('reauthSpinner');
+        if (s) s.textContent = txt;
+        if (sp) sp.classList.toggle('hidden', !spinning);
+      }
+
+      async function runDeviceFlowWizard(){
+        // Hide the main token status/actions while device flow runs
+        document.getElementById('onboardingOauthMain')?.classList.add('hidden');
+
+        if (reauthBox) reauthBox.classList.remove('hidden');
+        document.getElementById('reauthErrorBox')?.classList.add('hidden');
+        _setOdfStep(1);
+        _setOdfState('Starting…', true);
+
+        // reauthStart removed
+
+        try {
+          await apiFetch('/api/token/start', { method: 'POST' });
+        } catch(e) {
+          showToast('Could not start device flow.', 'error');
+          _setOdfState('Failed to start', false);
+          document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
+          // reauthStart removed
+          return;
+        }
+
+        showToast('Device flow started.', 'ok');
+
+        const until = Date.now() + 5 * 60 * 1000;
+        let haveCode = false;
+
+        while (Date.now() < until) {
+          try {
+            const j = await refreshDeviceFlowStatus();
+
+            if (j && j.url && j.code && !haveCode) {
+              haveCode = true;
+              _setOdfStep(2);
+              _setOdfState('Waiting for sign-in…', true);
+              _setOdfStep(3);
+            }
+
+            if (j && j.done) {
+              _setOdfState('Finished', false);
+              _setOdfStep(4);
+
+              await refreshTokenBits();
+
+              if (j.ok) {
+                showToast('Token acquired. Verifying…', 'ok');
+                if (_tokenValid) {
+                  _tokenVerified = true;
+                  const hint = document.getElementById('tokenVerifyHint');
+                  if (hint) hint.textContent = 'Verified';
+                  _setOdfStep(5);
+                  document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
+                  showToast('Success. Token verified.', 'ok');
+                } else {
+                  _tokenVerified = false;
+                  const hint = document.getElementById('tokenVerifyHint');
+                  if (hint) hint.textContent = 'Not verified';
+                  document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
+                  showToast('Token written but appears invalid/expired. Check logs.', 'error');
+                }
+              } else {
+                document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
+                showToast('Device flow finished but token acquisition failed.', 'error');
+              }
+
+              return;
+            }
+
+            if (!haveCode) {
+              _setOdfState('Waiting for login code…', true);
+              _setOdfStep(2);
+            }
+
+          } catch(e) {}
+
+          await new Promise(res => setTimeout(res, 1500));
+        }
+
+        _setOdfState('Timed out', false);
+        document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
+        showToast('Device flow timed out. Check the log.', 'error');
+      }
+
+      document.getElementById('startDeviceFlowBtn')?.addEventListener('click', async () => {
+        runDeviceFlowWizard();
+      });
+
+      // reauthStart removed
+
+      document.getElementById('reauthClose')?.addEventListener('click', () => {
+        reauthBox?.classList.add('hidden');
+      });
+
+      reauthCopy?.addEventListener('click', async () => {
+        await copyText('reauthCode', reauthCopy);
+      });
+
+      document.getElementById('refreshDeviceFlowBtn')?.addEventListener('click', async () => {
+        await refreshDeviceFlowStatus();
+        await refreshTokenBits();
+      });
+
+      // initial refresh
+      refreshDeviceFlowStatus();
 
       document.getElementById('verifyTokenBtn')?.addEventListener('click', async () => {
         await refreshTokenBits();
@@ -417,7 +630,7 @@
         }
       });
 
-      refreshLog();
+      // refreshLog() removed (no standalone log refresher)
 
       // Step 4: test mail (optional)
       document.getElementById('sendTestBtn')?.addEventListener('click', async () => {
@@ -495,8 +708,21 @@
 
           // Apply so dashboard doesn't immediately show the pending/apply banner.
           const ar = await apiFetch('/api/apply', { method: 'POST' });
+          if (!ar.ok) {
+            showToast('Saved. Redirecting…', 'ok');
+            window.setTimeout(() => { window.location.href = '/'; }, 600);
+            return;
+          }
+
+          const ct = (ar.headers.get('content-type') || '');
+          if (!ct.includes('application/json')) {
+            showToast('Saved. Redirecting…', 'ok');
+            window.setTimeout(() => { window.location.href = '/'; }, 600);
+            return;
+          }
+
           const aj = await ar.json().catch(()=>({}));
-          if (!ar.ok || !aj.ok) {
+          if (!aj.ok) {
             showToast(aj.detail || 'Saved, but apply failed. You can apply later on the dashboard.', 'error');
           } else {
             showToast('Saved & applied. Redirecting…', 'ok');
@@ -776,14 +1002,14 @@
           </div>
         </div>
 
-        <div class="mt-4 flex flex-wrap gap-2">
+        <div class="mt-4 flex flex-wrap gap-2" id="onboardingOauthMain">
           <button id="startDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
-            <i data-lucide="play" class="h-4 w-4"></i>
-            Start device flow
+            <i data-lucide="key-round" class="h-4 w-4"></i>
+            Re-auth wizard
           </button>
           <button id="refreshDeviceFlowBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">
             <i data-lucide="refresh-cw" class="h-4 w-4"></i>
-            Refresh
+            Refresh status
           </button>
           <button id="verifyTokenBtn" type="button" class="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-200 dark:hover:bg-emerald-950/50">
             <i data-lucide="badge-check" class="h-4 w-4"></i>
@@ -792,7 +1018,72 @@
           <div class="ml-auto text-xs text-slate-500 dark:text-slate-400 self-center">Token expiry: <span id="tokenExp" data-ts="{{ token_exp_ts or '' }}"></span> · <span id="tokenVerifyHint">Not verified</span></div>
         </div>
 
-        <pre id="deviceFlowLog" class="mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ device_flow_log or '' }}</pre>
+        <!-- Re-auth wizard (same UX as dashboard) -->
+        <div id="reauthBox" class="hidden mt-3 rounded-2xl border border-slate-200 bg-white p-4 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="font-semibold">Device flow</div>
+              <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">Open the link and enter the code. This overwrites the current token for <span class="mono">{{ ms365_user }}</span>.</div>
+            </div>
+            <button id="reauthClose" type="button" class="rounded-lg px-2 py-1 text-slate-500 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white" title="Hide">
+              <i data-lucide="x" class="h-4 w-4"></i>
+            </button>
+          </div>
+
+          <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">URL</div>
+              <a id="reauthUrl" href="https://microsoft.com/devicelogin" target="_blank" rel="noreferrer" class="mt-1 inline-flex items-center gap-2 underline underline-offset-2">
+                <i data-lucide="external-link" class="h-4 w-4"></i>
+                <span>microsoft.com/devicelogin</span>
+              </a>
+            </div>
+            <div>
+              <div class="text-xs font-semibold text-slate-500 dark:text-slate-400">Code</div>
+              <div class="mt-1 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/40">
+                <span id="reauthCode" class="mono font-semibold">—</span>
+                <button id="reauthCopy" type="button" class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800">
+                  <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                  Copy
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="mt-3 flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span id="reauthSpinner" class="hidden inline-flex h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-transparent dark:border-slate-700 dark:border-t-transparent" aria-label="Loading"></span>
+                <div id="reauthStatus" class="text-xs text-slate-600 dark:text-slate-300">Idle</div>
+              </div>
+              <ol class="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                <li id="odfStep1" class="font-semibold">1) Started</li>
+                <li id="odfStep2" class="opacity-70">2) Waiting for login code</li>
+                <li id="odfStep3" class="opacity-70">3) Waiting for sign-in</li>
+                <li id="odfStep4" class="opacity-70">4) Token acquired</li>
+                <li id="odfStep5" class="opacity-70">5) Success</li>
+              </ol>
+            </div>
+            <!-- Start/Restart button removed: device flow starts via the Re-auth wizard button -->
+          </div>
+
+          <div id="reauthErrorBox" class="hidden mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-900 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
+            <div class="flex items-start gap-2">
+              <i data-lucide="triangle-alert" class="mt-0.5 h-4 w-4"></i>
+              <div>
+                <div class="font-semibold">Re-auth failed</div>
+                <div id="reauthErrorText" class="mt-0.5"></div>
+                <div class="mt-2 text-red-800/90 dark:text-red-200/90">
+                  Usual fixes: check Tenant ID + Client ID, ensure the Azure app has the right permissions for SMTP AUTH / Outlook, then retry.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <pre id="deviceFlowLog" class="mono mt-3 max-h-60 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-900/40">{{ device_flow_log or '' }}</pre>
+        </div>
+
+        <pre id="deviceFlowLogFallback" class="hidden mono mt-3 max-h-72 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-950">{{ device_flow_log or '' }}</pre>
 
         <div class="mt-6 flex justify-between">
           <button type="button" id="s3Prev" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800">

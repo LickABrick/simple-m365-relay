@@ -4,6 +4,7 @@ import os
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import socketserver
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -40,9 +41,93 @@ def get_auto_refresh_minutes() -> int:
 
 BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
 PORT = int(os.environ.get("CONTROL_PORT", "18080"))
+SOCKET_PATH = os.environ.get("CONTROL_SOCKET", "")
+CONTROL_TOKEN_ENV = os.environ.get("CONTROL_TOKEN", "")
+CONTROL_TOKEN_FILE = DATA_DIR / "state" / "control.token"
 
 _device_lock = threading.Lock()
 _device_running = False
+
+
+def _get_control_token() -> str:
+    """Return the shared control token.
+
+    Priority:
+      1) CONTROL_TOKEN env
+      2) /data/state/control.token (generated once if missing)
+
+    This token is used by the UI container to authenticate to this control API.
+    """
+    if CONTROL_TOKEN_ENV:
+        return CONTROL_TOKEN_ENV
+
+    try:
+        if CONTROL_TOKEN_FILE.exists():
+            v = (CONTROL_TOKEN_FILE.read_text(encoding="utf-8", errors="ignore") or "").strip()
+            if v:
+                return v
+    except Exception:
+        pass
+
+    # generate and persist a token
+    import secrets
+
+    tok = secrets.token_urlsafe(32)
+    try:
+        CONTROL_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # best effort: avoid changing existing token
+        if not CONTROL_TOKEN_FILE.exists():
+            CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+        else:
+            v = (CONTROL_TOKEN_FILE.read_text(encoding="utf-8", errors="ignore") or "").strip()
+            if v:
+                return v
+            CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+    except Exception:
+        pass
+    return tok
+
+
+def _timing_safe_eq(a: str, b: str) -> bool:
+    try:
+        import hmac
+
+        return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+    except Exception:
+        return a == b
+
+
+def _safe_token_filename(user: str) -> str:
+    import re
+
+    u = (user or "").strip()
+    if not u:
+        return ""
+    u2 = re.sub(r"[^A-Za-z0-9_.@+\-]", "_", u)
+    while ".." in u2:
+        u2 = u2.replace("..", "__")
+    u2 = u2.strip("._-")
+    return u2[:128]
+
+
+def _token_path_for_user(user: str) -> str:
+    safe = _safe_token_filename(user)
+    if not safe:
+        return str(DATA_DIR / "tokens" / "token")
+    return str(DATA_DIR / "tokens" / safe)
+
+
+def _redact_sensitive(text: str) -> str:
+    import re
+
+    t = text or ""
+    # redact jwt-ish tokens
+    t = re.sub(r"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b", "[REDACTED_JWT]", t)
+    # redact common fields
+    t = re.sub(r"(?i)(refresh_token|access_token|id_token|authorization)\s*[:=]\s*[^\s\"']+", r"\1=[REDACTED]", t)
+    # NOTE: do NOT redact device codes here. The UI needs the device code to complete sign-in.
+    # Device codes are short-lived and only shown to authenticated admins.
+    return t
 
 
 def sh(cmd, check=False):
@@ -123,11 +208,87 @@ def _append_log(path: Path, text: str, max_bytes: int = 200_000) -> None:
         pass
 
 
+def _jwt_exp_best_effort(jwt: str):
+    try:
+        parts = (jwt or "").split(".")
+        if len(parts) < 2:
+            return None
+        import base64
+
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        raw = base64.urlsafe_b64decode(payload.encode("utf-8"))
+        obj = json.loads(raw.decode("utf-8", errors="ignore"))
+        exp = obj.get("exp")
+        if exp is None:
+            return None
+        return int(exp)
+    except Exception:
+        return None
+
+
+def token_status() -> dict:
+    user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    if not user:
+        return {"ok": False, "error": "MS365_SMTP_USER_not_set"}
+    p = _token_path_for_user(user)
+    try:
+        txt = Path(p).read_text(encoding="utf-8")
+        data = json.loads(txt)
+    except Exception as e:
+        # we only return mtime as a last resort
+        try:
+            st = os.stat(p)
+            return {"ok": True, "token_exp_ts": int(st.st_mtime), "warning": "fallback_mtime"}
+        except Exception:
+            return {"ok": False, "error": f"cannot_read_token: {type(e).__name__}"}
+
+    # common field
+    exp = None
+    try:
+        exp0 = int(str(data.get("expiry", "") or 0))
+        if exp0 > 0:
+            exp = exp0
+    except Exception:
+        pass
+
+    if not exp:
+        jwt_exp = _jwt_exp_best_effort((data or {}).get("access_token", ""))
+        if jwt_exp:
+            exp = jwt_exp
+
+    if not exp:
+        # nested fields
+        def walk(obj):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    lk = str(k).lower()
+                    if lk in ("expires_on", "expiresat", "expires_at", "expireson", "expiry"):
+                        yield v
+                    yield from walk(v)
+            elif isinstance(obj, list):
+                for it in obj:
+                    yield from walk(it)
+
+        for v in walk(data):
+            try:
+                ts = int(str(v))
+                if ts > 10_000_000_000:
+                    ts //= 1000
+                if ts > 0:
+                    exp = ts
+                    break
+            except Exception:
+                pass
+
+    return {"ok": True, "token_exp_ts": exp}
+
+
 def refresh_token() -> str:
     user = os.environ.get("MS365_SMTP_USER", "")
     if not user:
         return "Missing MS365_SMTP_USER"
-    tok_path = str(DATA_DIR / "tokens" / user)
+    tok_path = _token_path_for_user(user)
     if not Path(tok_path).exists():
         return f"Token file not found: {tok_path}"
 
@@ -145,7 +306,7 @@ def refresh_token() -> str:
     # store a short log record
     import time as _time
 
-    _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{out}\n")
+    _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
     return out or "ok"
 
 
@@ -196,7 +357,7 @@ def start_device_flow_background() -> None:
             if not (tenant and client_id and user):
                 DEVICE_FLOW_LOG.write_text("Missing tenant_id/client_id (OAuth settings) or MS365_SMTP_USER\n", encoding="utf-8")
                 return
-            tok_path = str(DATA_DIR / "tokens" / user)
+            tok_path = _token_path_for_user(user)
             Path(tok_path).parent.mkdir(parents=True, exist_ok=True)
 
             cmd = [
@@ -211,7 +372,7 @@ def start_device_flow_background() -> None:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             with open(DEVICE_FLOW_LOG, "a", encoding="utf-8") as f:
                 for line in proc.stdout or []:
-                    f.write(line)
+                    f.write(_redact_sensitive(line))
                     f.flush()
             proc.wait()
             with open(DEVICE_FLOW_LOG, "a", encoding="utf-8") as f:
@@ -224,6 +385,33 @@ def start_device_flow_background() -> None:
 
 
 class H(BaseHTTPRequestHandler):
+    # When served over a unix socket, BaseHTTPRequestHandler's default
+    # logging tries to index client_address[0], which breaks.
+    def address_string(self) -> str:  # pragma: no cover
+        try:
+            ca = getattr(self, "client_address", None)
+            if isinstance(ca, (tuple, list)) and ca:
+                return str(ca[0])
+        except Exception:
+            pass
+        return "local"
+
+    def _require_auth(self) -> bool:
+        # /health is intentionally unauthenticated for basic liveness checks.
+        if self.path == "/health":
+            return True
+
+        tok = _get_control_token()
+        hdr = (self.headers.get("X-Control-Token") or "").strip()
+        if not tok:
+            # Should never happen, but fail closed.
+            self._json(503, {"error": "control_token_unavailable"})
+            return False
+        if not hdr or not _timing_safe_eq(hdr, tok):
+            self._json(403, {"error": "forbidden"})
+            return False
+        return True
+
     def _json(self, code, obj):
         data = json.dumps(obj).encode("utf-8")
         self.send_response(code)
@@ -248,6 +436,8 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             return self._json(200, {"ok": True})
+        if not self._require_auth():
+            return
         if self.path == "/mailq":
             out = sh(["mailq"], check=False)
             return self._json(200, {"mailq": out})
@@ -255,9 +445,11 @@ class H(BaseHTTPRequestHandler):
             out = tail(DATA_DIR / "log" / "maillog", 200)
             return self._json(200, {"maillog": out})
         if self.path == "/device-flow-log":
-            return self._json(200, {"log": tail(DEVICE_FLOW_LOG, 200)})
+            return self._json(200, {"log": _redact_sensitive(tail(DEVICE_FLOW_LOG, 200))})
+        if self.path == "/token/status":
+            return self._json(200, token_status())
         if self.path == "/token/refresh-log":
-            return self._json(200, {"log": tail(TOKEN_REFRESH_LOG, 200)})
+            return self._json(200, {"log": _redact_sensitive(tail(TOKEN_REFRESH_LOG, 200))})
         if self.path == "/users":
             db = DATA_DIR / "sasl" / "sasldb2"
             if not db.exists():
@@ -267,6 +459,8 @@ class H(BaseHTTPRequestHandler):
         self._json(404, {"error": "not_found"})
 
     def do_POST(self):
+        if not self._require_auth():
+            return
         if self.path == "/render-reload":
             out = render_and_reload()
             return self._json(200, {"output": out})
@@ -349,10 +543,42 @@ def _auto_refresh_loop():
         _time.sleep(5)
 
 
+class _UnixHTTPServer(socketserver.UnixStreamServer, HTTPServer):
+    # allow immediate restart
+    allow_reuse_address = True
+
+
 def main():
     # always start loop; it self-disables when interval <= 0
     threading.Thread(target=_auto_refresh_loop, daemon=True).start()
-    httpd = HTTPServer((BIND, PORT), H)
+
+    if SOCKET_PATH:
+        sock = Path(SOCKET_PATH)
+        try:
+            if sock.exists():
+                sock.unlink()
+        except Exception:
+            pass
+        sock.parent.mkdir(parents=True, exist_ok=True)
+        httpd = _UnixHTTPServer(str(sock), H)
+        # Make the socket usable by the non-root UI container (uid/gid 10001).
+        try:
+            import os as _os
+
+            ui_uid = int(_os.environ.get("UI_UID", "10001"))
+            ui_gid = int(_os.environ.get("UI_GID", "10001"))
+            _os.chown(str(sock), ui_uid, ui_gid)
+            _os.chmod(str(sock), 0o660)
+        except Exception:
+            try:
+                import os as _os
+
+                _os.chmod(str(sock), 0o666)
+            except Exception:
+                pass
+    else:
+        httpd = HTTPServer((BIND, PORT), H)
+
     httpd.serve_forever()
 
 

@@ -13,6 +13,7 @@ from fastapi import FastAPI, Form, Request
 from fastapi.responses import Response
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -21,12 +22,34 @@ DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
 templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
 app = FastAPI(title="Simple M365 Relay")
+app.mount("/static", StaticFiles(directory="/opt/ms365-relay/app/static"), name="static")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    # Minimal CSP (still allows inline JS due to current template).
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'",
+    )
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "no-referrer")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    return resp
 
 from . import auth  # noqa: E402
 from . import lockout  # noqa: E402
-from .security import get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
+from .security import client_ip, get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
+POSTFIX_CONTROL_SOCKET = (os.environ.get("POSTFIX_CONTROL_SOCKET") or "").strip()
 
 _device_flow_lock = threading.Lock()
 _device_flow_running = False
@@ -175,6 +198,44 @@ def token_expiry_ts_best_effort(token_path: Path) -> Optional[int]:
     return None
 
 
+def safe_token_filename(user: str) -> str:
+    """Derive a safe filename for token storage.
+
+    Token filenames must not allow path traversal or separators.
+    """
+    u = (user or "").strip()
+    if not u:
+        return ""
+    # Replace anything not in a safe set.
+    u2 = re.sub(r"[^A-Za-z0-9_.@+\-]", "_", u)
+    # Disallow traversal artifacts.
+    while ".." in u2:
+        u2 = u2.replace("..", "__")
+    u2 = u2.strip("._-")
+    return u2[:128]
+
+
+def token_file_for_ms365_user(ms365_user: str) -> Optional[Path]:
+    if not ms365_user:
+        return None
+    safe = safe_token_filename(ms365_user)
+    if not safe:
+        return None
+    p = DATA_DIR / "tokens" / safe
+
+    # legacy support: if the old filename exists and is safe-ish (no separators), use it.
+    legacy = (DATA_DIR / "tokens" / ms365_user.strip())
+    try:
+        if not p.exists():
+            leg_name = ms365_user.strip()
+            if "/" not in leg_name and "\\" not in leg_name and ".." not in leg_name and legacy.exists():
+                return legacy
+    except Exception:
+        pass
+
+    return p
+
+
 def token_expiry_best_effort(token_path: Path) -> Optional[str]:
     ts = token_expiry_ts_best_effort(token_path)
     if ts is None:
@@ -182,12 +243,110 @@ def token_expiry_best_effort(token_path: Path) -> Optional[str]:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
 
 
+def _control_token() -> str:
+    """Read the shared control token used to authenticate to the postfix control API.
+
+    Priority:
+      1) CONTROL_TOKEN env
+      2) /data/state/control.token (shared volume)
+
+    We keep this in the shared /data volume so UI can talk to postfix without exposing
+    the control API unauthenticated.
+    """
+    tok = (os.environ.get("CONTROL_TOKEN") or "").strip()
+    if tok:
+        return tok
+    try:
+        p = DATA_DIR / "state" / "control.token"
+        if p.exists():
+            return (p.read_text(encoding="utf-8", errors="ignore") or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _control_headers(extra: Optional[dict] = None) -> dict:
+    h = {"User-Agent": "simple-m365-relay-ui"}
+    tok = _control_token()
+    if tok:
+        h["X-Control-Token"] = tok
+    if extra:
+        h.update(extra)
+    return h
+
+
+def _unix_http_json(method: str, path: str, body: bytes = b"", headers: Optional[dict] = None, timeout: float = 10.0) -> dict:
+    """Minimal HTTP client over a unix domain socket.
+
+    We keep this tiny on purpose to avoid extra deps.
+    """
+    import socket
+
+    sock_path = POSTFIX_CONTROL_SOCKET
+    if not sock_path:
+        raise RuntimeError("POSTFIX_CONTROL_SOCKET not set")
+
+    hdrs = _control_headers(headers or {})
+    if body:
+        hdrs.setdefault("Content-Length", str(len(body)))
+    else:
+        hdrs.setdefault("Content-Length", "0")
+    hdrs.setdefault("Host", "postfix")
+
+    req = f"{method} {path} HTTP/1.1\r\n" + "\r\n".join([f"{k}: {v}" for k, v in hdrs.items()]) + "\r\n\r\n"
+
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    s.connect(sock_path)
+    try:
+        s.sendall(req.encode("utf-8") + (body or b""))
+        data = b""
+        while True:
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            data += chunk
+            # stop early if body complete
+            if b"\r\n\r\n" in data:
+                head, rest = data.split(b"\r\n\r\n", 1)
+                # try parse content-length
+                hl = head.decode("iso-8859-1", "ignore").split("\r\n")
+                clen = None
+                for ln in hl[1:]:
+                    if ln.lower().startswith("content-length:"):
+                        try:
+                            clen = int(ln.split(":", 1)[1].strip())
+                        except Exception:
+                            pass
+                if clen is not None and len(rest) >= clen:
+                    break
+        if b"\r\n\r\n" not in data:
+            raise RuntimeError("invalid response")
+        head, body_bytes = data.split(b"\r\n\r\n", 1)
+        status_line = head.split(b"\r\n", 1)[0].decode("ascii", "ignore")
+        try:
+            status = int(status_line.split()[1])
+        except Exception:
+            status = 0
+        if status >= 400:
+            raise RuntimeError(f"control api error HTTP {status}")
+        return json.loads(body_bytes.decode("utf-8"))
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
 def _control_get(path: str) -> dict:
     import urllib.request
     import ssl
 
+    if POSTFIX_CONTROL_SOCKET:
+        return _unix_http_json("GET", path, timeout=10)
+
     url = POSTFIX_CONTROL_URL + path
-    req = urllib.request.Request(url, headers={"User-Agent": "simple-m365-relay-ui"})
+    req = urllib.request.Request(url, headers=_control_headers())
     with urllib.request.urlopen(req, timeout=10, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -196,8 +355,11 @@ def _control_post(path: str) -> dict:
     import urllib.request
     import ssl
 
+    if POSTFIX_CONTROL_SOCKET:
+        return _unix_http_json("POST", path, body=b"", timeout=20)
+
     url = POSTFIX_CONTROL_URL + path
-    req = urllib.request.Request(url, method="POST", data=b"", headers={"User-Agent": "simple-m365-relay-ui"})
+    req = urllib.request.Request(url, method="POST", data=b"", headers=_control_headers())
     with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8"))
 
@@ -214,11 +376,15 @@ def ensure_user(login: str, password: str) -> str:
     import urllib.request, ssl
 
     data = json.dumps({"login": login, "password": password}).encode("utf-8")
+    if POSTFIX_CONTROL_SOCKET:
+        j = _unix_http_json("POST", "/users/add", body=data, headers={"Content-Type": "application/json"}, timeout=15)
+        return j.get("output") or "ok"
+
     req = urllib.request.Request(
         POSTFIX_CONTROL_URL + "/users/add",
         method="POST",
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
+        headers=_control_headers({"Content-Type": "application/json"}),
     )
     with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"
@@ -228,11 +394,15 @@ def delete_user(login: str) -> str:
     import urllib.request, ssl
 
     data = json.dumps({"login": login}).encode("utf-8")
+    if POSTFIX_CONTROL_SOCKET:
+        j = _unix_http_json("POST", "/users/delete", body=data, headers={"Content-Type": "application/json"}, timeout=15)
+        return j.get("output") or "ok"
+
     req = urllib.request.Request(
         POSTFIX_CONTROL_URL + "/users/delete",
         method="POST",
         data=data,
-        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
+        headers=_control_headers({"Content-Type": "application/json"}),
     )
     with urllib.request.urlopen(req, timeout=15, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"
@@ -281,11 +451,15 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         "body": body,
     }).encode("utf-8")
 
+    if POSTFIX_CONTROL_SOCKET:
+        j = _unix_http_json("POST", "/testmail", body=payload, headers={"Content-Type": "application/json"}, timeout=20)
+        return j.get("output") or "ok"
+
     req = urllib.request.Request(
         POSTFIX_CONTROL_URL + "/testmail",
         method="POST",
         data=payload,
-        headers={"Content-Type": "application/json", "User-Agent": "simple-m365-relay-ui"},
+        headers=_control_headers({"Content-Type": "application/json"}),
     )
     with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8")).get("output") or "ok"
@@ -334,17 +508,51 @@ def _extract_recent_warnings(mail_log: str, limit: int = 6) -> str:
     return "\n".join(reversed(interesting))
 
 
+def _validate_login(v: str) -> str:
+    """Conservative login validation (stored as key in allowed_from/default_from).
+
+    Allow only email-ish logins (no whitespace/control chars).
+    """
+    v = _reject_ctl(v)
+    v = v.strip()
+    if not v or len(v) > 254:
+        raise ValueError("invalid login")
+    if re.search(r"\s", v):
+        raise ValueError("invalid login")
+    if not re.fullmatch(r"[A-Za-z0-9._%+\-@]+", v):
+        raise ValueError("invalid login")
+    return v
+
+
+def _validate_emailish(v: str) -> str:
+    v = _reject_ctl(v)
+    v = v.strip().lower()
+    if not v or len(v) > 254:
+        raise ValueError("invalid address")
+    if re.search(r"\s", v):
+        raise ValueError("invalid address")
+    # very small sanity check
+    if "@" not in v or v.startswith("@") or v.endswith("@"):  # noqa: PLR1714
+        raise ValueError("invalid address")
+    if not re.fullmatch(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+", v):
+        raise ValueError("invalid address")
+    return v
+
+
 def parse_addr_list(text: str) -> list[str]:
     # accepts comma/space/newline separated
     raw = (text or "").replace(",", " ")
     parts = []
     for ln in raw.splitlines():
         parts.extend([p.strip() for p in ln.split() if p.strip()])
-    # normalize + unique
+    # normalize + unique (email-ish)
     seen = set()
     out = []
     for a in parts:
-        aa = a.strip().lower()
+        try:
+            aa = _validate_emailish(a)
+        except Exception:
+            continue
         if aa and aa not in seen:
             seen.add(aa)
             out.append(aa)
@@ -512,7 +720,7 @@ def login_post(
     if expected and csrf_token != expected:
         return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid CSRF token.", "csrf_token": expected})
 
-    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "")
+    ip = client_ip(request)
     rem = lockout.get_lock_remaining(ip)
     if rem > 0:
         return templates.TemplateResponse(
@@ -571,8 +779,11 @@ def onboarding_get(request: Request):
     cfg = load_cfg()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     return templates.TemplateResponse(
         "onboarding.html",
@@ -606,8 +817,11 @@ def index(request: Request):
     warn_tail = _extract_recent_warnings(mail_log)
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     user = getattr(request.state, "user", "")
     csrf_token = getattr(request.state, "csrf", "")
@@ -644,6 +858,8 @@ def index(request: Request):
 
 @app.post("/settings")
 def update_settings(
+    request: Request,
+    csrf_token: str = Form(""),
     hostname: str = Form(...),
     domain: str = Form(...),
     mynetworks: str = Form(""),
@@ -655,13 +871,13 @@ def update_settings(
     auto_refresh_minutes: str = Form("30"),
 ):
     """HTML form endpoint (kept for no-JS fallback)."""
+    require_csrf(request, csrf_token)
     cfg = load_cfg()
-    cfg["hostname"] = hostname.strip()
-    cfg["domain"] = domain.strip()
-    nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
+    cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
+    cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
     from urllib.parse import quote
 
-    cfg["mynetworks"] = nets
+    cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
     cfg.setdefault("tls", {})
@@ -669,8 +885,8 @@ def update_settings(
     cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
 
     cfg.setdefault("oauth", {})
-    cfg["oauth"]["tenant_id"] = (tenant_id or "").strip()
-    cfg["oauth"]["client_id"] = (client_id or "").strip()
+    cfg["oauth"]["tenant_id"] = _reject_ctl(tenant_id or "")
+    cfg["oauth"]["client_id"] = _reject_ctl(client_id or "")
     cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
 
     save_cfg(cfg)
@@ -684,9 +900,74 @@ def _validate_tls_level(v: str, default: str) -> str:
     return default
 
 
+def _has_ctl(s: str) -> bool:
+    return any((ord(ch) < 32) or (ord(ch) == 127) for ch in (s or ""))
+
+
+def _reject_ctl(s: str) -> str:
+    s = (s or "").strip()
+    if _has_ctl(s) or "\n" in s or "\r" in s or "\x00" in s:
+        raise ValueError("invalid control characters")
+    return s
+
+
+def _validate_fqdnish(v: str, default: str) -> str:
+    """Strict-ish validation for hostname/domain to prevent config injection.
+
+    We accept LDH labels separated by dots, 1-253 chars total.
+    """
+    import re
+
+    v = _reject_ctl(v)
+    if not v:
+        return default
+    if len(v) > 253:
+        return default
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*", v):
+        return default
+    return v
+
+
 def _validate_relayhost(v: str, default: str) -> str:
-    v = (v or "").strip()
-    return v or default
+    """Validate relayhost format like [smtp.office365.com]:587 or smtp.example:587."""
+    import re
+
+    v = _reject_ctl(v)
+    if not v:
+        return default
+    # allow bracketed host or plain host, optional port
+    if not re.fullmatch(r"\[?[A-Za-z0-9.-]+\]?(?::\d{2,5})?", v):
+        return default
+    return v
+
+
+def _validate_mynetworks(v: str) -> list[str]:
+    """Parse and validate Postfix mynetworks tokens (CIDR/IP only)."""
+    import ipaddress
+
+    v = _reject_ctl(v)
+    toks = [t.strip() for t in v.replace(",", " ").split() if t.strip()]
+    out: list[str] = []
+    for t in toks:
+        try:
+            if "/" in t:
+                ipaddress.ip_network(t, strict=False)
+                out.append(t)
+            else:
+                # allow single host IP -> normalize to /32 or /128
+                ip = ipaddress.ip_address(t)
+                out.append(str(ip) + ("/32" if ip.version == 4 else "/128"))
+        except Exception:
+            # skip invalid tokens
+            continue
+    # stable unique
+    seen = set()
+    uniq = []
+    for n in out:
+        if n not in seen:
+            seen.add(n)
+            uniq.append(n)
+    return uniq
 
 
 def _validate_int(v: str, default: int, lo: int = 0, hi: int = 1440) -> int:
@@ -716,12 +997,11 @@ def api_settings_save(
     cfg = load_cfg()
 
     if hostname.strip():
-        cfg["hostname"] = hostname.strip()
+        cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
     if domain.strip():
-        cfg["domain"] = domain.strip()
+        cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
     if mynetworks.strip():
-        nets = [n.strip() for n in mynetworks.replace(",", " ").split() if n.strip()]
-        cfg["mynetworks"] = nets
+        cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
     cfg.setdefault("tls", {})
@@ -729,8 +1009,8 @@ def api_settings_save(
     cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
 
     cfg.setdefault("oauth", {})
-    cfg["oauth"]["tenant_id"] = (tenant_id or "").strip()
-    cfg["oauth"]["client_id"] = (client_id or "").strip()
+    cfg["oauth"]["tenant_id"] = _reject_ctl(tenant_id or "")
+    cfg["oauth"]["client_id"] = _reject_ctl(client_id or "")
     cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
 
     save_cfg(cfg)
@@ -743,15 +1023,17 @@ def api_settings_save(
 
 
 @app.post("/users/add")
-def users_add(login: str = Form(...), password: str = Form(...)):
+def users_add(request: Request, csrf_token: str = Form(""), login: str = Form(...), password: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     ensure_user(login.strip(), password)
     return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/users/delete")
-def users_del(login: str = Form(...)):
+def users_del(request: Request, csrf_token: str = Form(""), login: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     delete_user(login.strip())
     return RedirectResponse(url="/", status_code=303)
 
@@ -777,10 +1059,11 @@ def api_users_delete(login: str = Form(...)):
 
 
 @app.post("/from/allow")
-def allow_from(login: str = Form(...), from_addr: str = Form(...)):
+def allow_from(request: Request, csrf_token: str = Form(""), login: str = Form(...), from_addr: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     cfg = load_cfg()
-    login = login.strip()
+    login = _validate_login(login)
     addrs = parse_addr_list(from_addr)
     cfg.setdefault("allowed_from", {})
     cfg["allowed_from"].setdefault(login, [])
@@ -801,8 +1084,9 @@ def allow_from(login: str = Form(...), from_addr: str = Form(...)):
 
 
 @app.post("/from/disallow")
-def disallow_from(login: str = Form(...), from_addr: str = Form(...)):
+def disallow_from(request: Request, csrf_token: str = Form(""), login: str = Form(...), from_addr: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     cfg = load_cfg()
     login = login.strip()
     addr = from_addr.strip().lower()
@@ -815,13 +1099,16 @@ def disallow_from(login: str = Form(...), from_addr: str = Form(...)):
 
 
 @app.post("/from/default")
-def set_default_from(login: str = Form(...), from_addr: str = Form(...)):
+def set_default_from(request: Request, csrf_token: str = Form(""), login: str = Form(...), from_addr: str = Form(...)):
     # HTML fallback
+    require_csrf(request, csrf_token)
     cfg = load_cfg()
     cfg.setdefault("default_from", {})
     from urllib.parse import quote
 
-    cfg["default_from"][login.strip()] = from_addr.strip()
+    login2 = _validate_login(login)
+    addr2 = _validate_emailish(from_addr) if (from_addr or '').strip() else ''
+    cfg["default_from"][login2] = addr2
     save_cfg(cfg)
     return RedirectResponse(url=f"/?toast={quote('Saved (not applied). Click Apply Changes.')}&toastLevel=ok#senders", status_code=303)
 
@@ -847,7 +1134,7 @@ def api_senders_get():
 @app.post("/api/from/allow")
 def api_from_allow(login: str = Form(...), from_addr: str = Form(...)):
     cfg = load_cfg()
-    login = login.strip()
+    login = _validate_login(login)
     addrs = parse_addr_list(from_addr)
     cfg.setdefault("allowed_from", {})
     cfg["allowed_from"].setdefault(login, [])
@@ -893,7 +1180,9 @@ def api_from_disallow(login: str = Form(...), from_addr: str = Form(...)):
 def api_from_default(login: str = Form(...), from_addr: str = Form(...)):
     cfg = load_cfg()
     cfg.setdefault("default_from", {})
-    cfg["default_from"][login.strip()] = from_addr.strip()
+    login2 = _validate_login(login)
+    addr2 = _validate_emailish(from_addr) if (from_addr or '').strip() else ''
+    cfg["default_from"][login2] = addr2
     save_cfg(cfg)
 
     current_hash = cfg_hash(cfg)
@@ -904,14 +1193,16 @@ def api_from_default(login: str = Form(...), from_addr: str = Form(...)):
 
 
 @app.post("/postfix/reload")
-def btn_reload():
+def btn_reload(request: Request, csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
     out = postfix_reload()
     return PlainTextResponse(out)
 
 
 @app.post("/apply")
-def apply_changes():
+def apply_changes(request: Request, csrf_token: str = Form("")):
     # HTML fallback
+    require_csrf(request, csrf_token)
     out = render_and_reload()
 
     # Mark current config as applied.
@@ -943,15 +1234,17 @@ def api_apply_changes():
 
 
 @app.post("/token/start")
-def token_start():
+def token_start(request: Request, csrf_token: str = Form("")):
     # HTML fallback
+    require_csrf(request, csrf_token)
     start_device_flow_background()
     return RedirectResponse(url="/#oauth", status_code=303)
 
 
 @app.post("/token/refresh")
-def token_refresh():
+def token_refresh(request: Request, csrf_token: str = Form("")):
     # HTML fallback
+    require_csrf(request, csrf_token)
     from urllib.parse import quote
 
     out = refresh_token_now()
@@ -973,17 +1266,80 @@ def api_token_start():
 def api_token_refresh():
     out = refresh_token_now()
 
-    # recompute expiry after refresh
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    # recompute expiry after refresh via postfix control (UI container can't read token file)
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     return {"ok": True, "output": out, "token_exp_ts": token_exp_ts}
 
 
+def _parse_device_flow_log(log: str) -> dict:
+    import re
+
+    txt = (log or "")
+
+    # URL
+    url = None
+    m = re.search(r"https?://\S*devicelogin\S*", txt, re.IGNORECASE)
+    if m:
+        url = m.group(0).rstrip(').,;')
+    else:
+        m2 = re.search(r"microsoft\.com/devicelogin", txt, re.IGNORECASE)
+        if m2:
+            url = "https://microsoft.com/devicelogin"
+
+    # Code (best effort)
+    code = None
+    m = re.search(r"\b([A-Z0-9]{4,}-[A-Z0-9]{4,})\b", txt)
+    if m:
+        code = m.group(1)
+    else:
+        # common sasl-xoauth2-tool phrasing: "enter the code ABCDEF..."
+        m2 = re.search(r"enter\s+the\s+code\s+([A-Z0-9]{8,})\b", txt, re.IGNORECASE)
+        if m2:
+            code = m2.group(1)
+        else:
+            m3 = re.search(r"code\s*[: ]\s*([A-Z0-9]{8,})\b", txt, re.IGNORECASE)
+            if m3:
+                code = m3.group(1)
+
+    # Exit code
+    exit_code = None
+    m = re.search(r"\[exit\s+(\d+)\]", txt)
+    if m:
+        try:
+            exit_code = int(m.group(1))
+        except Exception:
+            exit_code = None
+
+    done = exit_code is not None
+    ok = (exit_code == 0) if done else False
+
+    # Error hint
+    err = None
+    if done and exit_code != 0:
+        # pick a helpful last non-empty line
+        lines = [ln.strip() for ln in txt.splitlines() if ln.strip()]
+        if lines:
+            err = lines[-1][:200]
+
+    return {
+        "url": url,
+        "code": code,
+        "done": done,
+        "ok": ok,
+        "exit": exit_code,
+        "error": err,
+    }
+
+
 @app.get("/api/device-flow-log")
 def api_device_flow_log():
-    return {"log": get_device_flow_log()}
+    log = get_device_flow_log()
+    return {"log": log, **_parse_device_flow_log(log)}
 
 
 @app.get("/api/token-refresh-log")
@@ -993,12 +1349,15 @@ def api_token_refresh_log():
 
 @app.post("/testmail")
 def testmail(
+    request: Request,
+    csrf_token: str = Form(""),
     to_addr: str = Form(...),
     from_addr: str = Form(...),
     subject: str = Form("Test"),
     body: str = Form("Does it work?"),
 ):
     # HTML fallback
+    require_csrf(request, csrf_token)
     from urllib.parse import quote
 
     out = send_test_mail(to_addr, from_addr, subject, body)
@@ -1034,8 +1393,11 @@ def api_status():
     token_refresh_log = get_token_refresh_log()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     current_hash = cfg_hash(cfg)
     applied_hash = get_applied_hash()
@@ -1072,6 +1434,12 @@ def _redact_mail_log(text: str) -> str:
     return "\n".join(out_lines)
 
 
+@app.get("/favicon.ico")
+def favicon_ico():
+    # Browsers often request /favicon.ico by default; we serve the SVG.
+    return RedirectResponse(url="/static/favicon.svg", status_code=307)
+
+
 @app.get("/diagnostics.txt")
 def diagnostics_txt():
     # No secrets: we do NOT include token files, and we redact token-like content from logs.
@@ -1080,8 +1448,11 @@ def diagnostics_txt():
     mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_path = DATA_DIR / "tokens" / ms365_user if ms365_user else None
-    token_exp_ts = token_expiry_ts_best_effort(token_path) if token_path else None
+    token_exp_ts = None
+    try:
+        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
+    except Exception:
+        token_exp_ts = None
 
     parts = []
     parts.append("# Simple M365 Relay diagnostics\n")

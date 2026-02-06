@@ -29,9 +29,18 @@ services:
 
       CONTROL_BIND: ${CONTROL_BIND:-0.0.0.0}
       CONTROL_PORT: ${CONTROL_PORT:-18080}
+      # Prefer unix domain socket for the control API. If set, postfix listens on this socket path.
+      CONTROL_SOCKET: ${CONTROL_SOCKET:-/data/state/control.sock}
+      # Shared token required for all control API calls (UI → postfix)
+      # If unset, postfix generates /data/state/control.token and UI reads it from the shared volume.
+      CONTROL_TOKEN: ${CONTROL_TOKEN:-}
 
       # Background token refresh (uses existing refresh token)
       AUTO_TOKEN_REFRESH_MINUTES: ${AUTO_TOKEN_REFRESH_MINUTES:-30}
+
+      # Reduce chance of secrets in logs by default
+      OAUTH_LOG_FULL_TRACE: ${OAUTH_LOG_FULL_TRACE:-no}
+      OAUTH_LOG_TO_SYSLOG: ${OAUTH_LOG_TO_SYSLOG:-yes}
     volumes:
       - simple-m365-relay-data:/data
     expose:
@@ -45,11 +54,25 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"  # put behind reverse proxy + basic auth
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       UI_BIND: ${UI_BIND:-0.0.0.0}
       UI_PORT: ${UI_PORT:-8000}
       UI_BASE_URL: ${UI_BASE_URL:-}
+      # If behind a TLS-terminating reverse proxy, you likely want:
+      #   FORCE_SECURE_COOKIES=1 and TRUST_PROXY_HEADERS=1
+      FORCE_SECURE_COOKIES: ${FORCE_SECURE_COOKIES:-}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-}
       POSTFIX_CONTROL_URL: ${POSTFIX_CONTROL_URL:-http://postfix:18080}
+      # If set, UI uses unix socket instead of TCP for control API.
+      POSTFIX_CONTROL_SOCKET: ${POSTFIX_CONTROL_SOCKET:-/data/state/control.sock}
+      CONTROL_TOKEN: ${CONTROL_TOKEN:-}
       RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
       DATA_DIR: ${DATA_DIR:-/data}
 

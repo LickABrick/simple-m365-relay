@@ -4,19 +4,14 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Simple M365 Relay</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="shortcut icon" href="/static/favicon.svg" />
 
-  <!-- Tailwind (CDN) -->
-  <script>
-    // IMPORTANT: Tailwind CDN defaults to darkMode: 'media'. Force class-based.
-    // Must be defined BEFORE loading the CDN script.
-    window.tailwind = window.tailwind || {};
-    window.tailwind.config = window.tailwind.config || {};
-    window.tailwind.config.darkMode = 'class';
-  </script>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Tailwind (self-hosted; compiled at build time) -->
+  <link rel="stylesheet" href="/static/tailwind.css" />
 
   <!-- Lucide icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="/static/lucide.min.js"></script>
 
   <meta name="csrf-token" content="{{ csrf_token }}" />
 
@@ -158,11 +153,45 @@
       return r;
     }
 
-    function copyText(elId){
+    async function copyText(elId, btn){
       const el = document.getElementById(elId);
       if (!el) return;
-      const text = el.innerText || el.textContent || '';
-      navigator.clipboard?.writeText(text);
+      const text = (el.innerText || el.textContent || '').trim();
+      if (!text) return;
+
+      async function setBtn(state){
+        if (!btn) return;
+        if (!btn.dataset.origHtml) btn.dataset.origHtml = btn.innerHTML;
+        if (state === 'ok') {
+          btn.innerHTML = '<i data-lucide="check" class="h-3.5 w-3.5"></i> Copied';
+          try { lucide.createIcons(); } catch(e) {}
+          await new Promise(r => setTimeout(r, 900));
+          btn.innerHTML = btn.dataset.origHtml;
+          try { lucide.createIcons(); } catch(e) {}
+        }
+      }
+
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          // Fallback for http / older browsers
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.top = '-1000px';
+          ta.style.left = '-1000px';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        showToast('Copied to clipboard.', 'ok');
+        await setBtn('ok');
+      } catch (e) {
+        showToast('Copy failed. (Browser blocked clipboard access)', 'error');
+      }
     }
 
     function syncFromSelect(){
@@ -216,7 +245,11 @@
     function formatTokenExpiryLocal(ts){
       if (!ts) return '(unknown)';
       try {
-        const d = new Date(Number(ts) * 1000);
+        let n = Number(ts);
+        if (!n || Number.isNaN(n)) return String(ts);
+        // Defensive: sometimes we might receive ms.
+        if (n > 1e12) n = Math.floor(n / 1000);
+        const d = new Date(n * 1000);
         return d.toLocaleString(undefined, { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
       } catch (e) {
         return String(ts);
@@ -224,8 +257,9 @@
     }
 
     function _tokenStatus(ts){
-      const n = Number(ts || 0);
+      let n = Number(ts || 0);
       if (!n || Number.isNaN(n)) return { state: 'unknown' };
+      if (n > 1e12) n = Math.floor(n / 1000);
 
       const now = Date.now();
       const exp = n * 1000;
@@ -321,14 +355,31 @@
     }
 
     function _extractLastRefresh(log){
-      // log lines look like: [YYYY-MM-DD HH:MM:SS] refresh_token\n...\nToken refresh succeeded.
+      // log blocks look like:
+      // [YYYY-MM-DD HH:MM:SS] refresh_token
+      // Config check passed.
+      // Token refresh succeeded.
+      // NOTE: timestamps come from the postfix container and are effectively UTC.
       const s = String(log || '');
-      const blocks = s.trim().split(/\n\[(?=\d{4}-\d{2}-\d{2} )/g);
-      const last = blocks[blocks.length-1] || '';
-      const m = last.match(/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
-      const ts = m ? m[1] : null;
-      const ok = /succeeded/i.test(last) && !/failed/i.test(last);
-      return { ts, ok, raw: last };
+      const re = /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*refresh_token[\s\S]*?(?=(\n\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\s*refresh_token)|$)/g;
+      let lastTs = null;
+      let lastBlock = '';
+      for (const m of s.matchAll(re)) {
+        lastTs = m[1];
+        lastBlock = m[0] || '';
+      }
+      const ok = /succeeded/i.test(lastBlock) && !/failed/i.test(lastBlock);
+
+      let local = null;
+      try {
+        if (lastTs) {
+          const iso = lastTs.replace(' ', 'T') + 'Z';
+          const d = new Date(iso);
+          if (!Number.isNaN(d.getTime())) local = d.toLocaleString();
+        }
+      } catch(e) {}
+
+      return { ts: lastTs, local, ok, raw: lastBlock };
     }
 
     async function refreshStatus(){
@@ -400,7 +451,8 @@
         if (lr && typeof j.token_refresh_log !== 'undefined') {
           const info = _extractLastRefresh(j.token_refresh_log || '');
           if (info.ts) {
-            lr.textContent = info.ts + (info.ok ? ' (ok)' : ' (check log)');
+            const shown = info.local || info.ts;
+            lr.textContent = shown + (info.ok ? ' (ok)' : ' (check log)');
           } else {
             lr.textContent = '(unknown)';
           }
@@ -470,43 +522,125 @@
       }
     }
 
+    function _setDfStep(n){
+      for (let i=1;i<=5;i++) {
+        const el = document.getElementById('dfStep'+i);
+        if (!el) continue;
+        el.classList.toggle('opacity-70', i !== n);
+        el.classList.toggle('font-semibold', i === n);
+      }
+    }
+
+    function _setDfState(txt, spinning){
+      const s = document.getElementById('deviceFlowState');
+      const sp = document.getElementById('deviceFlowSpinner');
+      if (s) s.textContent = txt;
+      if (sp) sp.classList.toggle('hidden', !spinning);
+    }
+
     async function startDeviceFlowNoReload(){
-      showToast('Starting device flow…', 'ok');
-      // hide previous callout
-      document.getElementById('deviceFlowCallout')?.classList.add('hidden');
+      // Hide the main OAuth status/actions while device flow runs (reduce distraction)
+      document.getElementById('oauthMainBlock')?.classList.add('hidden');
+
+      // Reset UI
+      const callout = document.getElementById('deviceFlowCallout');
+      const result = document.getElementById('deviceFlowResult');
+      const codeBox = document.getElementById('deviceFlowCodeBox');
+      if (result) { result.classList.add('hidden'); result.textContent = ''; }
+      if (codeBox) codeBox.classList.remove('hidden');
+      if (callout) callout.classList.remove('hidden');
+
+      _setDfState('Starting…', true);
+      _setDfStep(1);
+
+      // Disable button while running
+      const btn = document.getElementById('oauthReauthBtn');
+      if (btn) btn.setAttribute('disabled', 'disabled');
+
       try {
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         await apiFetch('/api/token/start', { method: 'POST' });
       } catch (e) {
         showToast('Failed to start device flow.', 'error');
+        _setDfState('Failed to start', false);
+        document.getElementById('oauthMainBlock')?.classList.remove('hidden');
+        if (btn) btn.removeAttribute('disabled');
         return;
       }
 
-      // Poll log until we see code + url
-      const started = Date.now();
-      while (Date.now() - started < 30000) {
+      showToast('Device flow started.', 'ok');
+
+      const until = Date.now() + 5 * 60 * 1000;
+      let haveCode = false;
+
+      while (Date.now() < until) {
         try {
-          const r = await fetch('/api/device-flow-log', { cache: 'no-store' });
-          const j = await r.json();
-          const log = j.log || '';
-          const m = log.match(/open the page\s+(https?:\/\/\S+)\s+and enter the code\s+([A-Z0-9]+)/i);
-          if (m) {
-            const url = m[1];
-            const code = m[2];
+          const r = await apiFetch('/api/device-flow-log', { method: 'GET', cache: 'no-store' });
+          const ct = (r.headers.get('content-type') || '');
+          if (!ct.includes('application/json')) {
+            showToast('Session expired or invalid. Please sign in again.', 'error');
+            window.setTimeout(() => { window.location.href = '/login'; }, 800);
+            return;
+          }
+          const j = await r.json().catch(()=>({}));
+
+          const url = j.url;
+          const code = j.code;
+
+          if (url && code && !haveCode) {
+            haveCode = true;
             const a = document.getElementById('deviceFlowUrl');
             const c = document.getElementById('deviceFlowCode');
             if (a) { a.href = url; a.textContent = url; }
             if (c) { c.textContent = code; }
-            document.getElementById('deviceFlowCallout')?.classList.remove('hidden');
-            showToast('Device flow started. Use the code shown in OAuth section.', 'ok');
             try { lucide.createIcons(); } catch(e) {}
+            _setDfStep(2);
+            _setDfState('Waiting for sign-in…', true);
+            _setDfStep(3);
+          }
+
+          if (j && j.done) {
+            _setDfState('Finished', false);
+            _setDfStep(4);
+
+            if (j.ok) {
+              showToast('Token acquired. Updating status…', 'ok');
+              try { await refreshStatus(); } catch(e) {}
+              _setDfStep(5);
+              if (result) {
+                result.classList.remove('hidden');
+                result.textContent = 'Success. Token acquired and status updated.';
+              }
+              // bring the normal OAuth status/actions back
+              document.getElementById('oauthMainBlock')?.classList.remove('hidden');
+              showToast('Device flow success.', 'ok');
+            } else {
+              if (result) {
+                result.classList.remove('hidden');
+                result.textContent = 'Device flow finished but token acquisition failed. See log below.';
+              }
+              // bring the normal OAuth status/actions back
+              document.getElementById('oauthMainBlock')?.classList.remove('hidden');
+              showToast('Device flow failed. See log.', 'error');
+            }
+
+            if (btn) btn.removeAttribute('disabled');
             return;
           }
+
+          if (!haveCode) {
+            _setDfState('Waiting for login code…', true);
+            _setDfStep(2);
+          }
+
         } catch (e) {}
-        await new Promise(res => setTimeout(res, 1000));
+
+        await new Promise(res => setTimeout(res, 1500));
       }
 
-      showToast('Device flow started. Check the log for the code.', 'ok');
+      _setDfState('Timed out', false);
+      document.getElementById('oauthMainBlock')?.classList.remove('hidden');
+      if (btn) btn.removeAttribute('disabled');
+      showToast('Device flow timed out. Check the log.', 'error');
     }
 
     async function refreshTokenNoReload(){
@@ -540,6 +674,9 @@
 
         showToast('Token refreshed.', 'ok');
 
+        // Immediately update last-refresh UI and refetch status/logs.
+        const lr = document.getElementById('oauthLastRefresh');
+        if (lr) lr.textContent = new Date().toLocaleString() + ' (ok)';
         // Always re-sync full status after refresh
         await refreshStatus();
       } catch (e) {
@@ -1119,6 +1256,7 @@
               <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Changes saved</div>
               <div class="mt-0.5">Not applied yet. Postfix is still running with the old config.</div>
               <form method="post" action="/apply" class="mt-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                 <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Applies saved settings: regenerate Postfix config + reload Postfix">
                   <i data-lucide="check-circle" class="h-4 w-4"></i>
                   Apply Changes
@@ -1140,6 +1278,7 @@
                   Diagnostics
                 </a>
                 <form method="post" action="/postfix/reload">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Reloads Postfix (keeps current config)">
                     <i data-lucide="rotate-cw" class="h-3.5 w-3.5"></i>
                     Reload Postfix
@@ -1216,7 +1355,7 @@
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="flex items-center justify-between">
                 <div class="text-sm font-semibold">Recent warnings / errors</div>
-                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('warnTail')">
+                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('warnTail', this)">
                   <i data-lucide="copy" class="h-3.5 w-3.5"></i>
                   Copy
                 </button>
@@ -1227,7 +1366,7 @@
             <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div class="flex items-center justify-between">
                 <div class="text-sm font-semibold">Queue (mailq)</div>
-                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailqPre')">
+                <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailqPre', this)">
                   <i data-lucide="copy" class="h-3.5 w-3.5"></i>
                   Copy
                 </button>
@@ -1247,6 +1386,7 @@
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Postfix and OAuth settings. Saved vs applied is explicit.</p>
 
           <form id="settingsForm" method="post" action="/settings" class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <div>
               <label class="text-sm font-medium">Hostname</label>
               <input name="hostname" value="{{ cfg.hostname }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
@@ -1360,6 +1500,7 @@
                     </div>
                     <div class="col-span-12 sm:col-span-4 flex justify-end">
                       <form method="post" action="/users/delete" class="inline-flex">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                         <input type="hidden" name="login" value="{{ u }}" />
                         <button type="submit" class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/40" title="Delete user">
                           <i data-lucide="trash-2" class="h-4 w-4"></i>
@@ -1376,6 +1517,7 @@
 
           <div class="mt-4 grid grid-cols-1 gap-4">
             <form id="usersAddForm" method="post" action="/users/add" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Add / update user</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">These are SMTP AUTH credentials for clients connecting to this relay.</div>
               <input name="login" placeholder="username" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
@@ -1437,6 +1579,7 @@
                       <div class="flex flex-wrap gap-2">
                         {% for a in addrs %}
                           <form method="post" action="/from/disallow" class="inline-flex">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                             <input type="hidden" name="login" value="{{ login }}" />
                             <input type="hidden" name="from_addr" value="{{ a }}" />
                             <button type="submit" class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Click to remove">
@@ -1460,6 +1603,7 @@
 
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <form id="fromAllowForm" method="post" action="/from/allow" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Add allowed From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same login again to add more From addresses.</div>
               <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
@@ -1472,6 +1616,7 @@
             </form>
 
             <form id="defaultFromForm" method="post" action="/from/default" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Set fallback From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Stored per SMTP AUTH user (login). Used when clients don’t specify a From address.</div>
               <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
@@ -1501,6 +1646,7 @@
           </div>
 
           <div class="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+            <div id="oauthMainBlock">
             {% if env.AUTO_TOKEN_REFRESH_MINUTES and env.AUTO_TOKEN_REFRESH_MINUTES != '0' %}
             <div class="callout-info mb-3 rounded-2xl border p-3 text-xs shadow-sm">
               <div class="flex items-start gap-2">
@@ -1536,39 +1682,60 @@
               </div>
               <div class="flex flex-col gap-2 sm:flex-row">
                 <form id="oauthRefreshForm" method="post" action="/token/refresh">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button id="oauthRefreshBtn" type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50" title="Manually refresh the OAuth token (uses existing refresh token)">
                     <i data-lucide="wand-2" class="h-4 w-4"></i>
                     Refresh token
                   </button>
                 </form>
                 <form id="oauthReauthForm" method="post" action="/token/start">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button id="oauthReauthBtn" type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Start a new OAuth device flow and overwrite the token in the shared volume">
                     <i data-lucide="refresh-cw" class="h-4 w-4"></i>
                     Restart device flow
                   </button>
                 </form>
+              </div>
+            </div>
+            </div>
 
-                <div id="deviceFlowCallout" class="hidden sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
+            <div id="deviceFlowCallout" class="hidden sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
                   <div class="flex items-start justify-between gap-3">
-                    <div>
-                      <div class="font-semibold">Device flow</div>
-                      <div class="mt-1">Open <a id="deviceFlowUrl" class="underline" href="#" target="_blank" rel="noreferrer">microsoft.com/devicelogin</a> and enter code:</div>
-                      <div class="mt-1 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-semibold dark:border-slate-800 dark:bg-slate-900/40">
-                        <span id="deviceFlowCode" class="mono text-sm">…</span>
-                        <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('deviceFlowCode')">
-                          <i data-lucide="copy" class="h-3.5 w-3.5"></i>
-                          Copy
-                        </button>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2 font-semibold">
+                        <span>Device flow</span>
+                        <span id="deviceFlowSpinner" class="hidden inline-flex h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-transparent dark:border-slate-700 dark:border-t-transparent" aria-label="Loading"></span>
+                        <span id="deviceFlowState" class="ml-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">Idle</span>
                       </div>
+
+                      <ol class="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                        <li id="dfStep1" class="font-semibold">1) Started</li>
+                        <li id="dfStep2" class="opacity-70">2) Waiting for login code</li>
+                        <li id="dfStep3" class="opacity-70">3) Waiting for sign-in</li>
+                        <li id="dfStep4" class="opacity-70">4) Token acquired</li>
+                        <li id="dfStep5" class="opacity-70">5) Success</li>
+                      </ol>
+
+                      <div class="mt-3" id="deviceFlowCodeBox">
+                        <div class="mt-1">Open <a id="deviceFlowUrl" class="underline" href="#" target="_blank" rel="noreferrer">microsoft.com/devicelogin</a> and enter code:</div>
+                        <div class="mt-1 inline-flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-semibold dark:border-slate-800 dark:bg-slate-900/40">
+                          <span id="deviceFlowCode" class="mono text-sm">…</span>
+                          <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('deviceFlowCode', this)">
+                            <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+
+                      <div id="deviceFlowResult" class="hidden mt-3 rounded-xl border border-slate-200 bg-slate-50 p-2 text-[11px] dark:border-slate-800 dark:bg-slate-900/40"></div>
                     </div>
+
                     <button type="button" class="rounded-lg px-2 py-1 opacity-70 hover:opacity-100" onclick="document.getElementById('deviceFlowCallout')?.classList.add('hidden')">
                       <i data-lucide="x" class="h-4 w-4"></i>
                     </button>
                   </div>
                 </div>
-              </div>
             </div>
-          </div>
 
           <div class="mt-4 text-xs text-slate-600 dark:text-slate-300">
             <a href="#logs" data-nav class="inline-flex items-center gap-2 font-semibold underline">
@@ -1587,6 +1754,7 @@
           <p class="mt-1 text-sm text-slate-600 dark:text-slate-300">Sends via local <span class="mono">sendmail</span> in the Postfix container (so it goes through the configured relay).</p>
 
           <form id="testmailForm" method="post" action="/testmail" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <div class="sm:col-span-1">
               <label class="text-sm font-medium">From</label>
               <div class="mt-1 flex gap-2">
@@ -1664,7 +1832,7 @@
               <details class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                 <summary class="cursor-pointer text-sm font-semibold">Queue (mailq)</summary>
                 <div class="mt-3 flex items-center justify-end">
-                  <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailqPre2')">
+                  <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailqPre2', this)">
                     <i data-lucide="copy" class="h-3.5 w-3.5"></i>
                     Copy
                   </button>
@@ -1686,7 +1854,7 @@
                       Clear
                     </button>
                   </div>
-                  <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailLogPre')">
+                  <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('mailLogPre', this)">
                     <i data-lucide="copy" class="h-3.5 w-3.5"></i>
                     Copy
                   </button>
