@@ -382,6 +382,50 @@
       return { ts: lastTs, local, ok, raw: lastBlock };
     }
 
+    function _parseUtcTsToEpoch(ts){
+      // ts: "YYYY-MM-DD HH:MM:SS" in UTC
+      if (!ts) return null;
+      try {
+        const iso = String(ts).replace(' ', 'T') + 'Z';
+        const d = new Date(iso);
+        const ms = d.getTime();
+        if (Number.isNaN(ms)) return null;
+        return Math.floor(ms / 1000);
+      } catch(e) { return null; }
+    }
+
+    function _fmtCountdown(secs){
+      const s = Math.max(0, Math.floor(Number(secs || 0)));
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      if (m >= 60) {
+        const h = Math.floor(m / 60);
+        const mm = m % 60;
+        return `${h}:${String(mm).padStart(2,'0')}:${String(r).padStart(2,'0')}`;
+      }
+      return `${m}:${String(r).padStart(2,'0')}`;
+    }
+
+    let _nextAutoRefreshTs = null;
+    function _renderNextAutoRefresh(){
+      const el = document.getElementById('oauthNextRefresh');
+      const cd = document.getElementById('oauthNextRefreshCountdown');
+      if (!el || !cd) return;
+
+      if (!_nextAutoRefreshTs) {
+        // leave whatever refreshStatus wrote
+        return;
+      }
+
+      const d = new Date(_nextAutoRefreshTs * 1000);
+      el.textContent = d.toLocaleString();
+      const left = Math.floor((_nextAutoRefreshTs * 1000 - Date.now()) / 1000);
+      cd.textContent = left <= 0 ? 'due now' : ('in ' + _fmtCountdown(left));
+    }
+
+    // live countdown ticker
+    window.setInterval(_renderNextAutoRefresh, 1000);
+
     async function refreshStatus(){
       try {
         const r = await fetch('/api/status', { cache: 'no-store' });
@@ -446,13 +490,35 @@
           applyLogFilter();
         }
 
-        // last refresh indicator
+        // last refresh + next auto-refresh
         const lr = document.getElementById('oauthLastRefresh');
+        const nr = document.getElementById('oauthNextRefresh');
+        const nrc = document.getElementById('oauthNextRefreshCountdown');
+
+        // default
+        if (nr) nr.textContent = '(unknown)';
+        if (nrc) nrc.textContent = '—';
+        _nextAutoRefreshTs = null;
+
         if (lr && typeof j.token_refresh_log !== 'undefined') {
           const info = _extractLastRefresh(j.token_refresh_log || '');
           if (info.ts) {
             const shown = info.local || info.ts;
             lr.textContent = shown + (info.ok ? ' (ok)' : ' (check log)');
+
+            // compute next refresh time when auto-refresh is enabled
+            const mins = parseInt(String(j.env?.AUTO_TOKEN_REFRESH_MINUTES || ''), 10);
+            if (mins > 0) {
+              const lastEpoch = _parseUtcTsToEpoch(info.ts);
+              if (lastEpoch) {
+                _nextAutoRefreshTs = lastEpoch + mins * 60;
+                _renderNextAutoRefresh();
+              }
+            } else {
+              if (nr) nr.textContent = 'off';
+              if (nrc) nrc.textContent = '—';
+            }
+
           } else {
             lr.textContent = '(unknown)';
           }
@@ -1673,6 +1739,11 @@
                 </div>
                 <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
                   Last refresh: <span id="oauthLastRefresh" class="mono">(unknown)</span>
+                </div>
+                <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Next auto-refresh: <span id="oauthNextRefresh" class="mono">(unknown)</span>
+                  <span class="opacity-50">•</span>
+                  <span id="oauthNextRefreshCountdown" class="mono">—</span>
                 </div>
                 {% if not env.AUTO_TOKEN_REFRESH_MINUTES or env.AUTO_TOKEN_REFRESH_MINUTES == '0' %}
                 <div class="mt-1 text-xs text-slate-600 dark:text-slate-300">
