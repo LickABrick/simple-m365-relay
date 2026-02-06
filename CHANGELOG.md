@@ -4,6 +4,15 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.0.1] - 2026-02-06
+
+### Fixed
+- Onboarding could enter a refresh/redirect loop when the session was missing/invalid (API endpoints now return 401 instead of redirecting to `/login`; frontend handles 401/403 consistently).
+- Fresh installs could hit a 500 when saving relay settings because `/data/config/config.json` was not writable by the non-root UI user (now chowned on initial creation).
+
+### Added
+- `docker-compose.dev.yml`: standalone dev stack with separate volume and non-conflicting ports.
+
 ## [1.0.0] - 2026-02-06
 
 ### Added
@@ -25,4 +34,5 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[1.0.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.1
 [1.0.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.0
