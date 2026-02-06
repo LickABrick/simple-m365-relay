@@ -309,6 +309,17 @@ def start_device_flow_background() -> None:
 
 
 class H(BaseHTTPRequestHandler):
+    # When served over a unix socket, BaseHTTPRequestHandler's default
+    # logging tries to index client_address[0], which breaks.
+    def address_string(self) -> str:  # pragma: no cover
+        try:
+            ca = getattr(self, "client_address", None)
+            if isinstance(ca, (tuple, list)) and ca:
+                return str(ca[0])
+        except Exception:
+            pass
+        return "local"
+
     def _require_auth(self) -> bool:
         # /health is intentionally unauthenticated for basic liveness checks.
         if self.path == "/health":
