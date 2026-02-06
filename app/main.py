@@ -607,7 +607,8 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
 
     # Setup required first
-    if not auth.admin_exists() and path not in ("/setup", "/login"):
+    # Allow static assets (CSS/JS/favicon) to load on /setup and /login.
+    if not auth.admin_exists() and (not _is_public_path(path)):
         return RedirectResponse(url="/setup", status_code=303)
 
     # If admin exists, require login for everything except login/setup/logout
