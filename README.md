@@ -26,15 +26,69 @@ Use it at your own risk.
 
 ## Quick start 🚀
 
+### Option A: Run from source (build locally)
+
 ```bash
-cd simple-m365-relay  # (or whatever your folder is named)
+git clone https://github.com/LickABrick/simple-m365-relay.git
+cd simple-m365-relay
 cp env.example .env
 # edit .env
+
 docker compose up -d --build
 ```
 
 Web UI:
 - http://localhost:8000/
+
+### Option B: Run from GHCR images (no local build)
+
+Create a minimal `docker-compose.yml` (adjust ports/volume as you like):
+
+```yaml
+services:
+  postfix:
+    image: ghcr.io/lickabrick/simple-m365-relay-postfix:latest
+    container_name: simple-m365-relay-postfix
+    restart: unless-stopped
+    ports:
+      - "25:25"
+      - "587:587"
+    environment:
+      RELAYHOST: "[smtp.office365.com]:587"
+      MS365_SMTP_USER: "postfix@example.com"
+      AUTO_TOKEN_REFRESH_MINUTES: "30"
+    volumes:
+      - simple-m365-relay-data:/data
+
+  ui:
+    image: ghcr.io/lickabrick/simple-m365-relay-ui:latest
+    container_name: simple-m365-relay-ui
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      POSTFIX_CONTROL_SOCKET: /data/state/control.sock
+      DATA_DIR: /data
+      MS365_SMTP_USER: "postfix@example.com"
+      AUTO_TOKEN_REFRESH_MINUTES: "30"
+    volumes:
+      - simple-m365-relay-data:/data
+    depends_on:
+      - postfix
+
+volumes:
+  simple-m365-relay-data: {}
+```
+
+Then run:
+
+```bash
+docker compose up -d
+```
+
+Open the UI and complete `/setup` + `/onboarding`.
+
+> Note: The images are published by GitHub Actions on pushes to `main`. If you need a specific build, use `:sha-<shortsha>` tags.
 
 ### First login 🔐
 
