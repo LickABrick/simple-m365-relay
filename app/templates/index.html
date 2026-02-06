@@ -353,14 +353,20 @@
     }
 
     function _extractLastRefresh(log){
-      // log lines look like: [YYYY-MM-DD HH:MM:SS] refresh_token\n...\nToken refresh succeeded.
+      // log blocks look like:
+      // [YYYY-MM-DD HH:MM:SS] refresh_token
+      // Config check passed.
+      // Token refresh succeeded.
       const s = String(log || '');
-      const blocks = s.trim().split(/\n\[(?=\d{4}-\d{2}-\d{2} )/g);
-      const last = blocks[blocks.length-1] || '';
-      const m = last.match(/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
-      const ts = m ? m[1] : null;
-      const ok = /succeeded/i.test(last) && !/failed/i.test(last);
-      return { ts, ok, raw: last };
+      const re = /\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s*refresh_token[\s\S]*?(?=(\n\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\s*refresh_token)|$)/g;
+      let lastTs = null;
+      let lastBlock = '';
+      for (const m of s.matchAll(re)) {
+        lastTs = m[1];
+        lastBlock = m[0] || '';
+      }
+      const ok = /succeeded/i.test(lastBlock) && !/failed/i.test(lastBlock);
+      return { ts: lastTs, ok, raw: lastBlock };
     }
 
     async function refreshStatus(){
