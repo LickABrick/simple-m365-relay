@@ -74,13 +74,18 @@ jobs:
 
           image="ghcr.io/${owner_lc}/${{ matrix.image_name }}"
 
-          tag_lines="$image:$ver_no_v
-$image:sha-$sha_short"
+          # Build tag list (one per line) without breaking YAML indentation.
+          tag_lines="$(printf '%s\n' \
+            "$image:$ver_no_v" \
+            "$image:sha-$sha_short" \
+          )"
 
           # Only move :latest on non-prerelease releases.
           if [[ "$pre" == "false" ]]; then
-            tag_lines="$tag_lines
-$image:latest"
+            tag_lines="$(printf '%s\n' \
+              "$tag_lines" \
+              "$image:latest" \
+            )"
           fi
 
           {
