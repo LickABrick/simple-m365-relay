@@ -455,26 +455,104 @@
         }, 1500);
       }
 
-      document.getElementById('startDeviceFlowBtn')?.addEventListener('click', async () => {
+      function _setOdfStep(n){
+        for (let i=1;i<=5;i++) {
+          const el = document.getElementById('odfStep'+i);
+          if (!el) continue;
+          el.classList.toggle('opacity-70', i !== n);
+          el.classList.toggle('font-semibold', i === n);
+        }
+      }
+
+      function _setOdfState(txt, spinning){
+        const s = document.getElementById('reauthStatus');
+        const sp = document.getElementById('reauthSpinner');
+        if (s) s.textContent = txt;
+        if (sp) sp.classList.toggle('hidden', !spinning);
+      }
+
+      async function runDeviceFlowWizard(){
         if (reauthBox) reauthBox.classList.remove('hidden');
-        startPolling();
+        document.getElementById('reauthErrorBox')?.classList.add('hidden');
+        _setOdfStep(1);
+        _setOdfState('Starting…', true);
+
+        if (reauthStart) reauthStart.setAttribute('disabled', 'disabled');
+
         try {
           await apiFetch('/api/token/start', { method: 'POST' });
-          showToast('Device flow started.', 'ok');
-          await refreshDeviceFlowStatus();
         } catch(e) {
           showToast('Could not start device flow.', 'error');
+          _setOdfState('Failed to start', false);
+          if (reauthStart) reauthStart.removeAttribute('disabled');
+          return;
         }
+
+        showToast('Device flow started.', 'ok');
+
+        const until = Date.now() + 5 * 60 * 1000;
+        let haveCode = false;
+
+        while (Date.now() < until) {
+          try {
+            const j = await refreshDeviceFlowStatus();
+
+            if (j && j.url && j.code && !haveCode) {
+              haveCode = true;
+              _setOdfStep(2);
+              _setOdfState('Waiting for sign-in…', true);
+              _setOdfStep(3);
+            }
+
+            if (j && j.done) {
+              _setOdfState('Finished', false);
+              _setOdfStep(4);
+
+              await refreshTokenBits();
+
+              if (j.ok) {
+                showToast('Token acquired. Verifying…', 'ok');
+                if (_tokenValid) {
+                  _tokenVerified = true;
+                  const hint = document.getElementById('tokenVerifyHint');
+                  if (hint) hint.textContent = 'Verified';
+                  _setOdfStep(5);
+                  showToast('Success. Token verified.', 'ok');
+                } else {
+                  _tokenVerified = false;
+                  const hint = document.getElementById('tokenVerifyHint');
+                  if (hint) hint.textContent = 'Not verified';
+                  showToast('Token written but appears invalid/expired. Check logs.', 'error');
+                }
+              } else {
+                showToast('Device flow finished but token acquisition failed.', 'error');
+              }
+
+              if (reauthStart) reauthStart.removeAttribute('disabled');
+              return;
+            }
+
+            if (!haveCode) {
+              _setOdfState('Waiting for login code…', true);
+              _setOdfStep(2);
+            }
+
+          } catch(e) {}
+
+          await new Promise(res => setTimeout(res, 1500));
+        }
+
+        _setOdfState('Timed out', false);
+        if (reauthStart) reauthStart.removeAttribute('disabled');
+        showToast('Device flow timed out. Check the log.', 'error');
+      }
+
+      document.getElementById('startDeviceFlowBtn')?.addEventListener('click', async () => {
+        runDeviceFlowWizard();
       });
 
       reauthStart?.addEventListener('click', async () => {
-        startPolling();
-        try {
-          await apiFetch('/api/token/start', { method: 'POST' });
-          await refreshDeviceFlowStatus();
-        } catch(e) {
-          showToast('Could not start device flow.', 'error');
-        }
+        runDeviceFlowWizard();
       });
 
       document.getElementById('reauthClose')?.addEventListener('click', () => {
@@ -917,8 +995,20 @@
             </div>
           </div>
 
-          <div class="mt-3 flex items-center justify-between">
-            <div id="reauthStatus" class="text-xs text-slate-600 dark:text-slate-300">Starting…</div>
+          <div class="mt-3 flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span id="reauthSpinner" class="hidden inline-flex h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-transparent dark:border-slate-700 dark:border-t-transparent" aria-label="Loading"></span>
+                <div id="reauthStatus" class="text-xs text-slate-600 dark:text-slate-300">Idle</div>
+              </div>
+              <ol class="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                <li id="odfStep1" class="font-semibold">1) Started</li>
+                <li id="odfStep2" class="opacity-70">2) Waiting for login code</li>
+                <li id="odfStep3" class="opacity-70">3) Waiting for sign-in</li>
+                <li id="odfStep4" class="opacity-70">4) Token acquired</li>
+                <li id="odfStep5" class="opacity-70">5) Success</li>
+              </ol>
+            </div>
             <button id="reauthStart" type="button" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
               <i data-lucide="play" class="h-4 w-4"></i>
               Start / Restart

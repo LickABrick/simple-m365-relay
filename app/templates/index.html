@@ -468,21 +468,53 @@
       }
     }
 
+    function _setDfStep(n){
+      for (let i=1;i<=5;i++) {
+        const el = document.getElementById('dfStep'+i);
+        if (!el) continue;
+        el.classList.toggle('opacity-70', i !== n);
+        el.classList.toggle('font-semibold', i === n);
+      }
+    }
+
+    function _setDfState(txt, spinning){
+      const s = document.getElementById('deviceFlowState');
+      const sp = document.getElementById('deviceFlowSpinner');
+      if (s) s.textContent = txt;
+      if (sp) sp.classList.toggle('hidden', !spinning);
+    }
+
     async function startDeviceFlowNoReload(){
-      showToast('Starting device flow…', 'ok');
-      // hide previous callout
-      document.getElementById('deviceFlowCallout')?.classList.add('hidden');
+      // Reset UI
+      const callout = document.getElementById('deviceFlowCallout');
+      const result = document.getElementById('deviceFlowResult');
+      const codeBox = document.getElementById('deviceFlowCodeBox');
+      if (result) { result.classList.add('hidden'); result.textContent = ''; }
+      if (codeBox) codeBox.classList.remove('hidden');
+      if (callout) callout.classList.remove('hidden');
+
+      _setDfState('Starting…', true);
+      _setDfStep(1);
+
+      // Disable button while running
+      const btn = document.getElementById('oauthReauthBtn');
+      if (btn) btn.setAttribute('disabled', 'disabled');
+
       try {
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         await apiFetch('/api/token/start', { method: 'POST' });
       } catch (e) {
         showToast('Failed to start device flow.', 'error');
+        _setDfState('Failed to start', false);
+        if (btn) btn.removeAttribute('disabled');
         return;
       }
 
-      // Poll log until we see code + url
-      const started = Date.now();
-      while (Date.now() - started < 30000) {
+      showToast('Device flow started.', 'ok');
+
+      const until = Date.now() + 5 * 60 * 1000;
+      let haveCode = false;
+
+      while (Date.now() < until) {
         try {
           const r = await apiFetch('/api/device-flow-log', { method: 'GET', cache: 'no-store' });
           const ct = (r.headers.get('content-type') || '');
@@ -492,47 +524,60 @@
             return;
           }
           const j = await r.json().catch(()=>({}));
+
           const url = j.url;
           const code = j.code;
-          if (url && code) {
+
+          if (url && code && !haveCode) {
+            haveCode = true;
             const a = document.getElementById('deviceFlowUrl');
             const c = document.getElementById('deviceFlowCode');
             if (a) { a.href = url; a.textContent = url; }
             if (c) { c.textContent = code; }
-            document.getElementById('deviceFlowCallout')?.classList.remove('hidden');
-            showToast('Device flow started. Use the code shown in OAuth section.', 'ok');
             try { lucide.createIcons(); } catch(e) {}
+            _setDfStep(2);
+            _setDfState('Waiting for sign-in…', true);
+            _setDfStep(3);
+          }
 
-            // Also poll for completion so the user gets feedback when the token is acquired.
-            (async () => {
-              const until = Date.now() + 5 * 60 * 1000;
-              while (Date.now() < until) {
-                try {
-                  const rr = await apiFetch('/api/device-flow-log', { method: 'GET', cache: 'no-store' });
-                  const ctt = (rr.headers.get('content-type') || '');
-                  if (!ctt.includes('application/json')) break;
-                  const jj = await rr.json().catch(()=>({}));
-                  if (jj && jj.done) {
-                    if (jj.ok) {
-                      showToast('Token acquired. Updating status…', 'ok');
-                      try { await refreshStatus(); } catch(e) {}
-                    } else {
-                      showToast('Device flow finished but token acquisition failed. See log.', 'error');
-                    }
-                    return;
-                  }
-                } catch(e) {}
-                await new Promise(res => setTimeout(res, 1500));
+          if (j && j.done) {
+            _setDfState('Finished', false);
+            _setDfStep(4);
+
+            if (j.ok) {
+              showToast('Token acquired. Updating status…', 'ok');
+              try { await refreshStatus(); } catch(e) {}
+              _setDfStep(5);
+              if (result) {
+                result.classList.remove('hidden');
+                result.textContent = 'Success. Token acquired and status updated.';
               }
-            })();
+              showToast('Device flow success.', 'ok');
+            } else {
+              if (result) {
+                result.classList.remove('hidden');
+                result.textContent = 'Device flow finished but token acquisition failed. See log below.';
+              }
+              showToast('Device flow failed. See log.', 'error');
+            }
 
+            if (btn) btn.removeAttribute('disabled');
             return;
           }
+
+          if (!haveCode) {
+            _setDfState('Waiting for login code…', true);
+            _setDfStep(2);
+          }
+
         } catch (e) {}
-        await new Promise(res => setTimeout(res, 1000));
+
+        await new Promise(res => setTimeout(res, 1500));
       }
 
-      showToast('Device flow started. Check the log for the code.', 'ok');
+      _setDfState('Timed out', false);
+      if (btn) btn.removeAttribute('disabled');
+      showToast('Device flow timed out. Check the log.', 'error');
     }
 
     async function refreshTokenNoReload(){
@@ -1586,17 +1631,35 @@
 
                 <div id="deviceFlowCallout" class="hidden sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-3 text-xs text-slate-700 shadow-sm dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200">
                   <div class="flex items-start justify-between gap-3">
-                    <div>
-                      <div class="font-semibold">Device flow</div>
-                      <div class="mt-1">Open <a id="deviceFlowUrl" class="underline" href="#" target="_blank" rel="noreferrer">microsoft.com/devicelogin</a> and enter code:</div>
-                      <div class="mt-1 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-semibold dark:border-slate-800 dark:bg-slate-900/40">
-                        <span id="deviceFlowCode" class="mono text-sm">…</span>
-                        <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('deviceFlowCode')">
-                          <i data-lucide="copy" class="h-3.5 w-3.5"></i>
-                          Copy
-                        </button>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2 font-semibold">
+                        <span>Device flow</span>
+                        <span id="deviceFlowSpinner" class="hidden inline-flex h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-transparent dark:border-slate-700 dark:border-t-transparent" aria-label="Loading"></span>
+                        <span id="deviceFlowState" class="ml-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">Idle</span>
                       </div>
+
+                      <ol class="mt-2 space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                        <li id="dfStep1" class="font-semibold">1) Started</li>
+                        <li id="dfStep2" class="opacity-70">2) Waiting for login code</li>
+                        <li id="dfStep3" class="opacity-70">3) Waiting for sign-in</li>
+                        <li id="dfStep4" class="opacity-70">4) Token acquired</li>
+                        <li id="dfStep5" class="opacity-70">5) Success</li>
+                      </ol>
+
+                      <div class="mt-3" id="deviceFlowCodeBox">
+                        <div class="mt-1">Open <a id="deviceFlowUrl" class="underline" href="#" target="_blank" rel="noreferrer">microsoft.com/devicelogin</a> and enter code:</div>
+                        <div class="mt-1 inline-flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-semibold dark:border-slate-800 dark:bg-slate-900/40">
+                          <span id="deviceFlowCode" class="mono text-sm">…</span>
+                          <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="copyText('deviceFlowCode')">
+                            <i data-lucide="copy" class="h-3.5 w-3.5"></i>
+                            Copy
+                          </button>
+                        </div>
+                      </div>
+
+                      <div id="deviceFlowResult" class="hidden mt-3 rounded-xl border border-slate-200 bg-slate-50 p-2 text-[11px] dark:border-slate-800 dark:bg-slate-900/40"></div>
                     </div>
+
                     <button type="button" class="rounded-lg px-2 py-1 opacity-70 hover:opacity-100" onclick="document.getElementById('deviceFlowCallout')?.classList.add('hidden')">
                       <i data-lucide="x" class="h-4 w-4"></i>
                     </button>
