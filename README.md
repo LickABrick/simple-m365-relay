@@ -13,6 +13,17 @@ This is based on the approach described here:
 
 ---
 
+## Disclaimer ⚠️
+
+This project was largely written with the help of an AI assistant.
+Use it at your own risk.
+
+- No warranties are provided.
+- Review the code and security posture before using in production.
+- Do not expose the relay/UI to the public internet unless you know what you are doing.
+
+---
+
 ## Quick start 🚀
 
 ```bash
