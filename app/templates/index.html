@@ -459,6 +459,17 @@
         if (rh && j.env?.RELAYHOST) rh.textContent = j.env.RELAYHOST;
         const mu = document.getElementById('ms365User');
         if (mu && j.env?.MS365_SMTP_USER) mu.textContent = j.env.MS365_SMTP_USER;
+        const muNote = document.getElementById('ms365UserNote');
+        if (muNote && j.env) {
+          const envU = j.env.ENV_MS365_SMTP_USER || '';
+          const cfgU = j.env.CFG_MS365_SMTP_USER || '';
+          if (envU && cfgU && (envU !== cfgU)) {
+            muNote.textContent = `Overridden by env MS365_SMTP_USER (${envU}).`;
+            muNote.classList.remove('hidden');
+          } else {
+            muNote.classList.add('hidden');
+          }
+        }
         const te = document.getElementById('tokenExp');
         if (te) {
           te.setAttribute('data-ts', j.token_exp_ts || '');
@@ -1405,6 +1416,7 @@
                 <i data-lucide="user-round" class="h-4 w-4 text-slate-400"></i>
               </div>
               <div class="mt-1 truncate text-sm font-semibold" id="ms365User" title="{{ env.MS365_SMTP_USER }}">{{ env.MS365_SMTP_USER }}</div>
+              <div id="ms365UserNote" class="mt-1 hidden text-xs text-amber-700 dark:text-amber-200"></div>
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">authenticated sender</div>
             </div>
             <div id="tokenCard" class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1476,6 +1488,18 @@
             </div>
 
             <div class="sm:col-span-2">
+              <label class="text-sm font-medium">Microsoft 365 SMTP user</label>
+              <input name="ms365_smtp_user" value="{{ cfg.ms365_smtp_user or '' }}" placeholder="postfix@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              {% if (env.ENV_MS365_SMTP_USER or '') %}
+                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Note: <span class="mono">MS365_SMTP_USER</span> is set via environment to <span class="mono">{{ env.ENV_MS365_SMTP_USER }}</span> and will override this value until removed.
+                </div>
+              {% else %}
+                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Stored in config.json (lets docker-compose stay minimal in v1.1.0+).</div>
+              {% endif %}
+            </div>
+
+            <div class="sm:col-span-2">
               <div class="text-sm font-semibold">Inbound TLS</div>
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Controls encryption requirements for clients connecting to port 25 and 587.</div>
             </div>
@@ -1528,7 +1552,7 @@
             <div class="flex items-start gap-2">
               <i data-lucide="info" class="callout-icon mt-0.5 h-4 w-4"></i>
               <div>
-                Ports/TLS and M365 OAuth settings are controlled by environment variables (docker compose).
+                Most settings are stored in <span class="mono">/data/config/config.json</span>. Some options can still be overridden via environment variables for backwards compatibility.
               </div>
             </div>
           </div>

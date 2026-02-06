@@ -800,6 +800,8 @@ def onboarding_get(request: Request):
     cfg = load_cfg()
 
     ms365_user = effective_ms365_user(cfg)
+    env_ms365_user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    cfg_ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip()
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -817,6 +819,8 @@ def onboarding_get(request: Request):
             "device_flow_log": tail(DEVICE_FLOW_LOG, 400),
             "onboarding_ok": onboarding_complete(cfg),
             "ms365_user": ms365_user,
+            "env_ms365_user": env_ms365_user,
+            "cfg_ms365_user": cfg_ms365_user,
         },
     )
 
@@ -838,6 +842,8 @@ def index(request: Request):
     warn_tail = _extract_recent_warnings(mail_log)
 
     ms365_user = effective_ms365_user(cfg)
+    env_ms365_user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    cfg_ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip()
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -867,7 +873,11 @@ def index(request: Request):
             "pending": pending,
             "from_identities": from_identities(cfg, ms365_user),
             "env": {
+                # effective value (env-first fallback)
                 "MS365_SMTP_USER": ms365_user,
+                # for debugging/UX: show both sources
+                "ENV_MS365_SMTP_USER": env_ms365_user,
+                "CFG_MS365_SMTP_USER": cfg_ms365_user,
                 "MS365_TENANT_ID": (cfg.get("oauth") or {}).get("tenant_id", ""),
                 "MS365_CLIENT_ID": (cfg.get("oauth") or {}).get("client_id", ""),
                 "RELAYHOST": cfg.get("relayhost") or os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
@@ -1420,6 +1430,8 @@ def api_status():
     token_refresh_log = get_token_refresh_log()
 
     ms365_user = effective_ms365_user(cfg)
+    env_ms365_user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    cfg_ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip()
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -1441,7 +1453,11 @@ def api_status():
         "token_refresh_log": token_refresh_log,
         "from_identities": from_identities(cfg, ms365_user),
         "env": {
+            # effective value (env-first fallback)
             "MS365_SMTP_USER": ms365_user,
+            # for debugging/UX: show both sources
+            "ENV_MS365_SMTP_USER": env_ms365_user,
+            "CFG_MS365_SMTP_USER": cfg_ms365_user,
             "RELAYHOST": cfg.get("relayhost") or os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
             "AUTO_TOKEN_REFRESH_MINUTES": str((cfg.get("oauth") or {}).get("auto_refresh_minutes", "")),
         },
