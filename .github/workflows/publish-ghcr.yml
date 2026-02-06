@@ -27,10 +27,10 @@ jobs:
       matrix:
         include:
           - name: ui
-            image: ghcr.io/${{ github.repository_owner }}/simple-m365-relay-ui
+            image: ghcr.io/${{ toLower(github.repository_owner) }}/simple-m365-relay-ui
             dockerfile: ui/Dockerfile
           - name: postfix
-            image: ghcr.io/${{ github.repository_owner }}/simple-m365-relay-postfix
+            image: ghcr.io/${{ toLower(github.repository_owner) }}/simple-m365-relay-postfix
             dockerfile: postfix/Dockerfile
 
     steps:
