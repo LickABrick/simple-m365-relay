@@ -472,6 +472,21 @@ def main():
             pass
         sock.parent.mkdir(parents=True, exist_ok=True)
         httpd = _UnixHTTPServer(str(sock), H)
+        # Make the socket usable by the non-root UI container (uid/gid 10001).
+        try:
+            import os as _os
+
+            ui_uid = int(_os.environ.get("UI_UID", "10001"))
+            ui_gid = int(_os.environ.get("UI_GID", "10001"))
+            _os.chown(str(sock), ui_uid, ui_gid)
+            _os.chmod(str(sock), 0o660)
+        except Exception:
+            try:
+                import os as _os
+
+                _os.chmod(str(sock), 0o666)
+            except Exception:
+                pass
     else:
         httpd = HTTPServer((BIND, PORT), H)
 
