@@ -125,8 +125,8 @@ def _redact_sensitive(text: str) -> str:
     t = re.sub(r"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b", "[REDACTED_JWT]", t)
     # redact common fields
     t = re.sub(r"(?i)(refresh_token|access_token|id_token|authorization)\s*[:=]\s*[^\s\"']+", r"\1=[REDACTED]", t)
-    # device codes
-    t = re.sub(r"(?i)(code\s*[:=]\s*)([A-Z0-9-]{8,})", r"\1[REDACTED_CODE]", t)
+    # NOTE: do NOT redact device codes here. The UI needs the device code to complete sign-in.
+    # Device codes are short-lived and only shown to authenticated admins.
     return t
 
 
