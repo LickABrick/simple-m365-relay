@@ -27,10 +27,10 @@ jobs:
       matrix:
         include:
           - name: ui
-            image: ghcr.io/${{ toLower(github.repository_owner) }}/simple-m365-relay-ui
+            image_name: simple-m365-relay-ui
             dockerfile: ui/Dockerfile
           - name: postfix
-            image: ghcr.io/${{ toLower(github.repository_owner) }}/simple-m365-relay-postfix
+            image_name: simple-m365-relay-postfix
             dockerfile: postfix/Dockerfile
 
     steps:
@@ -50,10 +50,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
+      - name: Compute image + tags
         id: tags
         shell: bash
         run: |
+          set -euo pipefail
+
           if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
             ver="${{ github.event.release.tag_name }}"
             pre="${{ github.event.release.prerelease }}"
@@ -67,27 +69,32 @@ jobs:
 
           sha_short="${GITHUB_SHA::7}"
 
-          tags="$(cat <<EOF
-          ${{ matrix.image }}:${ver_no_v}
-          ${{ matrix.image }}:sha-${sha_short}
-          EOF
-          )"
+          owner_lc="${{ github.repository_owner }}"
+          owner_lc="$(printf '%s' "$owner_lc" | tr '[:upper:]' '[:lower:]')"
+
+          image="ghcr.io/${owner_lc}/${{ matrix.image_name }}"
+
+          tag_lines="$image:$ver_no_v
+$image:sha-$sha_short"
 
           # Only move :latest on non-prerelease releases.
-          if [[ "${pre}" == "false" ]]; then
-            tags="${tags}
-          ${{ matrix.image }}:latest"
+          if [[ "$pre" == "false" ]]; then
+            tag_lines="$tag_lines
+$image:latest"
           fi
 
-          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$tags" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "image=$image"
+            echo "tags<<EOF"
+            echo "$tag_lines"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Docker metadata (labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ matrix.image }}
+          images: ${{ steps.tags.outputs.image }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
