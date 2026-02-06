@@ -253,7 +253,13 @@
       const sendHint = document.getElementById('testDisabledHint');
 
       try {
-        const r = await fetch('/api/status', { cache: 'no-store' });
+        const r = await apiFetch('/api/status', { method: 'GET', cache: 'no-store' });
+        const ct = (r.headers.get('content-type') || '');
+        if (!ct.includes('application/json')) {
+          showToast('Session expired or invalid. Please sign in again.', 'error');
+          window.setTimeout(() => { window.location.href = '/login'; }, 800);
+          return;
+        }
         const j = await r.json();
         const info = _fmtTsLocal(j.token_exp_ts);
         if (tokenExp) tokenExp.textContent = info.text;
@@ -430,6 +436,7 @@
               _reauthTimer = null;
               await refreshTokenBits();
               if (j.ok) {
+                showToast('Token acquired. Verifying…', 'ok');
                 // auto-verify
                 if (_tokenValid) {
                   _tokenVerified = true;

@@ -209,7 +209,11 @@
     function formatTokenExpiryLocal(ts){
       if (!ts) return '(unknown)';
       try {
-        const d = new Date(Number(ts) * 1000);
+        let n = Number(ts);
+        if (!n || Number.isNaN(n)) return String(ts);
+        // Defensive: sometimes we might receive ms.
+        if (n > 1e12) n = Math.floor(n / 1000);
+        const d = new Date(n * 1000);
         return d.toLocaleString(undefined, { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
       } catch (e) {
         return String(ts);
@@ -217,8 +221,9 @@
     }
 
     function _tokenStatus(ts){
-      const n = Number(ts || 0);
+      let n = Number(ts || 0);
       if (!n || Number.isNaN(n)) return { state: 'unknown' };
+      if (n > 1e12) n = Math.floor(n / 1000);
 
       const now = Date.now();
       const exp = n * 1000;
