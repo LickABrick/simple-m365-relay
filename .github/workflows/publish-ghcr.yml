@@ -67,13 +67,16 @@ jobs:
 
           sha_short="${GITHUB_SHA::7}"
 
-          tags="${{ matrix.image }}:${ver_no_v}
-${{ matrix.image }}:sha-${sha_short}"
+          tags="$(cat <<EOF
+          ${{ matrix.image }}:${ver_no_v}
+          ${{ matrix.image }}:sha-${sha_short}
+          EOF
+          )"
 
           # Only move :latest on non-prerelease releases.
           if [[ "${pre}" == "false" ]]; then
             tags="${tags}
-${{ matrix.image }}:latest"
+          ${{ matrix.image }}:latest"
           fi
 
           echo "tags<<EOF" >> "$GITHUB_OUTPUT"
