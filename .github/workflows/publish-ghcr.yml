@@ -1,9 +1,19 @@
 name: Publish Docker images to GHCR
 
 on:
-  push:
-    branches: ["main"]
-  workflow_dispatch: {}
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v1.2.3, v1.2.3-rc.1)"
+        required: true
+        type: string
+      prerelease:
+        description: "Treat as prerelease (do not move :latest)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -40,14 +50,44 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
+      - name: Compute tags
+        id: tags
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "release" ]]; then
+            ver="${{ github.event.release.tag_name }}"
+            pre="${{ github.event.release.prerelease }}"
+          else
+            ver="${{ inputs.version }}"
+            pre="${{ inputs.prerelease }}"
+          fi
+
+          # Accept both v1.2.3 and 1.2.3
+          ver_no_v="${ver#v}"
+
+          sha_short="${GITHUB_SHA::7}"
+
+          tags="${{ matrix.image }}:${ver_no_v}
+${{ matrix.image }}:sha-${sha_short}"
+
+          # Only move :latest on non-prerelease releases.
+          if [[ "${pre}" == "false" ]]; then
+            tags="${tags}
+${{ matrix.image }}:latest"
+          fi
+
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$tags" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata (labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ matrix.image }}
-          tags: |
-            type=raw,value=latest
-            type=sha,format=short,prefix=sha-
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -55,7 +95,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

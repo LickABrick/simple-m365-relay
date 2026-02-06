@@ -88,7 +88,7 @@ docker compose up -d
 
 Open the UI and complete `/setup` + `/onboarding`.
 
-> Note: The images are published by GitHub Actions on pushes to `main`. If you need a specific build, use `:sha-<shortsha>` tags.
+> Note: The images are published by GitHub Actions on **GitHub Releases** (not on every push). Use `:<version>` tags for releases (and `:sha-<shortsha>` for traceability).
 
 ### First login 🔐
 
