@@ -1395,18 +1395,32 @@ def api_testmail(
 
 @app.get("/api/status")
 def api_status():
+    """Return best-effort status as JSON.
+
+    This endpoint is polled by the UI. It must never crash into an HTML 500 page,
+    otherwise frontend code can misinterpret it as an auth/session problem.
+    """
+
+    def _safe_control(path: str) -> dict:
+        try:
+            return _control_get(path) or {}
+        except Exception as e:
+            return {"_error": f"control_api_error:{path}:{type(e).__name__}"}
+
     cfg = load_cfg()
-    mailq_out = (_control_get("/mailq").get("mailq") or "")
+
+    mailq_resp = _safe_control("/mailq")
+    mailq_out = str(mailq_resp.get("mailq") or "")
     qsize = parse_queue_size(mailq_out)
-    mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
+
+    maillog_resp = _safe_control("/maillog")
+    mail_log = _redact_mail_log(str(maillog_resp.get("maillog") or ""))
+
     token_refresh_log = get_token_refresh_log()
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "")
-    token_exp_ts = None
-    try:
-        token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
-    except Exception:
-        token_exp_ts = None
+    token_status = _safe_control("/token/status")
+    token_exp_ts = (token_status or {}).get("token_exp_ts")
 
     current_hash = cfg_hash(cfg)
     applied_hash = get_applied_hash()
@@ -1426,6 +1440,11 @@ def api_status():
             "MS365_SMTP_USER": ms365_user,
             "RELAYHOST": cfg.get("relayhost") or os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
             "AUTO_TOKEN_REFRESH_MINUTES": str((cfg.get("oauth") or {}).get("auto_refresh_minutes", "")),
+        },
+        "errors": {
+            "control_mailq": mailq_resp.get("_error"),
+            "control_maillog": maillog_resp.get("_error"),
+            "control_token_status": token_status.get("_error") if isinstance(token_status, dict) else None,
         },
     }
 

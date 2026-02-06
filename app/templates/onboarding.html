@@ -296,8 +296,7 @@
         const r = await apiFetch('/api/status', { method: 'GET', cache: 'no-store' });
         const ct = (r.headers.get('content-type') || '');
         if (!ct.includes('application/json')) {
-          showToast('Session expired or invalid. Please sign in again.', 'error');
-          window.setTimeout(() => { window.location.href = '/login'; }, 800);
+          showToast(`Status check failed (HTTP ${r.status}).`, 'error');
           return;
         }
         const j = await r.json();
