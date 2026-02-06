@@ -706,8 +706,21 @@
 
           // Apply so dashboard doesn't immediately show the pending/apply banner.
           const ar = await apiFetch('/api/apply', { method: 'POST' });
+          if (!ar.ok) {
+            showToast('Saved. Redirecting…', 'ok');
+            window.setTimeout(() => { window.location.href = '/'; }, 600);
+            return;
+          }
+
+          const ct = (ar.headers.get('content-type') || '');
+          if (!ct.includes('application/json')) {
+            showToast('Saved. Redirecting…', 'ok');
+            window.setTimeout(() => { window.location.href = '/'; }, 600);
+            return;
+          }
+
           const aj = await ar.json().catch(()=>({}));
-          if (!ar.ok || !aj.ok) {
+          if (!aj.ok) {
             showToast(aj.detail || 'Saved, but apply failed. You can apply later on the dashboard.', 'error');
           } else {
             showToast('Saved & applied. Redirecting…', 'ok');
