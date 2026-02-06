@@ -479,8 +479,8 @@
       const started = Date.now();
       while (Date.now() - started < 30000) {
         try {
-          const r = await fetch('/api/device-flow-log', { cache: 'no-store' });
-          const j = await r.json();
+          const r = await apiFetch('/api/device-flow-log', { method: 'GET', cache: 'no-store' });
+          const j = await r.json().catch(()=>({}));
           const url = j.url;
           const code = j.code;
           if (url && code) {
