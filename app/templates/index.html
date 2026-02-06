@@ -654,6 +654,9 @@
 
         showToast('Token refreshed.', 'ok');
 
+        // Immediately update last-refresh UI and refetch status/logs.
+        const lr = document.getElementById('oauthLastRefresh');
+        if (lr) lr.textContent = new Date().toLocaleString() + ' (ok)';
         // Always re-sync full status after refresh
         await refreshStatus();
       } catch (e) {

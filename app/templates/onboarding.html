@@ -421,7 +421,7 @@
       const reauthUrl = document.getElementById('reauthUrl');
       const reauthCode = document.getElementById('reauthCode');
       const reauthCopy = document.getElementById('reauthCopy');
-      const reauthStart = document.getElementById('reauthStart');
+      // reauthStart removed (device flow starts via the wizard entry button)
       const reauthErrorBox = document.getElementById('reauthErrorBox');
       const reauthErrorText = document.getElementById('reauthErrorText');
       const log = document.getElementById('deviceFlowLog');
@@ -518,7 +518,7 @@
         _setOdfStep(1);
         _setOdfState('Starting…', true);
 
-        if (reauthStart) reauthStart.setAttribute('disabled', 'disabled');
+        // reauthStart removed
 
         try {
           await apiFetch('/api/token/start', { method: 'POST' });
@@ -526,7 +526,7 @@
           showToast('Could not start device flow.', 'error');
           _setOdfState('Failed to start', false);
           document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
-          if (reauthStart) reauthStart.removeAttribute('disabled');
+          // reauthStart removed
           return;
         }
 
@@ -573,7 +573,6 @@
                 showToast('Device flow finished but token acquisition failed.', 'error');
               }
 
-              if (reauthStart) reauthStart.removeAttribute('disabled');
               return;
             }
 
@@ -589,7 +588,6 @@
 
         _setOdfState('Timed out', false);
         document.getElementById('onboardingOauthMain')?.classList.remove('hidden');
-        if (reauthStart) reauthStart.removeAttribute('disabled');
         showToast('Device flow timed out. Check the log.', 'error');
       }
 
@@ -597,9 +595,7 @@
         runDeviceFlowWizard();
       });
 
-      reauthStart?.addEventListener('click', async () => {
-        runDeviceFlowWizard();
-      });
+      // reauthStart removed
 
       document.getElementById('reauthClose')?.addEventListener('click', () => {
         reauthBox?.classList.add('hidden');
@@ -1053,10 +1049,7 @@
                 <li id="odfStep5" class="opacity-70">5) Success</li>
               </ol>
             </div>
-            <button id="reauthStart" type="button" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
-              <i data-lucide="play" class="h-4 w-4"></i>
-              Start / Restart
-            </button>
+            <!-- Start/Restart button removed: device flow starts via the Re-auth wizard button -->
           </div>
 
           <div id="reauthErrorBox" class="hidden mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-900 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
