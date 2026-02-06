@@ -1296,9 +1296,14 @@ def _parse_device_flow_log(log: str) -> dict:
     if m:
         code = m.group(1)
     else:
-        m2 = re.search(r"code\s*[: ]\s*([A-Z0-9]{8,})\b", txt, re.IGNORECASE)
+        # common sasl-xoauth2-tool phrasing: "enter the code ABCDEF..."
+        m2 = re.search(r"enter\s+the\s+code\s+([A-Z0-9]{8,})\b", txt, re.IGNORECASE)
         if m2:
             code = m2.group(1)
+        else:
+            m3 = re.search(r"code\s*[: ]\s*([A-Z0-9]{8,})\b", txt, re.IGNORECASE)
+            if m3:
+                code = m3.group(1)
 
     # Exit code
     exit_code = None
