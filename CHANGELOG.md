@@ -4,6 +4,15 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.0.2] - 2026-02-06
+
+### Fixed
+- More robust Postfix/UI startup for existing volumes: enforce UI write permissions on `/data/config/config.json` on every postfix startup.
+- Avoid misleading "Session expired or invalid" onboarding banner caused by transient `/api/status` failures; `/api/status` is now best-effort and always returns JSON.
+
+### Docs
+- README GHCR compose example now uses `POSTFIX_CONTROL_URL=http://postfix:18080` (recommended) and removes optional env vars from the example.
+
 ## [1.0.1] - 2026-02-06
 
 ### Fixed
@@ -34,5 +43,6 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[1.0.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.2
 [1.0.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.1
 [1.0.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.0
