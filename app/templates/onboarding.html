@@ -228,6 +228,53 @@
         chip.classList.toggle('dark:text-amber-200', !(okCore && okOAuth));
       }
 
+      // Step-level gating (disable Next + show exactly what is missing)
+      const coreMissing = [];
+      if (!_fieldOk(core.relayhost)) coreMissing.push('Relayhost');
+      if (!_fieldOk(core.ms365_smtp_user)) coreMissing.push('Microsoft 365 SMTP user');
+
+      const oauthMissing = [];
+      if (!_fieldOk(oauth.tenant_id)) oauthMissing.push('Tenant ID');
+      if (!_fieldOk(oauth.client_id)) oauthMissing.push('Client ID');
+
+      const coreBox = document.getElementById('coreMissing');
+      const coreList = document.getElementById('coreMissingList');
+      if (coreBox && coreList) {
+        coreList.innerHTML = '';
+        for (const x of coreMissing) {
+          const li = document.createElement('li');
+          li.textContent = x;
+          coreList.appendChild(li);
+        }
+        coreBox.classList.toggle('hidden', coreMissing.length === 0);
+      }
+
+      const oauthBox = document.getElementById('oauthMissing');
+      const oauthList = document.getElementById('oauthMissingList');
+      if (oauthBox && oauthList) {
+        oauthList.innerHTML = '';
+        for (const x of oauthMissing) {
+          const li = document.createElement('li');
+          li.textContent = x;
+          oauthList.appendChild(li);
+        }
+        oauthBox.classList.toggle('hidden', oauthMissing.length === 0);
+      }
+
+      const s1Next = document.getElementById('s1Next');
+      if (s1Next) {
+        s1Next.toggleAttribute('disabled', coreMissing.length > 0);
+        s1Next.classList.toggle('opacity-60', coreMissing.length > 0);
+        s1Next.classList.toggle('cursor-not-allowed', coreMissing.length > 0);
+      }
+
+      const s2Next = document.getElementById('s2Next');
+      if (s2Next) {
+        s2Next.toggleAttribute('disabled', oauthMissing.length > 0);
+        s2Next.classList.toggle('opacity-60', oauthMissing.length > 0);
+        s2Next.classList.toggle('cursor-not-allowed', oauthMissing.length > 0);
+      }
+
       const doneBanner = document.getElementById('doneBanner');
       if (doneBanner) doneBanner.classList.toggle('hidden', !(okCore && okOAuth));
     }
@@ -916,6 +963,16 @@
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">This is the authenticated account used for OAuth token storage and identity.</div>
           </div>
 
+          <div id="coreMissing" class="hidden sm:col-span-2 rounded-2xl border border-amber-200/70 bg-amber-50/60 p-4 text-sm text-slate-800 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-100">
+            <div class="flex items-start gap-2">
+              <i data-lucide="triangle-alert" class="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-300"></i>
+              <div>
+                <div class="font-semibold">Required fields missing</div>
+                <ul id="coreMissingList" class="mt-1 list-disc pl-5 text-sm"></ul>
+              </div>
+            </div>
+          </div>
+
           <div class="sm:col-span-2">
             <div class="text-sm font-semibold">Inbound TLS</div>
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Encryption requirements for clients connecting to port 25 and 587.</div>
@@ -974,6 +1031,16 @@
             <label class="text-sm font-medium">Auto refresh (minutes)</label>
             <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
+          </div>
+
+          <div id="oauthMissing" class="hidden sm:col-span-2 rounded-2xl border border-amber-200/70 bg-amber-50/60 p-4 text-sm text-slate-800 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-100">
+            <div class="flex items-start gap-2">
+              <i data-lucide="triangle-alert" class="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-300"></i>
+              <div>
+                <div class="font-semibold">Required fields missing</div>
+                <ul id="oauthMissingList" class="mt-1 list-disc pl-5 text-sm"></ul>
+              </div>
+            </div>
           </div>
         </div>
 
