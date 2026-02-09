@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Request, UploadFile, File
 from fastapi.responses import Response
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
@@ -47,6 +47,7 @@ async def security_headers(request: Request, call_next):
 from . import auth  # noqa: E402
 from . import lockout  # noqa: E402
 from .security import client_ip, get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
+from .backup import b64d, b64e, validate_cfg_obj  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
 POSTFIX_CONTROL_SOCKET = (os.environ.get("POSTFIX_CONTROL_SOCKET") or "").strip()
@@ -364,6 +365,22 @@ def _control_post(path: str) -> dict:
     url = POSTFIX_CONTROL_URL + path
     req = urllib.request.Request(url, method="POST", data=b"", headers=_control_headers())
     with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _control_post_json(path: str, obj: dict, timeout: int = 25) -> dict:
+    import urllib.request
+    import ssl
+
+    body = json.dumps(obj).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+
+    if POSTFIX_CONTROL_SOCKET:
+        return _unix_http_json("POST", path, body=body, headers=headers, timeout=timeout)
+
+    url = POSTFIX_CONTROL_URL + path
+    req = urllib.request.Request(url, method="POST", data=body, headers=_control_headers(headers))
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as r:
         return json.loads(r.read().decode("utf-8"))
 
 
@@ -1311,6 +1328,60 @@ def api_token_refresh():
         token_exp_ts = None
 
     return {"ok": True, "output": out, "token_exp_ts": token_exp_ts}
+
+
+@app.get("/backup/export.zip")
+def backup_export_zip():
+    j = _control_get("/backup/export")
+    if not j.get("ok"):
+        raise HTTPException(status_code=500, detail=j.get("error") or "export_failed")
+    zip_b64 = (j.get("zip_b64") or "").strip()
+    if not zip_b64:
+        raise HTTPException(status_code=500, detail="missing payload")
+    blob = b64d(zip_b64)
+    return Response(
+        content=blob,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="simple-m365-relay-backup.zip"'},
+    )
+
+
+@app.post("/backup/import")
+def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile = File(...)):
+    require_csrf(request, csrf_token)
+    raw = file.file.read() if file and file.file else b""
+    if not raw:
+        raise HTTPException(status_code=400, detail="empty upload")
+
+    # Validate config.json in bundle if present (avoid importing invalid config).
+    import io
+    import json as _json
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), mode="r") as z:
+            if "config/config.json" in z.namelist():
+                cfg_obj = _json.loads(z.read("config/config.json").decode("utf-8"))
+                validate_cfg_obj(cfg_obj)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid backup bundle: {e}")
+
+    res = _control_post_json("/backup/import", {"zip_b64": b64e(raw)})
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error") or "import_failed")
+
+    # After import, mark as pending until apply.
+    cfg = load_cfg()
+    applied_hash = get_applied_hash() or ""
+    pending = bool(applied_hash) and (cfg_hash(cfg) != applied_hash)
+
+    from urllib.parse import quote
+
+    return RedirectResponse(
+        url=f"/?toast={quote('Backup imported. Review settings and click Apply Changes.')}&toastLevel=ok#settings",
+        status_code=303,
+        headers={},
+    )
 
 
 def _parse_device_flow_log(log: str) -> dict:

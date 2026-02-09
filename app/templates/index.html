@@ -1111,6 +1111,27 @@
       });
     }
 
+    function initBackupImport(){
+      const form = document.getElementById('importBackupForm');
+      const file = document.getElementById('importBackupFile');
+      const btn = form?.querySelector('button[type="button"]');
+      if (!form || !file || !btn) return;
+
+      btn.addEventListener('click', () => file.click());
+
+      file.addEventListener('change', () => {
+        if (!file.files || !file.files.length) return;
+        const ok = window.confirm(
+          'Import backup?\n\nThis will OVERWRITE your saved settings and SMTP AUTH users (sasldb2).\nIt will NOT import admin credentials or OAuth tokens.\n\nAfter import, you still need to click Apply Changes.'
+        );
+        if (!ok) {
+          file.value = '';
+          return;
+        }
+        form.submit();
+      });
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       try { lucide.createIcons(); } catch(e) {}
       syncThemeButton();
@@ -1124,6 +1145,7 @@
       initSendersAjax();
       initTestmailAjax();
       initApplyAjax();
+      initBackupImport();
       syncTokenExpiryFromDom();
       applyLogFilter();
     });
@@ -1354,6 +1376,18 @@
                   <i data-lucide="download" class="h-3.5 w-3.5"></i>
                   Diagnostics
                 </a>
+                <a href="/backup/export.zip" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Exports config + SMTP AUTH users (no admin, no OAuth tokens)">
+                  <i data-lucide="archive" class="h-3.5 w-3.5"></i>
+                  Export config
+                </a>
+                <form id="importBackupForm" method="post" action="/backup/import" enctype="multipart/form-data">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input id="importBackupFile" type="file" name="file" accept=".zip" class="hidden" />
+                  <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Imports config + SMTP AUTH users from a backup bundle">
+                    <i data-lucide="upload" class="h-3.5 w-3.5"></i>
+                    Import config
+                  </button>
+                </form>
                 <form method="post" action="/postfix/reload">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Reloads Postfix (keeps current config)">
