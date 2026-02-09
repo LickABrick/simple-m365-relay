@@ -24,6 +24,30 @@ Use it at your own risk.
 
 ---
 
+## Screenshots 📸
+
+**First-run setup:** create the single admin user.
+
+![Create admin account](docs/screenshots/01-setup-create-admin.jpg)
+
+**Onboarding wizard:** guided setup flow.
+
+![Onboarding welcome](docs/screenshots/02-onboarding-welcome.jpg)
+
+**Relay settings:** configure relayhost + (currently) the M365 SMTP user.
+
+![Onboarding relay settings](docs/screenshots/03-onboarding-relay-settings.jpg)
+
+**OAuth device flow:** acquire a token via device login.
+
+![Onboarding OAuth device flow](docs/screenshots/04-onboarding-oauth-device-flow.jpg)
+
+**Dashboard:** status overview + settings.
+
+![Dashboard status and settings](docs/screenshots/05-dashboard-status-settings.jpg)
+
+---
+
 ## Quick start 🚀
 
 ### Option A: Run from source (build locally)
@@ -54,9 +78,8 @@ services:
       - "25:25"
       - "587:587"
     environment:
-      RELAYHOST: "[smtp.office365.com]:587"
+      # Currently required for token storage/identity (v1.1.0 aims to move this fully into onboarding):
       MS365_SMTP_USER: "postfix@example.com"
-      AUTO_TOKEN_REFRESH_MINUTES: "30"
     volumes:
       - simple-m365-relay-data:/data
 
@@ -67,10 +90,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      POSTFIX_CONTROL_SOCKET: /data/state/control.sock
+      # Recommended: use TCP within the Docker network
+      POSTFIX_CONTROL_URL: http://postfix:18080
       DATA_DIR: /data
-      MS365_SMTP_USER: "postfix@example.com"
-      AUTO_TOKEN_REFRESH_MINUTES: "30"
     volumes:
       - simple-m365-relay-data:/data
     depends_on:
