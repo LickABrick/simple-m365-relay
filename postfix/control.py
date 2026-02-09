@@ -147,25 +147,48 @@ def tail(path: Path, n: int = 200) -> str:
         return path.read_text(encoding="utf-8", errors="ignore")[-8000:]
 
 
-def render_and_reload() -> str:
+def _render_args(outdir: str) -> list[str]:
     cert = os.environ.get("RELAY_TLS_CERT_PATH", "/data/certs/tls.crt")
     key = os.environ.get("RELAY_TLS_KEY_PATH", "/data/certs/tls.key")
-    out = sh([
+    return [
         "python3",
         "/opt/ms365-relay/postfix/render.py",
         "--config",
         str(CFG_JSON),
         "--outdir",
-        "/etc/postfix",
+        outdir,
         "--token-dir",
         str(DATA_DIR / "tokens"),
         "--tls-cert",
         cert,
         "--tls-key",
         key,
-    ])
+    ]
+
+
+def render_and_reload() -> str:
+    out = sh(_render_args("/etc/postfix"))
     out2 = sh(["postfix", "reload"], check=False)
     return (out + "\n" + out2).strip()
+
+
+def render_validate_only() -> str:
+    """Render to a temporary directory to validate config.
+
+    Does not reload Postfix and does not touch /etc/postfix.
+    """
+    import tempfile
+    import shutil
+
+    d = tempfile.mkdtemp(prefix="ms365-relay-validate-")
+    try:
+        out = sh(_render_args(d), check=False)
+        return (out or "ok").strip() or "ok"
+    finally:
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str:
@@ -576,6 +599,9 @@ class H(BaseHTTPRequestHandler):
             return
         if self.path == "/render-reload":
             out = render_and_reload()
+            return self._json(200, {"output": out})
+        if self.path == "/render-validate":
+            out = render_validate_only()
             return self._json(200, {"output": out})
         if self.path == "/reload":
             out = sh(["postfix", "reload"], check=False)

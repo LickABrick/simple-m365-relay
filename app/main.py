@@ -392,6 +392,10 @@ def render_and_reload() -> str:
     return (_control_post("/render-reload").get("output") or "ok")
 
 
+def render_validate_only() -> str:
+    return (_control_post("/render-validate").get("output") or "ok")
+
+
 def ensure_user(login: str, password: str) -> str:
     import urllib.request, ssl
 
@@ -1275,7 +1279,16 @@ def apply_changes(request: Request, csrf_token: str = Form("")):
 
 
 @app.post("/api/apply")
-def api_apply_changes():
+def api_apply_changes(validate_only: str = Form("0")):
+    # validate_only=1: render to temp dir only; do not reload and do not mark applied.
+    v = (validate_only or "0").strip().lower() in ("1", "true", "yes", "on")
+
+    if v:
+        out = render_validate_only()
+        msg = (out or "ok").strip() or "ok"
+        level = "error" if ("fatal" in msg.lower() or "error" in msg.lower() or "valueerror" in msg.lower()) else "ok"
+        return {"ok": True, "output": msg, "level": level, "pending": True, "validated": True}
+
     out = render_and_reload()
 
     cfg = load_cfg()
@@ -1284,7 +1297,7 @@ def api_apply_changes():
     msg = (out or "ok").strip() or "ok"
     level = "error" if ("fatal" in msg.lower() or "error" in msg.lower()) else "ok"
 
-    return {"ok": True, "output": msg, "level": level, "pending": False}
+    return {"ok": True, "output": msg, "level": level, "pending": False, "validated": False}
 
 
 @app.post("/token/start")
