@@ -7,6 +7,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import socketserver
 from pathlib import Path
 
+from .backup import b64d, b64e, export_bundle, import_bundle
+
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
@@ -564,6 +566,9 @@ class H(BaseHTTPRequestHandler):
                 return self._json(200, {"users": ""})
             out = sh(["sasldblistusers2", "-f", str(db)], check=False)
             return self._json(200, {"users": out})
+        if self.path == "/backup/export":
+            blob, meta = export_bundle(DATA_DIR)
+            return self._json(200, {"ok": True, "format": "zip+b64", "zip_b64": b64e(blob), "meta": meta})
         self._json(404, {"error": "not_found"})
 
     def do_POST(self):
@@ -626,6 +631,20 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json(400, {"error": str(e)})
             return self._json(200, {"output": out})
+        if self.path == "/backup/import":
+            body = self._read_json()
+            zip_b64 = (body.get("zip_b64") or "").strip()
+            if not zip_b64:
+                return self._json(400, {"error": "missing zip_b64"})
+            try:
+                zip_bytes = b64d(zip_b64)
+            except Exception:
+                return self._json(400, {"error": "invalid base64"})
+            try:
+                res = import_bundle(DATA_DIR, zip_bytes)
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, res)
         self._json(404, {"error": "not_found"})
 
 
