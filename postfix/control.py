@@ -42,10 +42,10 @@ def get_auto_refresh_minutes() -> int:
     except Exception:
         return 0
 
-# Bind conservatively by default. For docker-compose, the UI reaches this over the
-# internal docker network via service name (postfix:18080). Binding to 0.0.0.0 is
-# still possible by setting CONTROL_BIND explicitly.
-BIND = os.environ.get("CONTROL_BIND", "127.0.0.1")
+# The control API must be reachable from the UI container (same docker network).
+# Default to 0.0.0.0 inside the container, but DO NOT publish the control port to the host.
+# If you need to restrict further, set CONTROL_BIND explicitly (e.g., 127.0.0.1 with a unix socket).
+BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
 PORT = int(os.environ.get("CONTROL_PORT", "18080"))
 SOCKET_PATH = os.environ.get("CONTROL_SOCKET", "")
 CONTROL_TOKEN_ENV = os.environ.get("CONTROL_TOKEN", "")

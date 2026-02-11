@@ -1394,10 +1394,13 @@
                   <i data-lucide="download" class="h-3.5 w-3.5"></i>
                   Diagnostics
                 </a>
-                <a href="/backup/export.zip" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Exports config + SMTP AUTH users (no admin, no OAuth tokens)">
-                  <i data-lucide="archive" class="h-3.5 w-3.5"></i>
-                  Export config
-                </a>
+                <form method="post" action="/backup/export.zip">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Exports config + SMTP AUTH users (no admin, no OAuth tokens)">
+                    <i data-lucide="archive" class="h-3.5 w-3.5"></i>
+                    Export config
+                  </button>
+                </form>
                 <form id="importBackupForm" method="post" action="/backup/import" enctype="multipart/form-data">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <input id="importBackupFile" type="file" name="file" accept=".zip" class="hidden" />

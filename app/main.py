@@ -1348,8 +1348,9 @@ def api_token_refresh():
     return {"ok": True, "output": out, "token_exp_ts": token_exp_ts}
 
 
-@app.get("/backup/export.zip")
-def backup_export_zip():
+@app.post("/backup/export.zip")
+def backup_export_zip(request: Request, csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
     j = _control_get("/backup/export")
     if not j.get("ok"):
         raise HTTPException(status_code=500, detail=j.get("error") or "export_failed")
