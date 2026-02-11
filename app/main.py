@@ -1383,10 +1383,13 @@ def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile
     if not res.get("ok"):
         raise HTTPException(status_code=400, detail=res.get("error") or "import_failed")
 
-    # After import, mark as pending until apply.
-    cfg = load_cfg()
-    applied_hash = get_applied_hash() or ""
-    pending = bool(applied_hash) and (cfg_hash(cfg) != applied_hash)
+    # After import, force pending until the admin explicitly applies.
+    # Reason: if the imported config happens to match the last applied hash (or if hashes are missing),
+    # the UI would not show the Apply reminder. Import should always be treated as "saved, not applied".
+    try:
+        set_applied_hash("import_pending")
+    except Exception:
+        pass
 
     from urllib.parse import quote
 
