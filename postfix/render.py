@@ -163,9 +163,15 @@ def main():
 
     relayhost = os.environ.get("RELAYHOST") or cfg.get("relayhost") or "[smtp.office365.com]:587"
 
+    def _tls_level(v: str, default: str) -> str:
+        vv = str(v or "").strip().lower()
+        if vv in ("none", "may", "encrypt"):
+            return vv
+        return default
+
     tls_cfg = cfg.get("tls") or {}
-    tls_25 = os.environ.get("RELAY_SMTPD_TLS_LEVEL_25") or tls_cfg.get("smtpd_25") or "may"
-    tls_587 = os.environ.get("RELAY_SMTPD_TLS_LEVEL_587") or tls_cfg.get("smtpd_587") or "encrypt"
+    tls_25 = _tls_level(os.environ.get("RELAY_SMTPD_TLS_LEVEL_25") or tls_cfg.get("smtpd_25"), "may")
+    tls_587 = _tls_level(os.environ.get("RELAY_SMTPD_TLS_LEVEL_587") or tls_cfg.get("smtpd_587"), "encrypt")
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)

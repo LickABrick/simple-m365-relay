@@ -42,7 +42,10 @@ def get_auto_refresh_minutes() -> int:
     except Exception:
         return 0
 
-BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
+# Bind conservatively by default. For docker-compose, the UI reaches this over the
+# internal docker network via service name (postfix:18080). Binding to 0.0.0.0 is
+# still possible by setting CONTROL_BIND explicitly.
+BIND = os.environ.get("CONTROL_BIND", "127.0.0.1")
 PORT = int(os.environ.get("CONTROL_PORT", "18080"))
 SOCKET_PATH = os.environ.get("CONTROL_SOCKET", "")
 CONTROL_TOKEN_ENV = os.environ.get("CONTROL_TOKEN", "")
@@ -88,6 +91,14 @@ def _get_control_token() -> str:
             if v:
                 return v
             CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+
+        # Best-effort: keep token file private on the shared volume.
+        try:
+            import os as _os
+
+            _os.chmod(str(CONTROL_TOKEN_FILE), 0o600)
+        except Exception:
+            pass
     except Exception:
         pass
     return tok
@@ -577,7 +588,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"mailq": out})
         if self.path == "/maillog":
             out = tail(DATA_DIR / "log" / "maillog", 200)
-            return self._json(200, {"maillog": out})
+            return self._json(200, {"maillog": _redact_sensitive(out)})
         if self.path == "/device-flow-log":
             return self._json(200, {"log": _redact_sensitive(tail(DEVICE_FLOW_LOG, 200))})
         if self.path == "/token/status":

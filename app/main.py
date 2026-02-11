@@ -859,7 +859,7 @@ def index(request: Request):
 
     mailq_out = (_control_get("/mailq").get("mailq") or "")
     qsize = parse_queue_size(mailq_out)
-    mail_log = (_control_get("/maillog").get("maillog") or "")
+    mail_log = _redact_mail_log((_control_get("/maillog").get("maillog") or ""))
     warn_tail = _extract_recent_warnings(mail_log)
 
     ms365_user = effective_ms365_user(cfg)
