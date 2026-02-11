@@ -447,14 +447,21 @@ def list_users_raw() -> str:
 def parse_sasl_users(text: str) -> list[str]:
     # sasldblistusers2 output looks like:
     #   user@example.internal: userPassword
-    out = []
+    # On errors it may print lines like:
+    #   listusers failed
+    #   BDB0004 fop_read_meta ...
+    # Filter strictly to avoid showing error text as "users".
+    out: list[str] = []
     for ln in (text or "").splitlines():
         ln = ln.strip()
         if not ln:
             continue
+        if ":" not in ln:
+            continue
         name = ln.split(":", 1)[0].strip()
-        if name:
-            out.append(name)
+        if not name or any(ch.isspace() for ch in name):
+            continue
+        out.append(name)
     # stable unique
     seen = set()
     uniq = []

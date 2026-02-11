@@ -331,6 +331,25 @@ def token_status() -> dict:
     return {"ok": True, "token_exp_ts": exp}
 
 
+def _fix_token_perms(path: str) -> None:
+    """Ensure the token file is readable by Postfix.
+
+    The control API runs as root and may create root-owned 0600 files.
+    Postfix processes typically run as the 'postfix' user, so we chown.
+    """
+    try:
+        import os as _os
+        import pwd
+        import grp
+
+        uid = pwd.getpwnam("postfix").pw_uid
+        gid = grp.getgrnam("postfix").gr_gid
+        _os.chown(path, uid, gid)
+        _os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
 def refresh_token() -> str:
     """Refresh the OAuth token file in-place.
 
@@ -440,7 +459,7 @@ def refresh_token() -> str:
             tmp.write_text(json.dumps(new, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             os.chmod(tmp, 0o600)
             tmp.replace(p)
-            os.chmod(p, 0o600)
+            _fix_token_perms(str(p))
         except Exception as e:
             out = f"Token refresh failed: cannot write token file: {type(e).__name__}: {e}"
             _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
@@ -522,6 +541,13 @@ def start_device_flow_background() -> None:
             proc.wait()
             with open(DEVICE_FLOW_LOG, "a", encoding="utf-8") as f:
                 f.write(f"\n[exit {proc.returncode}]\n")
+
+            # If token was created/updated, ensure Postfix can read it.
+            try:
+                if proc.returncode == 0 and Path(tok_path).exists():
+                    _fix_token_perms(tok_path)
+            except Exception:
+                pass
         finally:
             with _device_lock:
                 _device_running = False
@@ -599,7 +625,13 @@ class H(BaseHTTPRequestHandler):
             db = DATA_DIR / "sasl" / "sasldb2"
             if not db.exists():
                 return self._json(200, {"users": ""})
+
+            _ensure_sasldb_ok()
+
             out = sh(["sasldblistusers2", "-f", str(db)], check=False)
+            # If Cyrus can't read the db, return empty string (UI will show "no users").
+            if "failed" in (out or "").lower() or "bdb" in (out or "").lower():
+                return self._json(200, {"users": ""})
             return self._json(200, {"users": out})
         if self.path == "/backup/export":
             blob, meta = export_bundle(DATA_DIR)
