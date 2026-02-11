@@ -1421,8 +1421,13 @@ def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile
 
     from urllib.parse import quote
 
+    # If the imported bundle doesn't include the core onboarding fields yet,
+    # the onboarding gate would immediately redirect / -> /onboarding, making it look
+    # like "nothing happened". Route users to the appropriate page explicitly.
+    target = "/" if onboarding_complete(load_cfg()) else "/onboarding"
+
     return RedirectResponse(
-        url=f"/?toast={quote('Backup imported. Review settings and click Apply Changes.')}&toastLevel=ok#settings",
+        url=f"{target}?toast={quote('Backup imported. Review settings and click Apply Changes.')}&toastLevel=ok#settings",
         status_code=303,
         headers={},
     )
