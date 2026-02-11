@@ -394,12 +394,23 @@
       // theme toggle handled via inline onclick on the button
 
       // initial step
-      const savedStep = parseInt(
+      let savedStep = parseInt(
         localStorage.getItem('simple-m365-relay-onboarding-step') ||
         localStorage.getItem('sm365r_onboarding_step') ||
         '1',
         10,
       ) || 1;
+
+      // If we just imported a backup and onboarding is still active, land on Step 2
+      // so the user sees the imported values + any required fields that are still missing.
+      const params = new URLSearchParams(window.location.search || '');
+      const toast = (params.get('toast') || '');
+      const isImportToast = toast.toLowerCase().includes('backup imported');
+      if (isImportToast) {
+        savedStep = 2;
+        try { localStorage.setItem('simple-m365-relay-onboarding-step', '2'); } catch(e) {}
+      }
+
       showStep(Math.min(7, Math.max(1, savedStep)));
 
       // live validation chips
@@ -407,6 +418,16 @@
         el.addEventListener('input', refreshCompletionChips);
       }
       refreshCompletionChips();
+
+      if (isImportToast) {
+        // Nudge focus to the first required input to make it obvious what to do next.
+        window.setTimeout(() => {
+          const el = document.querySelector('input[name="relayhost"], input[name="ms365_smtp_user"], input[name="tenant_id"], input[name="client_id"]');
+          if (el && typeof el.focus === 'function') {
+            try { el.focus(); } catch(e) {}
+          }
+        }, 250);
+      }
 
       // show initial token expiry from server-rendered data-ts immediately
       const te = document.getElementById('tokenExp');
@@ -941,7 +962,7 @@
               <div class="w-full">
                 <div class="text-sm font-semibold">Quick start: import an existing configuration</div>
                 <div class="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                  Upload a backup ZIP to restore saved settings and SMTP AUTH users. You’ll be redirected to the dashboard after import.
+                  Upload a backup ZIP to restore saved settings and SMTP AUTH users. After import, you’ll continue onboarding (or go straight to the dashboard if core settings are complete).
                 </div>
 
                 <form class="mt-3" method="post" action="/backup/import" enctype="multipart/form-data">
