@@ -28,6 +28,19 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+# Hard limits to reduce DoS risk from crafted ZIPs.
+MAX_ZIP_BYTES = 10 * 1024 * 1024  # 10 MiB (compressed)
+MAX_ENTRIES = 25
+MAX_META_BYTES = 256 * 1024
+MAX_CONFIG_BYTES = 1 * 1024 * 1024
+MAX_SASL_BYTES = 50 * 1024 * 1024
+
+ALLOWED_NAMES = {
+    "meta.json": MAX_META_BYTES,
+    "config/config.json": MAX_CONFIG_BYTES,
+    "sasl/sasldb2": MAX_SASL_BYTES,
+}
+
 
 def export_bundle(data_dir: Path) -> Tuple[bytes, Dict[str, Any]]:
     cfg_path = data_dir / "config" / "config.json"
@@ -52,12 +65,33 @@ def export_bundle(data_dir: Path) -> Tuple[bytes, Dict[str, Any]]:
 
 
 def parse_bundle_zip(zip_bytes: bytes) -> Dict[str, bytes]:
+    """Parse a bundle ZIP safely.
+
+    We *never* extract to disk and we only read a strict allowlist of members.
+    This mitigates common ZIP attacks (path traversal, zip bombs, memory blowups).
+    """
+    if len(zip_bytes) > MAX_ZIP_BYTES:
+        raise ValueError(f"Backup bundle too large (>{MAX_ZIP_BYTES} bytes)")
+
     out: Dict[str, bytes] = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes), mode="r") as z:
-        for name in z.namelist():
+        infos = z.infolist()
+        if len(infos) > MAX_ENTRIES:
+            raise ValueError(f"Backup bundle has too many entries ({len(infos)} > {MAX_ENTRIES})")
+
+        for zi in infos:
+            name = zi.filename
             if name.endswith("/"):
                 continue
-            out[name] = z.read(name)
+            if name not in ALLOWED_NAMES:
+                # Ignore unknown entries; the bundle is a whitelist format.
+                continue
+            max_bytes = int(ALLOWED_NAMES[name])
+            # zipfile reports uncompressed file size here.
+            if zi.file_size > max_bytes:
+                raise ValueError(f"Backup member too large: {name} ({zi.file_size} > {max_bytes})")
+            out[name] = z.read(zi)
+
     return out
 
 

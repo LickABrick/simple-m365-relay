@@ -1366,6 +1366,21 @@ def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile
     if not raw:
         raise HTTPException(status_code=400, detail="empty upload")
 
+    # Hard limits to reduce DoS risk from crafted ZIPs.
+    MAX_ZIP_BYTES = 10 * 1024 * 1024  # 10 MiB
+    MAX_ENTRIES = 25
+    MAX_META_BYTES = 256 * 1024
+    MAX_CONFIG_BYTES = 1 * 1024 * 1024
+    MAX_SASL_BYTES = 50 * 1024 * 1024
+    ALLOWED = {
+        "meta.json": MAX_META_BYTES,
+        "config/config.json": MAX_CONFIG_BYTES,
+        "sasl/sasldb2": MAX_SASL_BYTES,
+    }
+
+    if len(raw) > MAX_ZIP_BYTES:
+        raise HTTPException(status_code=400, detail="Invalid backup bundle: too large")
+
     # Validate config.json in bundle if present (avoid importing invalid config).
     import io
     import json as _json
@@ -1373,6 +1388,19 @@ def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile
 
     try:
         with zipfile.ZipFile(io.BytesIO(raw), mode="r") as z:
+            infos = z.infolist()
+            if len(infos) > MAX_ENTRIES:
+                raise ValueError(f"too many entries ({len(infos)} > {MAX_ENTRIES})")
+
+            for zi in infos:
+                name = zi.filename
+                if name.endswith("/"):
+                    continue
+                if name not in ALLOWED:
+                    continue
+                if zi.file_size > int(ALLOWED[name]):
+                    raise ValueError(f"member too large: {name}")
+
             if "config/config.json" in z.namelist():
                 cfg_obj = _json.loads(z.read("config/config.json").decode("utf-8"))
                 validate_cfg_obj(cfg_obj)
