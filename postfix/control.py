@@ -7,7 +7,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import socketserver
 from pathlib import Path
 
-from .backup import b64d, b64e, export_bundle, import_bundle
+# NOTE: control.py is executed as a script (not a package). Use a local import.
+from backup import b64d, b64e, export_bundle, import_bundle
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CFG_JSON = DATA_DIR / "config" / "config.json"
