@@ -829,6 +829,9 @@ def onboarding_get(request: Request):
     except Exception:
         token_exp_ts = None
 
+    toast = str(request.query_params.get("toast") or "")
+    toast_level = str(request.query_params.get("toastLevel") or "ok")
+
     return templates.TemplateResponse(
         "onboarding.html",
         {
@@ -842,6 +845,8 @@ def onboarding_get(request: Request):
             "ms365_user": ms365_user,
             "env_ms365_user": env_ms365_user,
             "cfg_ms365_user": cfg_ms365_user,
+            "toast": toast,
+            "toast_level": toast_level,
         },
     )
 

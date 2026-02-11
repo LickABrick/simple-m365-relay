@@ -23,6 +23,8 @@
     // server-provided defaults
     window.SM365R = window.SM365R || {};
     window.SM365R.ms365User = {{ (ms365_user or '') | tojson }};
+    window.SM365R.toast = {{ (toast or '') | tojson }};
+    window.SM365R.toastLevel = {{ (toast_level or 'ok') | tojson }};
 
     // theme (persisted)
     const themeKey = 'simple-m365-relay-theme';
@@ -403,10 +405,9 @@
 
       // If we just imported a backup and onboarding is still active, land on Step 2
       // so the user sees the imported values + any required fields that are still missing.
-      const params = new URLSearchParams(window.location.search || '');
-      const toast = (params.get('toast') || '');
-      const toastLevel = (params.get('toastLevel') || 'ok');
-      const isImportToast = toast.toLowerCase().includes('backup imported');
+      const toast = (window.SM365R?.toast || '');
+      const toastLevel = (window.SM365R?.toastLevel || 'ok');
+      const isImportToast = String(toast).toLowerCase().includes('backup imported');
       if (toast) {
         // Show server-provided toast messages (same convention as dashboard).
         showToast(toast, toastLevel);
@@ -417,6 +418,8 @@
           u.searchParams.delete('toastLevel');
           window.history.replaceState({}, '', u.toString());
         } catch(e) {}
+        // prevent re-showing if onboarding JS runs again
+        try { window.SM365R.toast = ''; } catch(e) {}
       }
 
       if (isImportToast) {
