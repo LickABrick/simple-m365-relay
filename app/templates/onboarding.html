@@ -405,7 +405,20 @@
       // so the user sees the imported values + any required fields that are still missing.
       const params = new URLSearchParams(window.location.search || '');
       const toast = (params.get('toast') || '');
+      const toastLevel = (params.get('toastLevel') || 'ok');
       const isImportToast = toast.toLowerCase().includes('backup imported');
+      if (toast) {
+        // Show server-provided toast messages (same convention as dashboard).
+        showToast(toast, toastLevel);
+        // Clean URL (avoid re-showing toast on refresh/back).
+        try {
+          const u = new URL(window.location.href);
+          u.searchParams.delete('toast');
+          u.searchParams.delete('toastLevel');
+          window.history.replaceState({}, '', u.toString());
+        } catch(e) {}
+      }
+
       if (isImportToast) {
         savedStep = 2;
         try { localStorage.setItem('simple-m365-relay-onboarding-step', '2'); } catch(e) {}
