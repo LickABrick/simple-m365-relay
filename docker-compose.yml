@@ -29,8 +29,10 @@ services:
 
       CONTROL_BIND: ${CONTROL_BIND:-0.0.0.0}
       CONTROL_PORT: ${CONTROL_PORT:-18080}
-      # Prefer unix domain socket for the control API. If set, postfix listens on this socket path.
-      CONTROL_SOCKET: ${CONTROL_SOCKET:-/data/state/control.sock}
+      # Control API transport:
+      # - Leave CONTROL_SOCKET empty to use TCP on :18080 inside the Docker network (recommended for cross-container reliability).
+      # - Set CONTROL_SOCKET to enable unix socket.
+      CONTROL_SOCKET: ${CONTROL_SOCKET:-}
       # Shared token required for all control API calls (UI → postfix)
       # If unset, postfix generates /data/state/control.token and UI reads it from the shared volume.
       CONTROL_TOKEN: ${CONTROL_TOKEN:-}
@@ -71,7 +73,7 @@ services:
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-}
       POSTFIX_CONTROL_URL: ${POSTFIX_CONTROL_URL:-http://postfix:18080}
       # If set, UI uses unix socket instead of TCP for control API.
-      POSTFIX_CONTROL_SOCKET: ${POSTFIX_CONTROL_SOCKET:-/data/state/control.sock}
+      POSTFIX_CONTROL_SOCKET: ${POSTFIX_CONTROL_SOCKET:-}
       CONTROL_TOKEN: ${CONTROL_TOKEN:-}
       RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
       DATA_DIR: ${DATA_DIR:-/data}

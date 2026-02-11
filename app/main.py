@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, Request, UploadFile, File
 from fastapi.responses import Response
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
@@ -47,6 +47,7 @@ async def security_headers(request: Request, call_next):
 from . import auth  # noqa: E402
 from . import lockout  # noqa: E402
 from .security import client_ip, get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
+from .backup import b64d, b64e, validate_cfg_obj  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
 POSTFIX_CONTROL_SOCKET = (os.environ.get("POSTFIX_CONTROL_SOCKET") or "").strip()
@@ -61,6 +62,7 @@ def _default_cfg() -> Dict[str, Any]:
         "domain": "local",
         "mynetworks": ["127.0.0.0/8"],
         "relayhost": "[smtp.office365.com]:587",
+        "ms365_smtp_user": "",
         "tls": {"smtpd_25": "may", "smtpd_587": "encrypt"},
         "oauth": {"tenant_id": "", "client_id": "", "auto_refresh_minutes": 30},
         "allowed_from": {},
@@ -79,6 +81,8 @@ def load_cfg() -> Dict[str, Any]:
     base.setdefault("oauth", _default_cfg()["oauth"])
     base.setdefault("allowed_from", {})
     base.setdefault("default_from", {})
+    # ensure new keys exist
+    base.setdefault("ms365_smtp_user", "")
     return base
 
 
@@ -364,12 +368,32 @@ def _control_post(path: str) -> dict:
         return json.loads(r.read().decode("utf-8"))
 
 
+def _control_post_json(path: str, obj: dict, timeout: int = 25) -> dict:
+    import urllib.request
+    import ssl
+
+    body = json.dumps(obj).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+
+    if POSTFIX_CONTROL_SOCKET:
+        return _unix_http_json("POST", path, body=body, headers=headers, timeout=timeout)
+
+    url = POSTFIX_CONTROL_URL + path
+    req = urllib.request.Request(url, method="POST", data=body, headers=_control_headers(headers))
+    with urllib.request.urlopen(req, timeout=timeout, context=ssl.create_default_context()) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def postfix_reload() -> str:
     return (_control_post("/reload").get("output") or "ok")
 
 
 def render_and_reload() -> str:
     return (_control_post("/render-reload").get("output") or "ok")
+
+
+def render_validate_only() -> str:
+    return (_control_post("/render-validate").get("output") or "ok")
 
 
 def ensure_user(login: str, password: str) -> str:
@@ -423,14 +447,21 @@ def list_users_raw() -> str:
 def parse_sasl_users(text: str) -> list[str]:
     # sasldblistusers2 output looks like:
     #   user@example.internal: userPassword
-    out = []
+    # On errors it may print lines like:
+    #   listusers failed
+    #   BDB0004 fop_read_meta ...
+    # Filter strictly to avoid showing error text as "users".
+    out: list[str] = []
     for ln in (text or "").splitlines():
         ln = ln.strip()
         if not ln:
             continue
+        if ":" not in ln:
+            continue
         name = ln.split(":", 1)[0].strip()
-        if name:
-            out.append(name)
+        if not name or any(ch.isspace() for ch in name):
+            continue
+        out.append(name)
     # stable unique
     seen = set()
     uniq = []
@@ -559,6 +590,14 @@ def parse_addr_list(text: str) -> list[str]:
     return out
 
 
+def effective_ms365_user(cfg: Dict[str, Any]) -> str:
+    # Prefer env for backwards compatibility, fallback to config for v1.1.0+
+    env_u = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    if env_u:
+        return env_u
+    return str((cfg or {}).get("ms365_smtp_user") or "").strip()
+
+
 def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
     addrs = []
 
@@ -596,10 +635,11 @@ def _is_public_path(path: str) -> bool:
 
 def onboarding_complete(cfg: Dict[str, Any]) -> bool:
     relayhost = str((cfg or {}).get("relayhost") or "").strip()
+    ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip()
     oauth = (cfg or {}).get("oauth") or {}
     tenant_id = str((oauth or {}).get("tenant_id") or "").strip()
     client_id = str((oauth or {}).get("client_id") or "").strip()
-    return bool(relayhost and tenant_id and client_id)
+    return bool(relayhost and ms365_user and tenant_id and client_id)
 
 
 @app.middleware("http")
@@ -787,12 +827,17 @@ def logout_post(request: Request, csrf_token: str = Form("")):
 def onboarding_get(request: Request):
     cfg = load_cfg()
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
+    env_ms365_user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    cfg_ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip()
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
     except Exception:
         token_exp_ts = None
+
+    toast = str(request.query_params.get("toast") or "")
+    toast_level = str(request.query_params.get("toastLevel") or "ok")
 
     return templates.TemplateResponse(
         "onboarding.html",
@@ -805,6 +850,10 @@ def onboarding_get(request: Request):
             "device_flow_log": tail(DEVICE_FLOW_LOG, 400),
             "onboarding_ok": onboarding_complete(cfg),
             "ms365_user": ms365_user,
+            "env_ms365_user": env_ms365_user,
+            "cfg_ms365_user": cfg_ms365_user,
+            "toast": toast,
+            "toast_level": toast_level,
         },
     )
 
@@ -822,10 +871,12 @@ def index(request: Request):
 
     mailq_out = (_control_get("/mailq").get("mailq") or "")
     qsize = parse_queue_size(mailq_out)
-    mail_log = (_control_get("/maillog").get("maillog") or "")
+    mail_log = _redact_mail_log((_control_get("/maillog").get("maillog") or ""))
     warn_tail = _extract_recent_warnings(mail_log)
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
+    env_ms365_user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    cfg_ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip()
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -855,7 +906,11 @@ def index(request: Request):
             "pending": pending,
             "from_identities": from_identities(cfg, ms365_user),
             "env": {
+                # effective value (env-first fallback)
                 "MS365_SMTP_USER": ms365_user,
+                # for debugging/UX: show both sources
+                "ENV_MS365_SMTP_USER": env_ms365_user,
+                "CFG_MS365_SMTP_USER": cfg_ms365_user,
                 "MS365_TENANT_ID": (cfg.get("oauth") or {}).get("tenant_id", ""),
                 "MS365_CLIENT_ID": (cfg.get("oauth") or {}).get("client_id", ""),
                 "RELAYHOST": cfg.get("relayhost") or os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
@@ -873,6 +928,7 @@ def update_settings(
     domain: str = Form(...),
     mynetworks: str = Form(""),
     relayhost: str = Form(""),
+    ms365_smtp_user: str = Form(""),
     tls_25: str = Form("may"),
     tls_587: str = Form("encrypt"),
     tenant_id: str = Form(""),
@@ -889,6 +945,8 @@ def update_settings(
     cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
     cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
+    if (ms365_smtp_user or "").strip():
+        cfg["ms365_smtp_user"] = _reject_ctl(ms365_smtp_user or "")
     cfg.setdefault("tls", {})
     cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
     cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
@@ -993,6 +1051,7 @@ def api_settings_save(
     domain: str = Form(""),
     mynetworks: str = Form(""),
     relayhost: str = Form(""),
+    ms365_smtp_user: str = Form(""),
     tls_25: str = Form("may"),
     tls_587: str = Form("encrypt"),
     tenant_id: str = Form(""),
@@ -1003,32 +1062,37 @@ def api_settings_save(
 
     Note: fields are optional so onboarding can save partial configuration.
     """
-    cfg = load_cfg()
+    try:
+        cfg = load_cfg()
 
-    if hostname.strip():
-        cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
-    if domain.strip():
-        cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
-    if mynetworks.strip():
-        cfg["mynetworks"] = _validate_mynetworks(mynetworks)
+        if hostname.strip():
+            cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
+        if domain.strip():
+            cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
+        if mynetworks.strip():
+            cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
-    cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
-    cfg.setdefault("tls", {})
-    cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
-    cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
+        cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
+        if (ms365_smtp_user or "").strip():
+            cfg["ms365_smtp_user"] = _reject_ctl(ms365_smtp_user or "")
+        cfg.setdefault("tls", {})
+        cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
+        cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
 
-    cfg.setdefault("oauth", {})
-    cfg["oauth"]["tenant_id"] = _reject_ctl(tenant_id or "")
-    cfg["oauth"]["client_id"] = _reject_ctl(client_id or "")
-    cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
+        cfg.setdefault("oauth", {})
+        cfg["oauth"]["tenant_id"] = _reject_ctl(tenant_id or "")
+        cfg["oauth"]["client_id"] = _reject_ctl(client_id or "")
+        cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
 
-    save_cfg(cfg)
+        save_cfg(cfg)
 
-    current_hash = cfg_hash(cfg)
-    applied_hash = get_applied_hash()
-    pending = bool(applied_hash) and (current_hash != applied_hash)
+        current_hash = cfg_hash(cfg)
+        applied_hash = get_applied_hash()
+        pending = bool(applied_hash) and (current_hash != applied_hash)
 
-    return {"ok": True, "pending": pending}
+        return {"ok": True, "pending": pending}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/users/add")
@@ -1125,7 +1189,7 @@ def set_default_from(request: Request, csrf_token: str = Form(""), login: str = 
 @app.get("/api/senders")
 def api_senders_get():
     cfg = load_cfg()
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
 
     current_hash = cfg_hash(cfg)
     applied_hash = get_applied_hash()
@@ -1230,7 +1294,16 @@ def apply_changes(request: Request, csrf_token: str = Form("")):
 
 
 @app.post("/api/apply")
-def api_apply_changes():
+def api_apply_changes(validate_only: str = Form("0")):
+    # validate_only=1: render to temp dir only; do not reload and do not mark applied.
+    v = (validate_only or "0").strip().lower() in ("1", "true", "yes", "on")
+
+    if v:
+        out = render_validate_only()
+        msg = (out or "ok").strip() or "ok"
+        level = "error" if ("fatal" in msg.lower() or "error" in msg.lower() or "valueerror" in msg.lower()) else "ok"
+        return {"ok": True, "output": msg, "level": level, "pending": True, "validated": True}
+
     out = render_and_reload()
 
     cfg = load_cfg()
@@ -1239,7 +1312,7 @@ def api_apply_changes():
     msg = (out or "ok").strip() or "ok"
     level = "error" if ("fatal" in msg.lower() or "error" in msg.lower()) else "ok"
 
-    return {"ok": True, "output": msg, "level": level, "pending": False}
+    return {"ok": True, "output": msg, "level": level, "pending": False, "validated": False}
 
 
 @app.post("/token/start")
@@ -1283,6 +1356,97 @@ def api_token_refresh():
         token_exp_ts = None
 
     return {"ok": True, "output": out, "token_exp_ts": token_exp_ts}
+
+
+@app.post("/backup/export.zip")
+def backup_export_zip(request: Request, csrf_token: str = Form("")):
+    require_csrf(request, csrf_token)
+    j = _control_get("/backup/export")
+    if not j.get("ok"):
+        raise HTTPException(status_code=500, detail=j.get("error") or "export_failed")
+    zip_b64 = (j.get("zip_b64") or "").strip()
+    if not zip_b64:
+        raise HTTPException(status_code=500, detail="missing payload")
+    blob = b64d(zip_b64)
+    return Response(
+        content=blob,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="simple-m365-relay-backup.zip"'},
+    )
+
+
+@app.post("/backup/import")
+def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile = File(...)):
+    require_csrf(request, csrf_token)
+    raw = file.file.read() if file and file.file else b""
+    if not raw:
+        raise HTTPException(status_code=400, detail="empty upload")
+
+    # Hard limits to reduce DoS risk from crafted ZIPs.
+    MAX_ZIP_BYTES = 10 * 1024 * 1024  # 10 MiB
+    MAX_ENTRIES = 25
+    MAX_META_BYTES = 256 * 1024
+    MAX_CONFIG_BYTES = 1 * 1024 * 1024
+    MAX_SASL_BYTES = 50 * 1024 * 1024
+    ALLOWED = {
+        "meta.json": MAX_META_BYTES,
+        "config/config.json": MAX_CONFIG_BYTES,
+        "sasl/sasldb2": MAX_SASL_BYTES,
+    }
+
+    if len(raw) > MAX_ZIP_BYTES:
+        raise HTTPException(status_code=400, detail="Invalid backup bundle: too large")
+
+    # Validate config.json in bundle if present (avoid importing invalid config).
+    import io
+    import json as _json
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw), mode="r") as z:
+            infos = z.infolist()
+            if len(infos) > MAX_ENTRIES:
+                raise ValueError(f"too many entries ({len(infos)} > {MAX_ENTRIES})")
+
+            for zi in infos:
+                name = zi.filename
+                if name.endswith("/"):
+                    continue
+                if name not in ALLOWED:
+                    continue
+                if zi.file_size > int(ALLOWED[name]):
+                    raise ValueError(f"member too large: {name}")
+
+            if "config/config.json" in z.namelist():
+                cfg_obj = _json.loads(z.read("config/config.json").decode("utf-8"))
+                validate_cfg_obj(cfg_obj)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid backup bundle: {e}")
+
+    res = _control_post_json("/backup/import", {"zip_b64": b64e(raw)})
+    if not res.get("ok"):
+        raise HTTPException(status_code=400, detail=res.get("error") or "import_failed")
+
+    # After import, force pending until the admin explicitly applies.
+    # Reason: if the imported config happens to match the last applied hash (or if hashes are missing),
+    # the UI would not show the Apply reminder. Import should always be treated as "saved, not applied".
+    try:
+        set_applied_hash("import_pending")
+    except Exception:
+        pass
+
+    from urllib.parse import quote
+
+    # If the imported bundle doesn't include the core onboarding fields yet,
+    # the onboarding gate would immediately redirect / -> /onboarding, making it look
+    # like "nothing happened". Route users to the appropriate page explicitly.
+    target = "/" if onboarding_complete(load_cfg()) else "/onboarding"
+
+    return RedirectResponse(
+        url=f"{target}?toast={quote('Backup imported. Review settings and click Apply Changes.')}&toastLevel=ok#settings",
+        status_code=303,
+        headers={},
+    )
 
 
 def _parse_device_flow_log(log: str) -> dict:
@@ -1418,7 +1582,10 @@ def api_status():
 
     token_refresh_log = get_token_refresh_log()
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
+    env_ms365_user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    cfg_ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip()
+
     token_status = _safe_control("/token/status")
     token_exp_ts = (token_status or {}).get("token_exp_ts")
 
@@ -1437,7 +1604,11 @@ def api_status():
         "token_refresh_log": token_refresh_log,
         "from_identities": from_identities(cfg, ms365_user),
         "env": {
+            # effective value (env-first fallback)
             "MS365_SMTP_USER": ms365_user,
+            # for debugging/UX: show both sources
+            "ENV_MS365_SMTP_USER": env_ms365_user,
+            "CFG_MS365_SMTP_USER": cfg_ms365_user,
             "RELAYHOST": cfg.get("relayhost") or os.environ.get("RELAYHOST", "[smtp.office365.com]:587"),
             "AUTO_TOKEN_REFRESH_MINUTES": str((cfg.get("oauth") or {}).get("auto_refresh_minutes", "")),
         },
@@ -1475,7 +1646,7 @@ def diagnostics_txt():
     mailq_out = (_control_get("/mailq").get("mailq") or "")
     mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "")
+    ms365_user = effective_ms365_user(cfg)
     token_exp_ts = None
     try:
         token_exp_ts = (_control_get("/token/status") or {}).get("token_exp_ts")
@@ -1488,6 +1659,7 @@ def diagnostics_txt():
     parts.append("\n## env\n")
     parts.append(f"RELAYHOST={os.environ.get('RELAYHOST','')}\n")
     parts.append(f"MS365_SMTP_USER={ms365_user}\n")
+    parts.append(f"CFG_MS365_SMTP_USER={str((cfg or {}).get('ms365_smtp_user') or '')}\n")
     parts.append(f"token_expiry_ts={token_exp_ts or ''}\n")
 
     parts.append("\n## config.json\n")

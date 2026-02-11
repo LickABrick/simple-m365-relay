@@ -459,6 +459,17 @@
         if (rh && j.env?.RELAYHOST) rh.textContent = j.env.RELAYHOST;
         const mu = document.getElementById('ms365User');
         if (mu && j.env?.MS365_SMTP_USER) mu.textContent = j.env.MS365_SMTP_USER;
+        const muNote = document.getElementById('ms365UserNote');
+        if (muNote && j.env) {
+          const envU = j.env.ENV_MS365_SMTP_USER || '';
+          const cfgU = j.env.CFG_MS365_SMTP_USER || '';
+          if (envU && cfgU && (envU !== cfgU)) {
+            muNote.textContent = `Overridden by env MS365_SMTP_USER (${envU}).`;
+            muNote.classList.remove('hidden');
+          } else {
+            muNote.classList.add('hidden');
+          }
+        }
         const te = document.getElementById('tokenExp');
         if (te) {
           te.setAttribute('data-ts', j.token_exp_ts || '');
@@ -1055,19 +1066,31 @@
       }
     }
 
-    async function applyNoReload(){
+    async function applyNoReload(opts){
+      const o = Object.assign({ validateOnly: false }, (opts || {}));
       const btn = document.getElementById('applyBtn');
+      const vbtn = document.getElementById('validateBtn');
       if (btn) btn.disabled = true;
+      if (vbtn) vbtn.disabled = true;
       try {
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
-        const r = await apiFetch('/api/apply', { method: 'POST' });
+        const fd = new FormData();
+        if (o.validateOnly) fd.append('validate_only','1');
+
+        const r = await apiFetch('/api/apply', { method: 'POST', body: fd });
         const j = await r.json();
         const out = (j.output || '').trim() || 'ok';
-        showToast('Applied changes.', j.level === 'error' ? 'error' : 'ok');
-        syncPendingFromApi(false);
+
+        if (o.validateOnly) {
+          showToast(j.level === 'error' ? 'Validation failed.' : 'Validation OK.', j.level === 'error' ? 'error' : 'ok');
+          // keep pending state; do not mark applied
+        } else {
+          showToast('Applied changes.', j.level === 'error' ? 'error' : 'ok');
+          syncPendingFromApi(false);
+        }
+
         await refreshStatus();
       } catch (e) {
-        showToast('Apply failed.', 'error');
+        showToast(o.validateOnly ? 'Validation failed.' : 'Apply failed.', 'error');
       } finally {
         // keep disabled state correct after refreshStatus
       }
@@ -1075,7 +1098,9 @@
 
     function initApplyAjax(){
       const f = document.getElementById('applyForm');
-      if (f) f.addEventListener('submit', (e) => { e.preventDefault(); applyNoReload(); });
+      if (f) f.addEventListener('submit', (e) => { e.preventDefault(); applyNoReload({ validateOnly:false }); });
+      const v = document.getElementById('validateBtn');
+      if (v) v.addEventListener('click', (e) => { e.preventDefault(); applyNoReload({ validateOnly:true }); });
     }
 
     function initTestmailAjax(){
@@ -1100,6 +1125,27 @@
       });
     }
 
+    function initBackupImport(){
+      const form = document.getElementById('importBackupForm');
+      const file = document.getElementById('importBackupFile');
+      const btn = form?.querySelector('button[type="button"]');
+      if (!form || !file || !btn) return;
+
+      btn.addEventListener('click', () => file.click());
+
+      file.addEventListener('change', () => {
+        if (!file.files || !file.files.length) return;
+        const ok = window.confirm(
+          'Import backup?\n\nThis will OVERWRITE your saved settings and SMTP AUTH users (sasldb2).\nIt will NOT import admin credentials or OAuth tokens.\n\nAfter import, you still need to click Apply Changes.'
+        );
+        if (!ok) {
+          file.value = '';
+          return;
+        }
+        form.submit();
+      });
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       try { lucide.createIcons(); } catch(e) {}
       syncThemeButton();
@@ -1113,6 +1159,7 @@
       initSendersAjax();
       initTestmailAjax();
       initApplyAjax();
+      initBackupImport();
       syncTokenExpiryFromDom();
       applyLogFilter();
     });
@@ -1321,11 +1368,15 @@
             <div class="flex-1">
               <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">Changes saved</div>
               <div class="mt-0.5">Not applied yet. Postfix is still running with the old config.</div>
-              <form method="post" action="/apply" class="mt-3">
+              <form id="applyForm" method="post" action="/apply" class="mt-3 space-y-2">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
-                <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Applies saved settings: regenerate Postfix config + reload Postfix">
+                <button id="applyBtn" type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500" title="Applies saved settings: regenerate Postfix config + reload Postfix">
                   <i data-lucide="check-circle" class="h-4 w-4"></i>
                   Apply Changes
+                </button>
+                <button id="validateBtn" type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Validates saved settings by rendering Postfix config (no reload)">
+                  <i data-lucide="check" class="h-4 w-4"></i>
+                  Validate (no reload)
                 </button>
               </form>
               <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">This reminder stays until changes are applied.</div>
@@ -1343,6 +1394,21 @@
                   <i data-lucide="download" class="h-3.5 w-3.5"></i>
                   Diagnostics
                 </a>
+                <form method="post" action="/backup/export.zip">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Exports config + SMTP AUTH users (no admin, no OAuth tokens)">
+                    <i data-lucide="archive" class="h-3.5 w-3.5"></i>
+                    Export config
+                  </button>
+                </form>
+                <form id="importBackupForm" method="post" action="/backup/import" enctype="multipart/form-data">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
+                  <input id="importBackupFile" type="file" name="file" accept=".zip" class="hidden" />
+                  <button type="button" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Imports config + SMTP AUTH users from a backup bundle">
+                    <i data-lucide="upload" class="h-3.5 w-3.5"></i>
+                    Import config
+                  </button>
+                </form>
                 <form method="post" action="/postfix/reload">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
                   <button type="submit" class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Reloads Postfix (keeps current config)">
@@ -1405,6 +1471,7 @@
                 <i data-lucide="user-round" class="h-4 w-4 text-slate-400"></i>
               </div>
               <div class="mt-1 truncate text-sm font-semibold" id="ms365User" title="{{ env.MS365_SMTP_USER }}">{{ env.MS365_SMTP_USER }}</div>
+              <div id="ms365UserNote" class="mt-1 hidden text-xs text-amber-700 dark:text-amber-200"></div>
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">authenticated sender</div>
             </div>
             <div id="tokenCard" class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1476,6 +1543,18 @@
             </div>
 
             <div class="sm:col-span-2">
+              <label class="text-sm font-medium">Microsoft 365 SMTP user</label>
+              <input name="ms365_smtp_user" value="{{ cfg.ms365_smtp_user or '' }}" placeholder="postfix@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              {% if (env.ENV_MS365_SMTP_USER or '') %}
+                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Note: <span class="mono">MS365_SMTP_USER</span> is set via environment to <span class="mono">{{ env.ENV_MS365_SMTP_USER }}</span> and will override this value until removed.
+                </div>
+              {% else %}
+                <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Stored in config.json (lets docker-compose stay minimal in v1.1.0+).</div>
+              {% endif %}
+            </div>
+
+            <div class="sm:col-span-2">
               <div class="text-sm font-semibold">Inbound TLS</div>
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Controls encryption requirements for clients connecting to port 25 and 587.</div>
             </div>
@@ -1528,7 +1607,7 @@
             <div class="flex items-start gap-2">
               <i data-lucide="info" class="callout-icon mt-0.5 h-4 w-4"></i>
               <div>
-                Ports/TLS and M365 OAuth settings are controlled by environment variables (docker compose).
+                Most settings are stored in <span class="mono">/data/config/config.json</span>. Some options can still be overridden via environment variables for backwards compatibility.
               </div>
             </div>
           </div>

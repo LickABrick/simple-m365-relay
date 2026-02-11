@@ -17,7 +17,7 @@ chown -R postfix:postfix "$DATA_DIR/tokens" 2>/dev/null || true
 UI_UID=${UI_UID:-10001}
 UI_GID=${UI_GID:-10001}
 
-for p in "$DATA_DIR/config" "$DATA_DIR/state"; do
+for p in "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/sasl"; do
   mkdir -p "$p" || true
   chown -R "$UI_UID:$UI_GID" "$p" 2>/dev/null || true
   chmod -R u+rwX "$p" 2>/dev/null || true
@@ -32,6 +32,7 @@ if [ ! -f "$CFG_JSON" ]; then
   "mynetworks": ["127.0.0.0/8"],
 
   "relayhost": "[smtp.office365.com]:587",
+  "ms365_smtp_user": "",
   "tls": {
     "smtpd_25": "may",
     "smtpd_587": "encrypt"

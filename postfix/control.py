@@ -7,6 +7,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import socketserver
 from pathlib import Path
 
+# NOTE: control.py is executed as a script (not a package). Use a local import.
+from backup import b64d, b64e, export_bundle, import_bundle
+
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
@@ -39,6 +42,9 @@ def get_auto_refresh_minutes() -> int:
     except Exception:
         return 0
 
+# The control API must be reachable from the UI container (same docker network).
+# Default to 0.0.0.0 inside the container, but DO NOT publish the control port to the host.
+# If you need to restrict further, set CONTROL_BIND explicitly (e.g., 127.0.0.1 with a unix socket).
 BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
 PORT = int(os.environ.get("CONTROL_PORT", "18080"))
 SOCKET_PATH = os.environ.get("CONTROL_SOCKET", "")
@@ -85,6 +91,14 @@ def _get_control_token() -> str:
             if v:
                 return v
             CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+
+        # Best-effort: keep token file private on the shared volume.
+        try:
+            import os as _os
+
+            _os.chmod(str(CONTROL_TOKEN_FILE), 0o600)
+        except Exception:
+            pass
     except Exception:
         pass
     return tok
@@ -145,25 +159,48 @@ def tail(path: Path, n: int = 200) -> str:
         return path.read_text(encoding="utf-8", errors="ignore")[-8000:]
 
 
-def render_and_reload() -> str:
+def _render_args(outdir: str) -> list[str]:
     cert = os.environ.get("RELAY_TLS_CERT_PATH", "/data/certs/tls.crt")
     key = os.environ.get("RELAY_TLS_KEY_PATH", "/data/certs/tls.key")
-    out = sh([
+    return [
         "python3",
         "/opt/ms365-relay/postfix/render.py",
         "--config",
         str(CFG_JSON),
         "--outdir",
-        "/etc/postfix",
+        outdir,
         "--token-dir",
         str(DATA_DIR / "tokens"),
         "--tls-cert",
         cert,
         "--tls-key",
         key,
-    ])
+    ]
+
+
+def render_and_reload() -> str:
+    out = sh(_render_args("/etc/postfix"))
     out2 = sh(["postfix", "reload"], check=False)
     return (out + "\n" + out2).strip()
+
+
+def render_validate_only() -> str:
+    """Render to a temporary directory to validate config.
+
+    Does not reload Postfix and does not touch /etc/postfix.
+    """
+    import tempfile
+    import shutil
+
+    d = tempfile.mkdtemp(prefix="ms365-relay-validate-")
+    try:
+        out = sh(_render_args(d), check=False)
+        return (out or "ok").strip() or "ok"
+    finally:
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+        except Exception:
+            pass
 
 
 def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str:
@@ -229,8 +266,16 @@ def _jwt_exp_best_effort(jwt: str):
         return None
 
 
+def _ms365_user(cfg: dict) -> str:
+    u = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    if u:
+        return u
+    return str((cfg or {}).get("ms365_smtp_user") or "").strip()
+
+
 def token_status() -> dict:
-    user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    cfg = load_cfg()
+    user = _ms365_user(cfg)
     if not user:
         return {"ok": False, "error": "MS365_SMTP_USER_not_set"}
     p = _token_path_for_user(user)
@@ -286,6 +331,25 @@ def token_status() -> dict:
     return {"ok": True, "token_exp_ts": exp}
 
 
+def _fix_token_perms(path: str) -> None:
+    """Ensure the token file is readable by Postfix.
+
+    The control API runs as root and may create root-owned 0600 files.
+    Postfix processes typically run as the 'postfix' user, so we chown.
+    """
+    try:
+        import os as _os
+        import pwd
+        import grp
+
+        uid = pwd.getpwnam("postfix").pw_uid
+        gid = grp.getgrnam("postfix").gr_gid
+        _os.chown(path, uid, gid)
+        _os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
 def refresh_token() -> str:
     """Refresh the OAuth token file in-place.
 
@@ -304,7 +368,8 @@ def refresh_token() -> str:
     import urllib.request
 
     with _refresh_lock:
-        user = (os.environ.get("MS365_SMTP_USER") or "").strip()
+        cfg = load_cfg()
+        user = _ms365_user(cfg)
         if not user:
             return "Missing MS365_SMTP_USER"
 
@@ -394,7 +459,7 @@ def refresh_token() -> str:
             tmp.write_text(json.dumps(new, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             os.chmod(tmp, 0o600)
             tmp.replace(p)
-            os.chmod(p, 0o600)
+            _fix_token_perms(str(p))
         except Exception as e:
             out = f"Token refresh failed: cannot write token file: {type(e).__name__}: {e}"
             _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
@@ -452,7 +517,7 @@ def start_device_flow_background() -> None:
             cfg = load_cfg()
             tenant = (cfg.get("oauth") or {}).get("tenant_id") or os.environ.get("MS365_TENANT_ID", "")
             client_id = (cfg.get("oauth") or {}).get("client_id") or os.environ.get("MS365_CLIENT_ID", "")
-            user = os.environ.get("MS365_SMTP_USER", "")
+            user = _ms365_user(cfg)
             if not (tenant and client_id and user):
                 DEVICE_FLOW_LOG.write_text("Missing tenant_id/client_id (OAuth settings) or MS365_SMTP_USER\n", encoding="utf-8")
                 return
@@ -476,6 +541,13 @@ def start_device_flow_background() -> None:
             proc.wait()
             with open(DEVICE_FLOW_LOG, "a", encoding="utf-8") as f:
                 f.write(f"\n[exit {proc.returncode}]\n")
+
+            # If token was created/updated, ensure Postfix can read it.
+            try:
+                if proc.returncode == 0 and Path(tok_path).exists():
+                    _fix_token_perms(tok_path)
+            except Exception:
+                pass
         finally:
             with _device_lock:
                 _device_running = False
@@ -542,7 +614,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"mailq": out})
         if self.path == "/maillog":
             out = tail(DATA_DIR / "log" / "maillog", 200)
-            return self._json(200, {"maillog": out})
+            return self._json(200, {"maillog": _redact_sensitive(out)})
         if self.path == "/device-flow-log":
             return self._json(200, {"log": _redact_sensitive(tail(DEVICE_FLOW_LOG, 200))})
         if self.path == "/token/status":
@@ -553,8 +625,17 @@ class H(BaseHTTPRequestHandler):
             db = DATA_DIR / "sasl" / "sasldb2"
             if not db.exists():
                 return self._json(200, {"users": ""})
+
+            _ensure_sasldb_ok()
+
             out = sh(["sasldblistusers2", "-f", str(db)], check=False)
+            # If Cyrus can't read the db, return empty string (UI will show "no users").
+            if "failed" in (out or "").lower() or "bdb" in (out or "").lower():
+                return self._json(200, {"users": ""})
             return self._json(200, {"users": out})
+        if self.path == "/backup/export":
+            blob, meta = export_bundle(DATA_DIR)
+            return self._json(200, {"ok": True, "format": "zip+b64", "zip_b64": b64e(blob), "meta": meta})
         self._json(404, {"error": "not_found"})
 
     def do_POST(self):
@@ -562,6 +643,9 @@ class H(BaseHTTPRequestHandler):
             return
         if self.path == "/render-reload":
             out = render_and_reload()
+            return self._json(200, {"output": out})
+        if self.path == "/render-validate":
+            out = render_validate_only()
             return self._json(200, {"output": out})
         if self.path == "/reload":
             out = sh(["postfix", "reload"], check=False)
@@ -617,6 +701,20 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._json(400, {"error": str(e)})
             return self._json(200, {"output": out})
+        if self.path == "/backup/import":
+            body = self._read_json()
+            zip_b64 = (body.get("zip_b64") or "").strip()
+            if not zip_b64:
+                return self._json(400, {"error": "missing zip_b64"})
+            try:
+                zip_bytes = b64d(zip_b64)
+            except Exception:
+                return self._json(400, {"error": "invalid base64"})
+            try:
+                res = import_bundle(DATA_DIR, zip_bytes)
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, res)
         self._json(404, {"error": "not_found"})
 
 

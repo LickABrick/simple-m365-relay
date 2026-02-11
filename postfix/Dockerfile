@@ -57,6 +57,7 @@ COPY --from=builder /etc/sasl-xoauth2.conf /etc/sasl-xoauth2.conf
 
 WORKDIR /opt/ms365-relay
 COPY postfix/render.py /opt/ms365-relay/postfix/render.py
+COPY postfix/backup.py /opt/ms365-relay/postfix/backup.py
 COPY postfix/control.py /opt/ms365-relay/postfix/control.py
 COPY postfix/entrypoint.sh /entrypoint.sh
 

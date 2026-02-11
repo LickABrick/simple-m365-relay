@@ -23,6 +23,8 @@
     // server-provided defaults
     window.SM365R = window.SM365R || {};
     window.SM365R.ms365User = {{ (ms365_user or '') | tojson }};
+    window.SM365R.toast = {{ (toast or '') | tojson }};
+    window.SM365R.toastLevel = {{ (toast_level or 'ok') | tojson }};
 
     // theme (persisted)
     const themeKey = 'simple-m365-relay-theme';
@@ -195,9 +197,10 @@
 
     function _getCoreFields(){
       const relayhost = document.querySelector('input[name="relayhost"]')?.value || '';
+      const ms365_smtp_user = document.querySelector('input[name="ms365_smtp_user"]')?.value || '';
       const tls25 = document.querySelector('select[name="tls_25"]')?.value || 'may';
       const tls587 = document.querySelector('select[name="tls_587"]')?.value || 'encrypt';
-      return { relayhost, tls_25: tls25, tls_587: tls587 };
+      return { relayhost, ms365_smtp_user, tls_25: tls25, tls_587: tls587 };
     }
 
     function _getOauthFields(){
@@ -211,7 +214,7 @@
       const core = _getCoreFields();
       const oauth = _getOauthFields();
 
-      const okCore = _fieldOk(core.relayhost);
+      const okCore = _fieldOk(core.relayhost) && _fieldOk(core.ms365_smtp_user);
       const okOAuth = _fieldOk(oauth.tenant_id) && _fieldOk(oauth.client_id);
 
       const chip = document.getElementById('coreReadyChip');
@@ -227,6 +230,53 @@
         chip.classList.toggle('dark:text-amber-200', !(okCore && okOAuth));
       }
 
+      // Step-level gating (disable Next + show exactly what is missing)
+      const coreMissing = [];
+      if (!_fieldOk(core.relayhost)) coreMissing.push('Relayhost');
+      if (!_fieldOk(core.ms365_smtp_user)) coreMissing.push('Microsoft 365 SMTP user');
+
+      const oauthMissing = [];
+      if (!_fieldOk(oauth.tenant_id)) oauthMissing.push('Tenant ID');
+      if (!_fieldOk(oauth.client_id)) oauthMissing.push('Client ID');
+
+      const coreBox = document.getElementById('coreMissing');
+      const coreList = document.getElementById('coreMissingList');
+      if (coreBox && coreList) {
+        coreList.innerHTML = '';
+        for (const x of coreMissing) {
+          const li = document.createElement('li');
+          li.textContent = x;
+          coreList.appendChild(li);
+        }
+        coreBox.classList.toggle('hidden', coreMissing.length === 0);
+      }
+
+      const oauthBox = document.getElementById('oauthMissing');
+      const oauthList = document.getElementById('oauthMissingList');
+      if (oauthBox && oauthList) {
+        oauthList.innerHTML = '';
+        for (const x of oauthMissing) {
+          const li = document.createElement('li');
+          li.textContent = x;
+          oauthList.appendChild(li);
+        }
+        oauthBox.classList.toggle('hidden', oauthMissing.length === 0);
+      }
+
+      const s1Next = document.getElementById('s1Next');
+      if (s1Next) {
+        s1Next.toggleAttribute('disabled', coreMissing.length > 0);
+        s1Next.classList.toggle('opacity-60', coreMissing.length > 0);
+        s1Next.classList.toggle('cursor-not-allowed', coreMissing.length > 0);
+      }
+
+      const s2Next = document.getElementById('s2Next');
+      if (s2Next) {
+        s2Next.toggleAttribute('disabled', oauthMissing.length > 0);
+        s2Next.classList.toggle('opacity-60', oauthMissing.length > 0);
+        s2Next.classList.toggle('cursor-not-allowed', oauthMissing.length > 0);
+      }
+
       const doneBanner = document.getElementById('doneBanner');
       if (doneBanner) doneBanner.classList.toggle('hidden', !(okCore && okOAuth));
     }
@@ -234,9 +284,11 @@
     async function saveCoreStep(){
       const core = _getCoreFields();
       if (!_fieldOk(core.relayhost)) throw new Error('Relayhost is required.');
+      if (!_fieldOk(core.ms365_smtp_user)) throw new Error('Microsoft 365 SMTP user is required.');
 
       const data = new FormData();
       data.append('relayhost', core.relayhost);
+      data.append('ms365_smtp_user', core.ms365_smtp_user);
       data.append('tls_25', core.tls_25);
       data.append('tls_587', core.tls_587);
 
@@ -343,19 +395,54 @@
       // theme toggle handled via inline onclick on the button
 
       // initial step
-      const savedStep = parseInt(
+      let savedStep = parseInt(
         localStorage.getItem('simple-m365-relay-onboarding-step') ||
         localStorage.getItem('sm365r_onboarding_step') ||
         '1',
         10,
       ) || 1;
+
+      // If we just imported a backup and onboarding is still active, land on Step 2
+      // so the user sees the imported values + any required fields that are still missing.
+      const toast = (window.SM365R?.toast || '');
+      const toastLevel = (window.SM365R?.toastLevel || 'ok');
+      const isImportToast = String(toast).toLowerCase().includes('backup imported');
+      if (toast) {
+        // Show server-provided toast messages (same convention as dashboard).
+        showToast(toast, toastLevel);
+        // Clean URL (avoid re-showing toast on refresh/back).
+        try {
+          const u = new URL(window.location.href);
+          u.searchParams.delete('toast');
+          u.searchParams.delete('toastLevel');
+          window.history.replaceState({}, '', u.toString());
+        } catch(e) {}
+        // prevent re-showing if onboarding JS runs again
+        try { window.SM365R.toast = ''; } catch(e) {}
+      }
+
+      if (isImportToast) {
+        savedStep = 2;
+        try { localStorage.setItem('simple-m365-relay-onboarding-step', '2'); } catch(e) {}
+      }
+
       showStep(Math.min(7, Math.max(1, savedStep)));
 
       // live validation chips
-      for (const el of document.querySelectorAll('input[name="relayhost"],input[name="tenant_id"],input[name="client_id"]')) {
+      for (const el of document.querySelectorAll('input[name="relayhost"],input[name="ms365_smtp_user"],input[name="tenant_id"],input[name="client_id"]')) {
         el.addEventListener('input', refreshCompletionChips);
       }
       refreshCompletionChips();
+
+      if (isImportToast) {
+        // Nudge focus to the first required input to make it obvious what to do next.
+        window.setTimeout(() => {
+          const el = document.querySelector('input[name="relayhost"], input[name="ms365_smtp_user"], input[name="tenant_id"], input[name="client_id"]');
+          if (el && typeof el.focus === 'function') {
+            try { el.focus(); } catch(e) {}
+          }
+        }, 250);
+      }
 
       // show initial token expiry from server-rendered data-ts immediately
       const te = document.getElementById('tokenExp');
@@ -883,6 +970,41 @@
           </div>
         </div>
 
+        <div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div class="flex items-start gap-2">
+              <i data-lucide="download" class="mt-0.5 h-4 w-4 text-slate-500"></i>
+              <div class="w-full">
+                <div class="text-sm font-semibold">Quick start: import an existing configuration</div>
+                <div class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  Upload a backup ZIP to restore saved settings and SMTP AUTH users. After import, you’ll continue onboarding (or go straight to the dashboard if core settings are complete).
+                </div>
+
+                <form class="mt-3" method="post" action="/backup/import" enctype="multipart/form-data">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}" />
+
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
+                    <div class="sm:col-span-2">
+                      <label class="text-sm font-medium">Backup ZIP</label>
+                      <input name="file" type="file" accept=".zip,application/zip" class="mt-1 block w-full cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-200 dark:border-slate-800 dark:bg-slate-950 dark:file:bg-slate-800 dark:file:text-slate-100" required />
+                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Includes <span class="mono">config/config.json</span> + <span class="mono">sasl/sasldb2</span>. Excludes admin credentials and OAuth tokens.
+                      </div>
+                    </div>
+                    <div class="sm:col-span-1">
+                      <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100">
+                        <i data-lucide="upload" class="h-4 w-4"></i>
+                        Import
+                      </button>
+                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Import overwrites saved config/users. Apply Changes afterwards.</div>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="mt-6 flex justify-end">
           <button type="button" id="getStartedBtn" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
             Let's get started
@@ -904,6 +1026,22 @@
             <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
             <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Example: <span class="mono">[smtp.office365.com]:587</span></div>
+          </div>
+
+          <div class="sm:col-span-2">
+            <label class="text-sm font-medium">Microsoft 365 SMTP user <span class="text-xs text-slate-500">(required)</span></label>
+            <input name="ms365_smtp_user" value="{{ cfg.ms365_smtp_user or '' }}" placeholder="postfix@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">This is the authenticated account used for OAuth token storage and identity.</div>
+          </div>
+
+          <div id="coreMissing" class="hidden sm:col-span-2 rounded-2xl border border-amber-200/70 bg-amber-50/60 p-4 text-sm text-slate-800 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-100">
+            <div class="flex items-start gap-2">
+              <i data-lucide="triangle-alert" class="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-300"></i>
+              <div>
+                <div class="font-semibold">Required fields missing</div>
+                <ul id="coreMissingList" class="mt-1 list-disc pl-5 text-sm"></ul>
+              </div>
+            </div>
           </div>
 
           <div class="sm:col-span-2">
@@ -964,6 +1102,16 @@
             <label class="text-sm font-medium">Auto refresh (minutes)</label>
             <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
+          </div>
+
+          <div id="oauthMissing" class="hidden sm:col-span-2 rounded-2xl border border-amber-200/70 bg-amber-50/60 p-4 text-sm text-slate-800 shadow-sm dark:border-amber-900/40 dark:bg-amber-950/25 dark:text-amber-100">
+            <div class="flex items-start gap-2">
+              <i data-lucide="triangle-alert" class="mt-0.5 h-4 w-4 text-amber-600 dark:text-amber-300"></i>
+              <div>
+                <div class="font-semibold">Required fields missing</div>
+                <ul id="oauthMissingList" class="mt-1 list-disc pl-5 text-sm"></ul>
+              </div>
+            </div>
           </div>
         </div>
 
