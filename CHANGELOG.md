@@ -4,6 +4,35 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.0] - 2026-02-11
+
+### Added
+- Onboarding: “Quick start import” in Step 1 (imports backup bundle of saved settings + SMTP AUTH users).
+- Backup import hardening: ZIP allowlist + size limits (UI + postfix control API).
+- Dashboard UX: live “Next auto-refresh” countdown for OAuth token refresh.
+
+### Changed
+- Backup export download is now **POST + CSRF** (instead of GET) to mitigate CSRF.
+- Postfix control API bind default is Docker-friendly (do not publish to host).
+
+### Fixed
+- OAuth token refresh writes are now atomic/locked and expiry handling is monotonic.
+- Token file ownership/perms are corrected so Postfix can read refreshed tokens.
+- SMTP AUTH users list no longer shows sasldb error output as fake users.
+- AJAX settings save returns 400 on validation errors (instead of 500).
+- Mail log is redacted (UI + control API).
+
+### Security
+- Control API maillog output redaction.
+- TLS level inputs validated/allowlisted to prevent config injection.
+
+## [1.0.2] - 2026-02-07
+
+### Fixed
+- Ensure `/data/config/config.json` permissions are corrected on every postfix startup (avoids onboarding save 500 on existing volumes).
+- `/api/status` JSON robustness to avoid misleading “Session expired” UX.
+- README compose example corrected for `POSTFIX_CONTROL_URL=http://postfix:18080`.
+
 ## [1.0.1] - 2026-02-06
 
 ### Fixed
@@ -34,5 +63,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[1.1.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.0
+[1.0.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.2
 [1.0.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.1
 [1.0.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.0
