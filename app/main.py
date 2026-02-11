@@ -1062,34 +1062,37 @@ def api_settings_save(
 
     Note: fields are optional so onboarding can save partial configuration.
     """
-    cfg = load_cfg()
+    try:
+        cfg = load_cfg()
 
-    if hostname.strip():
-        cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
-    if domain.strip():
-        cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
-    if mynetworks.strip():
-        cfg["mynetworks"] = _validate_mynetworks(mynetworks)
+        if hostname.strip():
+            cfg["hostname"] = _validate_fqdnish(hostname, cfg.get("hostname") or "relay.local")
+        if domain.strip():
+            cfg["domain"] = _validate_fqdnish(domain, cfg.get("domain") or "local")
+        if mynetworks.strip():
+            cfg["mynetworks"] = _validate_mynetworks(mynetworks)
 
-    cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
-    if (ms365_smtp_user or "").strip():
-        cfg["ms365_smtp_user"] = _reject_ctl(ms365_smtp_user or "")
-    cfg.setdefault("tls", {})
-    cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
-    cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
+        cfg["relayhost"] = _validate_relayhost(relayhost, cfg.get("relayhost") or "[smtp.office365.com]:587")
+        if (ms365_smtp_user or "").strip():
+            cfg["ms365_smtp_user"] = _reject_ctl(ms365_smtp_user or "")
+        cfg.setdefault("tls", {})
+        cfg["tls"]["smtpd_25"] = _validate_tls_level(tls_25, "may")
+        cfg["tls"]["smtpd_587"] = _validate_tls_level(tls_587, "encrypt")
 
-    cfg.setdefault("oauth", {})
-    cfg["oauth"]["tenant_id"] = _reject_ctl(tenant_id or "")
-    cfg["oauth"]["client_id"] = _reject_ctl(client_id or "")
-    cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
+        cfg.setdefault("oauth", {})
+        cfg["oauth"]["tenant_id"] = _reject_ctl(tenant_id or "")
+        cfg["oauth"]["client_id"] = _reject_ctl(client_id or "")
+        cfg["oauth"]["auto_refresh_minutes"] = _validate_int(auto_refresh_minutes, 30)
 
-    save_cfg(cfg)
+        save_cfg(cfg)
 
-    current_hash = cfg_hash(cfg)
-    applied_hash = get_applied_hash()
-    pending = bool(applied_hash) and (current_hash != applied_hash)
+        current_hash = cfg_hash(cfg)
+        applied_hash = get_applied_hash()
+        pending = bool(applied_hash) and (current_hash != applied_hash)
 
-    return {"ok": True, "pending": pending}
+        return {"ok": True, "pending": pending}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/users/add")
