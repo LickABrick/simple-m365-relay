@@ -934,6 +934,41 @@
           </div>
         </div>
 
+        <div class="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div class="flex items-start gap-2">
+              <i data-lucide="download" class="mt-0.5 h-4 w-4 text-slate-500"></i>
+              <div class="w-full">
+                <div class="text-sm font-semibold">Quick start: import an existing configuration</div>
+                <div class="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                  Upload a backup ZIP to restore saved settings and SMTP AUTH users. You’ll be redirected to the dashboard after import.
+                </div>
+
+                <form class="mt-3" method="post" action="/backup/import" enctype="multipart/form-data">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}" />
+
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
+                    <div class="sm:col-span-2">
+                      <label class="text-sm font-medium">Backup ZIP</label>
+                      <input name="file" type="file" accept=".zip,application/zip" class="mt-1 block w-full cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-200 dark:border-slate-800 dark:bg-slate-950 dark:file:bg-slate-800 dark:file:text-slate-100" required />
+                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Includes <span class="mono">config/config.json</span> + <span class="mono">sasl/sasldb2</span>. Excludes admin credentials and OAuth tokens.
+                      </div>
+                    </div>
+                    <div class="sm:col-span-1">
+                      <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100">
+                        <i data-lucide="upload" class="h-4 w-4"></i>
+                        Import
+                      </button>
+                      <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Import overwrites saved config/users. Apply Changes afterwards.</div>
+                    </div>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="mt-6 flex justify-end">
           <button type="button" id="getStartedBtn" class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500">
             Let's get started
