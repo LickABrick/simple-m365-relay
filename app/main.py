@@ -1635,6 +1635,13 @@ def _redact_mail_log(text: str) -> str:
     return "\n".join(out_lines)
 
 
+@app.get("/healthz")
+@app.head("/healthz")
+@app.options("/healthz")
+def healthz():
+    return PlainTextResponse("ok")
+
+
 @app.get("/favicon.ico")
 def favicon_ico():
     # Browsers often request /favicon.ico by default; we serve the SVG.
