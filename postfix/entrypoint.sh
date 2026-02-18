@@ -17,11 +17,19 @@ chown -R postfix:postfix "$DATA_DIR/tokens" 2>/dev/null || true
 UI_UID=${UI_UID:-10001}
 UI_GID=${UI_GID:-10001}
 
-for p in "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/sasl"; do
+# UI needs write access to config/state.
+for p in "$DATA_DIR/config" "$DATA_DIR/state"; do
   mkdir -p "$p" || true
   chown -R "$UI_UID:$UI_GID" "$p" 2>/dev/null || true
   chmod -R u+rwX "$p" 2>/dev/null || true
 done
+
+# SASL DB must be readable by postfix/smtpd. The UI does not need direct write access here
+# (all user management goes through the control API inside this container).
+mkdir -p "$DATA_DIR/sasl" || true
+chown -R postfix:postfix "$DATA_DIR/sasl" 2>/dev/null || true
+chmod -R u+rwX,go-rwx "$DATA_DIR/sasl" 2>/dev/null || true
+chmod -R g+rX "$DATA_DIR/sasl" 2>/dev/null || true
 
 # Create default config if missing
 if [ ! -f "$CFG_JSON" ]; then
