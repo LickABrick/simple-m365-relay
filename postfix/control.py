@@ -73,6 +73,17 @@ def _get_control_token() -> str:
         if CONTROL_TOKEN_FILE.exists():
             v = (CONTROL_TOKEN_FILE.read_text(encoding="utf-8", errors="ignore") or "").strip()
             if v:
+                # Best-effort: ensure perms are correct even for existing volumes.
+                try:
+                    import os as _os
+
+                    try:
+                        _os.chown(str(CONTROL_TOKEN_FILE), 0, 10001)
+                    except Exception:
+                        pass
+                    _os.chmod(str(CONTROL_TOKEN_FILE), 0o640)
+                except Exception:
+                    pass
                 return v
     except Exception:
         pass
@@ -92,11 +103,17 @@ def _get_control_token() -> str:
                 return v
             CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
 
-        # Best-effort: keep token file private on the shared volume.
+        # Best-effort: token file readable by UI container (gid 10001), not world-readable.
+        # UI runs as uid/gid 10001 and must read this token to call the control API.
         try:
             import os as _os
 
-            _os.chmod(str(CONTROL_TOKEN_FILE), 0o600)
+            # group-read only; owner root (this process), group 10001 (UI)
+            try:
+                _os.chown(str(CONTROL_TOKEN_FILE), 0, 10001)
+            except Exception:
+                pass
+            _os.chmod(str(CONTROL_TOKEN_FILE), 0o640)
         except Exception:
             pass
     except Exception:
