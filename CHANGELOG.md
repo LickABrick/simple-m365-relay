@@ -4,6 +4,13 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.1] - 2026-02-18
+
+### Fixed
+- Fix onboarding refresh loop in some fresh installs where the UI could not read `/data/state/control.token` and the control API returned 403:
+  - Control token file permissions are now UI-readable (`0640`, group 10001) and self-heal on existing volumes.
+  - `/api/status` is best-effort for control API calls (no 500 crash → no loop).
+
 ## [1.1.0] - 2026-02-11
 
 ### Added
