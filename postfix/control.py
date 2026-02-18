@@ -73,6 +73,17 @@ def _get_control_token() -> str:
         if CONTROL_TOKEN_FILE.exists():
             v = (CONTROL_TOKEN_FILE.read_text(encoding="utf-8", errors="ignore") or "").strip()
             if v:
+                # Best-effort: ensure perms are correct even for existing volumes.
+                try:
+                    import os as _os
+
+                    try:
+                        _os.chown(str(CONTROL_TOKEN_FILE), 0, 10001)
+                    except Exception:
+                        pass
+                    _os.chmod(str(CONTROL_TOKEN_FILE), 0o640)
+                except Exception:
+                    pass
                 return v
     except Exception:
         pass
