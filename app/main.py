@@ -1580,7 +1580,8 @@ def api_status():
     maillog_resp = _safe_control("/maillog")
     mail_log = _redact_mail_log(str(maillog_resp.get("maillog") or ""))
 
-    token_refresh_log = get_token_refresh_log()
+    refresh_resp = _safe_control("/token/refresh-log")
+    token_refresh_log = str(refresh_resp.get("log") or "")
 
     ms365_user = effective_ms365_user(cfg)
     env_ms365_user = (os.environ.get("MS365_SMTP_USER") or "").strip()
@@ -1616,6 +1617,7 @@ def api_status():
             "control_mailq": mailq_resp.get("_error"),
             "control_maillog": maillog_resp.get("_error"),
             "control_token_status": token_status.get("_error") if isinstance(token_status, dict) else None,
+            "control_token_refresh_log": refresh_resp.get("_error") if isinstance(refresh_resp, dict) else None,
         },
     }
 

@@ -92,11 +92,17 @@ def _get_control_token() -> str:
                 return v
             CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
 
-        # Best-effort: keep token file private on the shared volume.
+        # Best-effort: token file readable by UI container (gid 10001), not world-readable.
+        # UI runs as uid/gid 10001 and must read this token to call the control API.
         try:
             import os as _os
 
-            _os.chmod(str(CONTROL_TOKEN_FILE), 0o600)
+            # group-read only; owner root (this process), group 10001 (UI)
+            try:
+                _os.chown(str(CONTROL_TOKEN_FILE), 0, 10001)
+            except Exception:
+                pass
+            _os.chmod(str(CONTROL_TOKEN_FILE), 0o640)
         except Exception:
             pass
     except Exception:
