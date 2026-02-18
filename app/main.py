@@ -1535,7 +1535,7 @@ def testmail(
 
     out = send_test_mail(to_addr, from_addr, subject, body)
 
-    msg = (out or "ok").strip()
+    msg = (out or "queued").strip()
     if len(msg) > 600:
         msg = msg[:600] + "…"
 
@@ -1552,9 +1552,16 @@ def api_testmail(
     body: str = Form("Does it work?"),
 ):
     out = send_test_mail(to_addr, from_addr, subject, body)
-    msg = (out or "ok").strip() or "ok"
-    level = "error" if "exit" in msg.lower() else "ok"
-    return {"ok": True, "output": msg, "level": level}
+    msg = (out or "").strip()
+
+    ok = True
+    if not msg:
+        msg = "queued"
+    if "sendmail exit" in msg.lower() or "error" in msg.lower():
+        ok = False
+
+    level = "ok" if ok else "error"
+    return {"ok": ok, "output": msg, "level": level, "note": "OK means queued/accepted locally; check Mail Log / queue for delivery."}
 
 
 @app.get("/api/status")
