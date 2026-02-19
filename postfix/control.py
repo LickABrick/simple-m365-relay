@@ -10,6 +10,53 @@ from pathlib import Path
 # NOTE: control.py is executed as a script (not a package). Use a local import.
 from backup import b64d, b64e, export_bundle, import_bundle
 
+
+def _dovecot_users_path() -> Path:
+    return DATA_DIR / "sasl" / "users"
+
+
+def _write_dovecot_user(login: str, password: str) -> None:
+    # Dovecot passwd-file format: user:{PLAIN}password
+    p = _dovecot_users_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    line = f"{login}:{{PLAIN}}{password}\n"
+
+    users = {}
+    if p.exists():
+        for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if not ln.strip() or ":" not in ln:
+                continue
+            u, rest = ln.split(":", 1)
+            users[u.strip()] = rest.strip()
+    users[login] = f"{{PLAIN}}{password}"
+
+    out = "".join(f"{u}:{rest}\n" for u, rest in sorted(users.items()))
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(out, encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    tmp.replace(p)
+
+
+def _delete_dovecot_user(login: str) -> None:
+    p = _dovecot_users_path()
+    if not p.exists():
+        return
+    users = {}
+    for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not ln.strip() or ":" not in ln:
+            continue
+        u, rest = ln.split(":", 1)
+        u = u.strip()
+        if not u or u == login:
+            continue
+        users[u] = rest.strip()
+    out = "".join(f"{u}:{rest}\n" for u, rest in sorted(users.items()))
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(out, encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    tmp.replace(p)
+
+
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
@@ -639,17 +686,19 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/token/refresh-log":
             return self._json(200, {"log": _redact_sensitive(tail(TOKEN_REFRESH_LOG, 200))})
         if self.path == "/users":
-            db = DATA_DIR / "sasl" / "sasldb2"
-            if not db.exists():
+            # Dovecot passwd-file users
+            p = _dovecot_users_path()
+            if not p.exists():
                 return self._json(200, {"users": ""})
-
-            _ensure_sasldb_ok()
-
-            out = sh(["sasldblistusers2", "-f", str(db)], check=False)
-            # If Cyrus can't read the db, return empty string (UI will show "no users").
-            if "failed" in (out or "").lower() or "bdb" in (out or "").lower():
-                return self._json(200, {"users": ""})
-            return self._json(200, {"users": out})
+            users = []
+            for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if not ln.strip() or ":" not in ln:
+                    continue
+                u = ln.split(":", 1)[0].strip()
+                if u:
+                    users.append(u)
+            users = sorted(set(users))
+            return self._json(200, {"users": "\n".join(f"{u}: userPassword" for u in users)})
         if self.path == "/backup/export":
             blob, meta = export_bundle(DATA_DIR)
             return self._json(200, {"ok": True, "format": "zip+b64", "zip_b64": b64e(blob), "meta": meta})
@@ -677,34 +726,23 @@ class H(BaseHTTPRequestHandler):
             body = self._read_json()
             login = (body.get("login") or "").strip()
             pw = body.get("password") or ""
-            realm = os.environ.get("RELAY_DOMAIN", "local")
             if not login or not pw:
                 return self._json(400, {"error": "missing login/password"})
-
-            _ensure_sasldb_ok()
-
-            p = subprocess.run(
-                ["saslpasswd2", "-p", "-c", "-u", realm, "-f", str(DATA_DIR / "sasl" / "sasldb2"), login],
-                input=pw + "\n",
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-            out = (p.stdout or "").strip()
-            if p.returncode != 0:
-                return self._json(400, {"error": out or f"saslpasswd2 exit {p.returncode}"})
-            return self._json(200, {"output": out or "ok"})
+            try:
+                _write_dovecot_user(login, pw)
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {"output": "ok"})
         if self.path == "/users/delete":
             body = self._read_json()
             login = (body.get("login") or "").strip()
-            realm = os.environ.get("RELAY_DOMAIN", "local")
             if not login:
                 return self._json(400, {"error": "missing login"})
-
-            _ensure_sasldb_ok()
-
-            out = sh(["saslpasswd2", "-d", "-u", realm, "-f", str(DATA_DIR / "sasl" / "sasldb2"), login], check=False).strip()
-            return self._json(200, {"output": out or "ok"})
+            try:
+                _delete_dovecot_user(login)
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {"output": "ok"})
         if self.path == "/testmail":
             body = self._read_json()
             to_addr = (body.get("to_addr") or "").strip()

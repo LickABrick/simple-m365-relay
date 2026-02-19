@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsasl2-modules \
     libsasl2-modules-db \
     sasl2-bin \
+    dovecot-core \
     openssl \
     libcurl4 \
     libjsoncpp25 \

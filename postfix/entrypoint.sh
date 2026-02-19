@@ -65,24 +65,54 @@ if [ "${RELAY_TLS_GENERATE_SELF_SIGNED:-true}" = "true" ] && { [ ! -f "$CERT_PAT
   chmod 600 "$KEY_PATH" || true
 fi
 
-# Make sure Cyrus SASL can find sasldb2 (only if it exists and looks non-empty).
-# We don't create an empty sasldb2 file because sasldblistusers2 will complain about invalid DB format.
-mkdir -p /etc/sasl2
-if [ -f "$DATA_DIR/sasl/sasldb2" ] && [ ! -s "$DATA_DIR/sasl/sasldb2" ]; then
-  rm -f "$DATA_DIR/sasl/sasldb2" || true
+# Dovecot SASL (auth socket for Postfix)
+# We use Dovecot for stable SMTP AUTH behavior.
+# User store: /data/sasl/users (passwd-file)
+mkdir -p /etc/dovecot /etc/dovecot/conf.d "$DATA_DIR/sasl" || true
+
+cat > /etc/dovecot/dovecot.conf <<'EOF'
+protocols = auth
+listen = *
+!include conf.d/*.conf
+EOF
+
+cat > /etc/dovecot/conf.d/10-auth.conf <<'EOF'
+disable_plaintext_auth = no
+auth_mechanisms = plain login
+!include auth-passwdfile.conf.ext
+EOF
+
+cat > /etc/dovecot/conf.d/auth-passwdfile.conf.ext <<'EOF'
+passdb {
+  driver = passwd-file
+  args = scheme=PLAIN username_format=%u /data/sasl/users
+}
+userdb {
+  driver = static
+  args = uid=postfix gid=postfix home=/tmp
+}
+EOF
+
+cat > /etc/dovecot/conf.d/10-master.conf <<'EOF'
+service auth {
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+EOF
+
+mkdir -p /var/spool/postfix/private || true
+chown -R postfix:postfix /var/spool/postfix || true
+
+if [ ! -f "$DATA_DIR/sasl/users" ]; then
+  touch "$DATA_DIR/sasl/users" || true
+  chmod 600 "$DATA_DIR/sasl/users" || true
 fi
 
-# If there's an existing sasldb2 but it's not readable by this image (db format mismatch), move it aside.
-if [ -f "$DATA_DIR/sasl/sasldb2" ]; then
-  if ! sasldblistusers2 -f "$DATA_DIR/sasl/sasldb2" >/dev/null 2>&1; then
-    ts=$(date +%s 2>/dev/null || echo 0)
-    mv "$DATA_DIR/sasl/sasldb2" "$DATA_DIR/sasl/sasldb2.bad.${ts}" 2>/dev/null || rm -f "$DATA_DIR/sasl/sasldb2" || true
-  fi
-fi
-
-if [ -f "$DATA_DIR/sasl/sasldb2" ]; then
-  ln -sf "$DATA_DIR/sasl/sasldb2" /etc/sasl2/sasldb2
-fi
+# Start dovecot (auth only)
+dovecot -F &
 
 # Render postfix config
 python3 /opt/ms365-relay/postfix/render.py \

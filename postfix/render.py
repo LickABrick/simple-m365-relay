@@ -55,8 +55,10 @@ smtp_tls_loglevel = 1
 smtp_always_send_ehlo = yes
 
 # Client AUTH (for incoming)
+# Use Dovecot auth socket for predictable SASL behavior across distros.
 smtpd_sasl_auth_enable = yes
-smtpd_sasl_type = cyrus
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
 smtpd_sasl_security_options = noanonymous
 broken_sasl_auth_clients = yes
 
