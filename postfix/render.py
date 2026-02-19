@@ -67,10 +67,7 @@ smtpd_sender_login_maps = lmdb:/etc/postfix/sender_login_maps
 smtpd_sender_restrictions = reject_sender_login_mismatch
 
 # XOAUTH2 for outbound relay
-smtp_sasl_auth_enable = yes
-smtp_sasl_password_maps = lmdb:/etc/postfix/sasl_passwd
-smtp_sasl_security_options =
-smtp_sasl_mechanism_filter = xoauth2
+{outbound_sasl_block}
 
 # Size limits
 message_size_limit = 52428800
@@ -179,6 +176,21 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
+    ms365_user = os.environ.get("MS365_SMTP_USER", "").strip() or str((cfg or {}).get("ms365_smtp_user") or "").strip()
+
+    if ms365_user:
+        outbound_sasl_block = "\n".join(
+            [
+                "smtp_sasl_auth_enable = yes",
+                "smtp_sasl_password_maps = lmdb:/etc/postfix/sasl_passwd",
+                "smtp_sasl_security_options =",
+                "smtp_sasl_mechanism_filter = xoauth2",
+            ]
+        )
+    else:
+        # Dev/test mode (e.g. MailHog): allow unauthenticated relayhost.
+        outbound_sasl_block = "smtp_sasl_auth_enable = no"
+
     main_cf = MAIN_CF_TEMPLATE.format(
         hostname=_safe_cf_value(hostname),
         domain=_safe_cf_value(domain),
@@ -187,12 +199,12 @@ def main():
         tls_cert=_safe_cf_value(args.tls_cert),
         tls_key=_safe_cf_value(args.tls_key),
         smtp_tls_security_level=_safe_cf_value(tls_out),
+        outbound_sasl_block=outbound_sasl_block,
     )
     (outdir / "main.cf").write_text(main_cf, encoding="utf-8")
     (outdir / "master.cf").write_text(MASTER_CF.format(tls_25=tls_25, tls_587=tls_587), encoding="utf-8")
 
     # Outbound xoauth2 token file mapping
-    ms365_user = os.environ.get("MS365_SMTP_USER", "").strip() or str((cfg or {}).get("ms365_smtp_user") or "").strip()
     sasl_passwd = outdir / "sasl_passwd"
     if ms365_user:
         # token file path must be a safe filename
