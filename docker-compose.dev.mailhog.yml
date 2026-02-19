@@ -14,7 +14,7 @@ services:
       # MailHog SMTP has no STARTTLS, so relax outbound TLS for local e2e tests.
       RELAY_SMTP_TLS_SECURITY_LEVEL: "may"
       # disable ms365 settings for local tests
-      MS365_SMTP_USER: "postfix@example.com"
+      MS365_SMTP_USER: ""
       MS365_TENANT_ID: ""
       MS365_CLIENT_ID: ""
 
