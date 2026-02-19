@@ -626,7 +626,7 @@ def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
 
 
 def _is_public_path(path: str) -> bool:
-    if path in ("/login", "/logout", "/setup"):
+    if path in ("/login", "/logout", "/setup", "/healthz"):
         return True
     if path.startswith("/static"):
         return True
