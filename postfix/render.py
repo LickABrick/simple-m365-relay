@@ -66,6 +66,11 @@ broken_sasl_auth_clients = yes
 smtpd_sender_login_maps = lmdb:/etc/postfix/sender_login_maps
 smtpd_sender_restrictions = reject_sender_login_mismatch
 
+# Rewrite locally-generated envelope senders (e.g. DSNs) to a valid From for relayhost.
+# This avoids Microsoft 365 rejecting MAILER-DAEMON / postmaster send-as.
+sender_canonical_maps = lmdb:/etc/postfix/sender_canonical
+sender_canonical_classes = envelope_sender
+
 # XOAUTH2 for outbound relay
 {outbound_sasl_block}
 
@@ -239,6 +244,24 @@ def main():
     sender_login_maps = outdir / "sender_login_maps"
     sender_login_maps.write_text("".join(lines), encoding="utf-8")
     postmap(sender_login_maps)
+
+    # Sender canonical map: rewrite DSN-ish senders to the MS365 identity.
+    # This avoids M365 rejecting MAILER-DAEMON / postmaster envelope senders.
+    sender_canonical = outdir / "sender_canonical"
+    canon_lines = []
+    if ms365_user:
+        canon_lines.extend(
+            [
+                f"MAILER-DAEMON {ms365_user}\n",
+                f"postmaster {ms365_user}\n",
+                f"MAILER-DAEMON@{domain} {ms365_user}\n",
+                f"postmaster@{domain} {ms365_user}\n",
+                f"MAILER-DAEMON@{hostname} {ms365_user}\n",
+                f"postmaster@{hostname} {ms365_user}\n",
+            ]
+        )
+    sender_canonical.write_text("".join(canon_lines), encoding="utf-8")
+    postmap(sender_canonical)
 
 
 if __name__ == "__main__":
