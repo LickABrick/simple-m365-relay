@@ -1,0 +1,27 @@
+services:
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: simple-m365-relay-mailhog-dev
+    restart: unless-stopped
+    ports:
+      - "8026:8025" # UI
+    expose:
+      - "1025" # SMTP
+
+  postfix:
+    environment:
+      RELAYHOST: "[mailhog]:1025"
+      # MailHog SMTP has no STARTTLS, so relax outbound TLS for local e2e tests.
+      RELAY_SMTP_TLS_SECURITY_LEVEL: "may"
+      # disable ms365 settings for local tests
+      MS365_SMTP_USER: "postfix@example.com"
+      MS365_TENANT_ID: ""
+      MS365_CLIENT_ID: ""
+
+  smtpclient:
+    image: python:3.12-alpine
+    container_name: simple-m365-relay-smtpclient-dev
+    command: ["sh","-lc","sleep infinity"]
+    depends_on:
+      - postfix
+    # same network as other services by default

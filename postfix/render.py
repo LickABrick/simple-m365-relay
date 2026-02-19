@@ -48,7 +48,7 @@ smtpd_tls_loglevel = 1
 smtpd_tls_received_header = yes
 
 # TLS outbound (smtp)
-smtp_tls_security_level = encrypt
+smtp_tls_security_level = {smtp_tls_security_level}
 smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
 smtp_tls_session_cache_database = lmdb:${{data_directory}}/smtp_scache
 smtp_tls_loglevel = 1
@@ -174,6 +174,7 @@ def main():
     tls_cfg = cfg.get("tls") or {}
     tls_25 = _tls_level(os.environ.get("RELAY_SMTPD_TLS_LEVEL_25") or tls_cfg.get("smtpd_25"), "may")
     tls_587 = _tls_level(os.environ.get("RELAY_SMTPD_TLS_LEVEL_587") or tls_cfg.get("smtpd_587"), "encrypt")
+    tls_out = _tls_level(os.environ.get("RELAY_SMTP_TLS_SECURITY_LEVEL") or tls_cfg.get("smtp_out"), "encrypt")
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -185,6 +186,7 @@ def main():
         mynetworks=_safe_cf_value(mynetworks),
         tls_cert=_safe_cf_value(args.tls_cert),
         tls_key=_safe_cf_value(args.tls_key),
+        smtp_tls_security_level=_safe_cf_value(tls_out),
     )
     (outdir / "main.cf").write_text(main_cf, encoding="utf-8")
     (outdir / "master.cf").write_text(MASTER_CF.format(tls_25=tls_25, tls_587=tls_587), encoding="utf-8")
