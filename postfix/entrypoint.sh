@@ -71,7 +71,8 @@ fi
 mkdir -p /etc/dovecot /etc/dovecot/conf.d "$DATA_DIR/sasl" || true
 
 cat > /etc/dovecot/dovecot.conf <<'EOF'
-protocols = auth
+# Dovecot base config
+# Note: do NOT set "protocols = auth" (auth is a service, not a protocol).
 listen = *
 !include conf.d/*.conf
 EOF
