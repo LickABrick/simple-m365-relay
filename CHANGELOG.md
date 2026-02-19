@@ -4,6 +4,11 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.2-rc.2] - 2026-02-19
+
+### Fixed
+- UI: multi-line placeholder for Allowed From textarea now uses `&#10;` to avoid leading whitespace on line 2.
+
 ## [1.1.2-rc.1] - 2026-02-19
 
 ### Fixed
