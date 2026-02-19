@@ -15,13 +15,28 @@ def _dovecot_users_path() -> Path:
     return DATA_DIR / "sasl" / "users"
 
 
+def _ensure_dovecot_readable(path: Path) -> None:
+    try:
+        import pwd, grp
+
+        duid = pwd.getpwnam("dovecot").pw_uid
+        dgid = grp.getgrnam("dovecot").gr_gid
+        os.chown(path, duid, dgid)
+    except Exception:
+        pass
+
+    try:
+        os.chmod(path, 0o640)
+    except Exception:
+        pass
+
+
 def _write_dovecot_user(login: str, password: str) -> None:
     # Dovecot passwd-file format: user:{PLAIN}password
     p = _dovecot_users_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    line = f"{login}:{{PLAIN}}{password}\n"
 
-    users = {}
+    users: dict[str, str] = {}
     if p.exists():
         for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
             if not ln.strip() or ":" not in ln:
@@ -33,15 +48,16 @@ def _write_dovecot_user(login: str, password: str) -> None:
     out = "".join(f"{u}:{rest}\n" for u, rest in sorted(users.items()))
     tmp = p.with_suffix(".tmp")
     tmp.write_text(out, encoding="utf-8")
-    os.chmod(tmp, 0o600)
+    _ensure_dovecot_readable(tmp)
     tmp.replace(p)
+    _ensure_dovecot_readable(p)
 
 
 def _delete_dovecot_user(login: str) -> None:
     p = _dovecot_users_path()
     if not p.exists():
         return
-    users = {}
+    users: dict[str, str] = {}
     for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
         if not ln.strip() or ":" not in ln:
             continue
@@ -53,8 +69,9 @@ def _delete_dovecot_user(login: str) -> None:
     out = "".join(f"{u}:{rest}\n" for u, rest in sorted(users.items()))
     tmp = p.with_suffix(".tmp")
     tmp.write_text(out, encoding="utf-8")
-    os.chmod(tmp, 0o600)
+    _ensure_dovecot_readable(tmp)
     tmp.replace(p)
+    _ensure_dovecot_readable(p)
 
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))

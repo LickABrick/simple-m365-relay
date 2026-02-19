@@ -109,8 +109,10 @@ chown -R postfix:postfix /var/spool/postfix || true
 
 if [ ! -f "$DATA_DIR/sasl/users" ]; then
   touch "$DATA_DIR/sasl/users" || true
-  chmod 600 "$DATA_DIR/sasl/users" || true
 fi
+# Dovecot (running as user "dovecot") must be able to read this file.
+chmod 640 "$DATA_DIR/sasl/users" || true
+chown dovecot:dovecot "$DATA_DIR/sasl/users" || true
 
 # Start dovecot (auth only)
 dovecot -F &
