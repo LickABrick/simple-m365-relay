@@ -626,7 +626,7 @@ def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
 
 
 def _is_public_path(path: str) -> bool:
-    if path in ("/login", "/logout", "/setup"):
+    if path in ("/login", "/logout", "/setup", "/healthz"):
         return True
     if path.startswith("/static"):
         return True
@@ -1633,6 +1633,13 @@ def _redact_mail_log(text: str) -> str:
         else:
             out_lines.append(ln)
     return "\n".join(out_lines)
+
+
+@app.get("/healthz")
+@app.head("/healthz")
+@app.options("/healthz")
+def healthz():
+    return PlainTextResponse("ok")
 
 
 @app.get("/favicon.ico")
