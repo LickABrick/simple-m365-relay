@@ -4,6 +4,14 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.2-rc.1] - 2026-02-19
+
+### Fixed
+- Inbound SMTP AUTH reliability: switch from Cyrus SASL/sasldb2 to Dovecot SASL (passwd-file) (issue #11).
+- Healthcheck endpoint: make `/healthz` public (no auth redirect) (issue #12).
+- Test Mail: apply config before sending + improved reporting semantics to avoid false OK (issue #8).
+- Rewrite locally-generated envelope senders (MAILER-DAEMON/postmaster) to the configured MS365 identity to avoid M365 SendAsDenied noise.
+
 ## [1.1.1] - 2026-02-18
 
 ### Fixed

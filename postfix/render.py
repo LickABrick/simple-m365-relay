@@ -48,15 +48,17 @@ smtpd_tls_loglevel = 1
 smtpd_tls_received_header = yes
 
 # TLS outbound (smtp)
-smtp_tls_security_level = encrypt
+smtp_tls_security_level = {smtp_tls_security_level}
 smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt
 smtp_tls_session_cache_database = lmdb:${{data_directory}}/smtp_scache
 smtp_tls_loglevel = 1
 smtp_always_send_ehlo = yes
 
 # Client AUTH (for incoming)
+# Use Dovecot auth socket for predictable SASL behavior across distros.
 smtpd_sasl_auth_enable = yes
-smtpd_sasl_type = cyrus
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
 smtpd_sasl_security_options = noanonymous
 broken_sasl_auth_clients = yes
 
@@ -64,11 +66,13 @@ broken_sasl_auth_clients = yes
 smtpd_sender_login_maps = lmdb:/etc/postfix/sender_login_maps
 smtpd_sender_restrictions = reject_sender_login_mismatch
 
+# Rewrite locally-generated envelope senders (e.g. DSNs) to a valid From for relayhost.
+# This avoids Microsoft 365 rejecting MAILER-DAEMON / postmaster send-as.
+sender_canonical_maps = lmdb:/etc/postfix/sender_canonical
+sender_canonical_classes = envelope_sender
+
 # XOAUTH2 for outbound relay
-smtp_sasl_auth_enable = yes
-smtp_sasl_password_maps = lmdb:/etc/postfix/sasl_passwd
-smtp_sasl_security_options =
-smtp_sasl_mechanism_filter = xoauth2
+{outbound_sasl_block}
 
 # Size limits
 message_size_limit = 52428800
@@ -172,9 +176,25 @@ def main():
     tls_cfg = cfg.get("tls") or {}
     tls_25 = _tls_level(os.environ.get("RELAY_SMTPD_TLS_LEVEL_25") or tls_cfg.get("smtpd_25"), "may")
     tls_587 = _tls_level(os.environ.get("RELAY_SMTPD_TLS_LEVEL_587") or tls_cfg.get("smtpd_587"), "encrypt")
+    tls_out = _tls_level(os.environ.get("RELAY_SMTP_TLS_SECURITY_LEVEL") or tls_cfg.get("smtp_out"), "encrypt")
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+
+    ms365_user = os.environ.get("MS365_SMTP_USER", "").strip() or str((cfg or {}).get("ms365_smtp_user") or "").strip()
+
+    if ms365_user:
+        outbound_sasl_block = "\n".join(
+            [
+                "smtp_sasl_auth_enable = yes",
+                "smtp_sasl_password_maps = lmdb:/etc/postfix/sasl_passwd",
+                "smtp_sasl_security_options =",
+                "smtp_sasl_mechanism_filter = xoauth2",
+            ]
+        )
+    else:
+        # Dev/test mode (e.g. MailHog): allow unauthenticated relayhost.
+        outbound_sasl_block = "smtp_sasl_auth_enable = no"
 
     main_cf = MAIN_CF_TEMPLATE.format(
         hostname=_safe_cf_value(hostname),
@@ -183,12 +203,13 @@ def main():
         mynetworks=_safe_cf_value(mynetworks),
         tls_cert=_safe_cf_value(args.tls_cert),
         tls_key=_safe_cf_value(args.tls_key),
+        smtp_tls_security_level=_safe_cf_value(tls_out),
+        outbound_sasl_block=outbound_sasl_block,
     )
     (outdir / "main.cf").write_text(main_cf, encoding="utf-8")
     (outdir / "master.cf").write_text(MASTER_CF.format(tls_25=tls_25, tls_587=tls_587), encoding="utf-8")
 
     # Outbound xoauth2 token file mapping
-    ms365_user = os.environ.get("MS365_SMTP_USER", "").strip() or str((cfg or {}).get("ms365_smtp_user") or "").strip()
     sasl_passwd = outdir / "sasl_passwd"
     if ms365_user:
         # token file path must be a safe filename
@@ -223,6 +244,24 @@ def main():
     sender_login_maps = outdir / "sender_login_maps"
     sender_login_maps.write_text("".join(lines), encoding="utf-8")
     postmap(sender_login_maps)
+
+    # Sender canonical map: rewrite DSN-ish senders to the MS365 identity.
+    # This avoids M365 rejecting MAILER-DAEMON / postmaster envelope senders.
+    sender_canonical = outdir / "sender_canonical"
+    canon_lines = []
+    if ms365_user:
+        canon_lines.extend(
+            [
+                f"MAILER-DAEMON {ms365_user}\n",
+                f"postmaster {ms365_user}\n",
+                f"MAILER-DAEMON@{domain} {ms365_user}\n",
+                f"postmaster@{domain} {ms365_user}\n",
+                f"MAILER-DAEMON@{hostname} {ms365_user}\n",
+                f"postmaster@{hostname} {ms365_user}\n",
+            ]
+        )
+    sender_canonical.write_text("".join(canon_lines), encoding="utf-8")
+    postmap(sender_canonical)
 
 
 if __name__ == "__main__":
