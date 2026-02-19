@@ -1533,15 +1533,39 @@ def testmail(
     require_csrf(request, csrf_token)
     from urllib.parse import quote
 
+    _ensure_applied_best_effort()
     out = send_test_mail(to_addr, from_addr, subject, body)
 
-    msg = (out or "ok").strip()
+    msg = (out or "queued").strip()
     if len(msg) > 600:
         msg = msg[:600] + "…"
 
     level = "error" if "exit" in msg.lower() else "ok"
 
     return RedirectResponse(url=f"/?toast={quote(msg)}&toastLevel={level}#testmail", status_code=303)
+
+
+def _ensure_applied_best_effort() -> str:
+    """Best-effort: ensure Postfix has current config rendered + reloaded.
+
+    Users can run the onboarding test-mail step before hitting Finish.
+    If config changes (e.g. ms365_smtp_user) haven't been applied yet,
+    Postfix may miss generated lmdb maps (e.g. sasl_passwd.lmdb) until a restart.
+
+    Returns a short status string ("ok" or output from render/reload).
+    """
+    try:
+        cfg = load_cfg()
+        current_hash = cfg_hash(cfg)
+        applied_hash = get_applied_hash()
+        pending = (applied_hash is None) or (current_hash != applied_hash)
+        if pending:
+            out = render_and_reload()
+            set_applied_hash(current_hash)
+            return (out or "ok").strip() or "ok"
+    except Exception as e:
+        return f"apply_error:{type(e).__name__}"
+    return "ok"
 
 
 @app.post("/api/testmail")
@@ -1551,10 +1575,25 @@ def api_testmail(
     subject: str = Form("Test"),
     body: str = Form("Does it work?"),
 ):
+    apply_out = _ensure_applied_best_effort()
     out = send_test_mail(to_addr, from_addr, subject, body)
-    msg = (out or "ok").strip() or "ok"
-    level = "error" if "exit" in msg.lower() else "ok"
-    return {"ok": True, "output": msg, "level": level}
+
+    msg = (out or "").strip()
+
+    ok = True
+    if not msg:
+        msg = "queued"
+    if ("sendmail exit" in msg.lower()) or ("error" in msg.lower()) or ("apply_error" in apply_out.lower()):
+        ok = False
+
+    level = "ok" if ok else "error"
+    return {
+        "ok": ok,
+        "output": msg,
+        "level": level,
+        "apply": apply_out,
+        "note": "OK means queued/accepted locally; check Mail Log / queue for delivery.",
+    }
 
 
 @app.get("/api/status")

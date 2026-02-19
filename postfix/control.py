@@ -300,8 +300,9 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         f"{body}\n"
     )
 
+    # Use -v to surface queue id / immediate SMTP dialogue where available.
     p = subprocess.run(
-        ["/usr/sbin/sendmail", "-t", "-f", from_addr],
+        ["/usr/sbin/sendmail", "-v", "-t", "-f", from_addr],
         input=msg,
         text=True,
         stdout=subprocess.PIPE,
@@ -310,7 +311,9 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
     out = (p.stdout or "").strip()
     if p.returncode != 0:
         return f"sendmail exit {p.returncode}\n" + out
-    return out or "ok"
+    # NOTE: returncode=0 only means the message was accepted/queued locally,
+    # not that it has been delivered to Microsoft 365.
+    return out or "queued"
 
 
 def _append_log(path: Path, text: str, max_bytes: int = 200_000) -> None:
