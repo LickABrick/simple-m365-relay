@@ -90,6 +90,7 @@ jobs:
 
           {
             echo "image=$image"
+            echo "ver_no_v=$ver_no_v"
             echo "tags<<EOF"
             echo "$tag_lines"
             echo "EOF"
@@ -112,5 +113,8 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.tags.outputs.ver_no_v }}
+            APP_GITHUB_REPO=${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
