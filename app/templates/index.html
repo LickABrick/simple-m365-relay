@@ -1155,15 +1155,16 @@
       const o = Object.assign({ validateOnly: false }, (opts || {}));
       const btn = document.getElementById('applyBtn');
       const vbtn = document.getElementById('validateBtn');
+      const dbtn = document.getElementById('discardBtn');
       if (btn) btn.disabled = true;
       if (vbtn) vbtn.disabled = true;
+      if (dbtn) dbtn.disabled = true;
       try {
         const fd = new FormData();
         if (o.validateOnly) fd.append('validate_only','1');
 
         const r = await apiFetch('/api/apply', { method: 'POST', body: fd });
         const j = await r.json();
-        const out = (j.output || '').trim() || 'ok';
 
         if (o.validateOnly) {
           showToast(j.level === 'error' ? 'Validation failed.' : 'Validation OK.', j.level === 'error' ? 'error' : 'ok');
@@ -1177,9 +1178,40 @@
       } catch (e) {
         showToast(o.validateOnly ? 'Validation failed.' : 'Apply failed.', 'error');
       } finally {
-        // Re-enable buttons; whether Apply should be used is driven by pending state.
         if (btn) btn.disabled = false;
         if (vbtn) vbtn.disabled = false;
+        if (dbtn) dbtn.disabled = false;
+      }
+    }
+
+    async function discardNoReload(){
+      const dbtn = document.getElementById('discardBtn');
+      if (dbtn) dbtn.disabled = true;
+      try {
+        const ok = window.confirm('Discard saved (not applied) changes?\n\nThis will restore the last applied config.');
+        if (!ok) return;
+
+        const r = await apiFetch('/api/discard', { method: 'POST', body: new FormData() });
+        let j = null;
+        try { j = await r.json(); } catch(e) {}
+
+        if (!r.ok) {
+          let msg = 'Discard failed.';
+          if (j && j.detail) {
+            const nice = _formatFastApiDetail(j.detail);
+            msg = 'Discard failed: ' + (nice || JSON.stringify(j.detail));
+          }
+          showToast(msg, 'error');
+          return;
+        }
+
+        showToast('Discarded saved changes (restored last applied config).', 'ok');
+        syncPendingFromApi(false);
+        window.setTimeout(() => { window.location.href = '/'; }, 600);
+      } catch (e) {
+        showToast('Discard failed.', 'error');
+      } finally {
+        if (dbtn) dbtn.disabled = false;
       }
     }
 
@@ -1188,6 +1220,8 @@
       if (f) f.addEventListener('submit', (e) => { e.preventDefault(); applyNoReload({ validateOnly:false }); });
       const v = document.getElementById('validateBtn');
       if (v) v.addEventListener('click', (e) => { e.preventDefault(); applyNoReload({ validateOnly:true }); });
+      const d = document.getElementById('discardBtn');
+      if (d) d.addEventListener('click', (e) => { e.preventDefault(); discardNoReload(); });
     }
 
     function initTestmailAjax(){
@@ -1470,6 +1504,10 @@
                 <button id="validateBtn" type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Validates saved settings by rendering Postfix config (no reload)">
                   <i data-lucide="check" class="h-4 w-4"></i>
                   Validate (no reload)
+                </button>
+                <button id="discardBtn" type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Discards saved changes and restores the last applied config">
+                  <i data-lucide="undo-2" class="h-4 w-4"></i>
+                  Discard saved changes
                 </button>
               </form>
               <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">This reminder stays until changes are applied.</div>

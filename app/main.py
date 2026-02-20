@@ -99,6 +99,7 @@ def load_cfg() -> Dict[str, Any]:
 
 
 APPLIED_HASH_PATH = DATA_DIR / "state" / "applied.hash"
+APPLIED_CFG_PATH = DATA_DIR / "state" / "applied_config.json"
 
 
 def save_cfg(cfg: Dict[str, Any]) -> None:
@@ -121,9 +122,32 @@ def get_applied_hash() -> Optional[str]:
     return None
 
 
+def _write_applied_cfg_snapshot(cfg: Dict[str, Any]) -> None:
+    try:
+        APPLIED_CFG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        APPLIED_CFG_PATH.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def read_applied_cfg_snapshot() -> Optional[Dict[str, Any]]:
+    try:
+        if APPLIED_CFG_PATH.exists():
+            return json.loads(APPLIED_CFG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return None
+
+
 def set_applied_hash(h: str) -> None:
     APPLIED_HASH_PATH.parent.mkdir(parents=True, exist_ok=True)
     APPLIED_HASH_PATH.write_text((h or "") + "\n", encoding="utf-8")
+
+
+def set_applied_state(cfg: Dict[str, Any]) -> None:
+    # Persist both the hash and a snapshot so we can discard saved-but-not-applied changes later.
+    set_applied_hash(cfg_hash(cfg))
+    _write_applied_cfg_snapshot(cfg)
 
 
 def sh(cmd, check=True) -> subprocess.CompletedProcess:
@@ -892,8 +916,8 @@ def index(request: Request):
     applied_hash = get_applied_hash()
     if not applied_hash:
         # On first run, assume current config was already applied by the container entrypoint.
-        set_applied_hash(current_hash)
-        applied_hash = current_hash
+        set_applied_state(cfg)
+        applied_hash = cfg_hash(cfg)
     pending = (current_hash != applied_hash)
 
     mailq_out = (_control_get("/mailq").get("mailq") or "")
@@ -1307,7 +1331,7 @@ def apply_changes(request: Request, csrf_token: str = Form("")):
 
     # Mark current config as applied.
     cfg = load_cfg()
-    set_applied_hash(cfg_hash(cfg))
+    set_applied_state(cfg)
 
     # Return to dashboard with a toast.
     from urllib.parse import quote
@@ -1334,12 +1358,25 @@ def api_apply_changes(validate_only: str = Form("0")):
     out = render_and_reload()
 
     cfg = load_cfg()
-    set_applied_hash(cfg_hash(cfg))
+    set_applied_state(cfg)
 
     msg = (out or "ok").strip() or "ok"
     level = "error" if ("fatal" in msg.lower() or "error" in msg.lower()) else "ok"
 
     return {"ok": True, "output": msg, "level": level, "pending": False, "validated": False}
+
+
+@app.post("/api/discard")
+def api_discard_changes():
+    snap = read_applied_cfg_snapshot()
+    if not snap:
+        raise HTTPException(status_code=409, detail="No applied config snapshot found yet.")
+
+    # Restore saved config to last applied snapshot.
+    save_cfg(snap)
+    set_applied_state(snap)
+
+    return {"ok": True, "pending": False}
 
 
 @app.post("/token/start")
@@ -1458,6 +1495,7 @@ def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile
     # Reason: if the imported config happens to match the last applied hash (or if hashes are missing),
     # the UI would not show the Apply reminder. Import should always be treated as "saved, not applied".
     try:
+        # Keep discard functionality safe: after an import, treat the last-applied snapshot as unknown.
         set_applied_hash("import_pending")
     except Exception:
         pass
