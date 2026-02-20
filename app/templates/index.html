@@ -572,6 +572,41 @@
       // updated elsewhere in refreshStatus
     }
 
+    function setUpdateChip(st){
+      const chip = document.getElementById('headerUpdateChip');
+      const txt = document.getElementById('headerUpdateText');
+      if (!chip || !txt) return;
+
+      const avail = !!(st && st.update_available);
+      chip.classList.toggle('hidden', !avail);
+      if (!avail) return;
+
+      let label = 'Update available';
+      if (st && st.latest_major) label = `Update available (v${st.latest_major}.x)`;
+      else if (st && st.latest_version) label = `Update available (${st.latest_version})`;
+      txt.textContent = label;
+
+      const url = (st && st.url) ? String(st.url) : '';
+      if (url) chip.setAttribute('href', url);
+    }
+
+    async function checkUpdateMaybe(){
+      // Major-only update check; run at most once per day per browser.
+      try {
+        const key = 'simple-m365-relay-update-check-ts';
+        const last = parseInt(localStorage.getItem(key) || '0', 10) || 0;
+        const now = Math.floor(Date.now() / 1000);
+        if ((now - last) < 86400) return;
+        localStorage.setItem(key, String(now));
+
+        const r = await fetch('/api/update', { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json();
+        setUpdateChip(j);
+        try { lucide.createIcons(); } catch(e) {}
+      } catch (e) {}
+    }
+
     function _formatFastApiDetail(detail){
       try {
         if (!Array.isArray(detail)) return null;
@@ -1215,6 +1250,7 @@
       initBackupImport();
       syncTokenExpiryFromDom();
       applyLogFilter();
+      checkUpdateMaybe();
     });
   </script>
 
@@ -1349,6 +1385,11 @@
               <span id="headerHealthDot" class="h-2 w-2 rounded-full {{ 'bg-emerald-500' if postfix_ok else 'bg-red-500' }}"></span>
               <span id="headerHealthText">{{ 'Postfix OK' if postfix_ok else 'Postfix not reachable' }}</span>
             </span>
+
+            <a id="headerUpdateChip" href="{{ APP_GITHUB_REPO_URL }}/releases/latest" target="_blank" rel="noopener" class="hidden inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-100 dark:border-violet-900/40 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-950/60" title="A newer MAJOR version is available">
+              <i data-lucide="arrow-up-right" class="h-3.5 w-3.5"></i>
+              <span id="headerUpdateText">Update available</span>
+            </a>
 
             <span id="headerPendingChip" class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm dark:border-amber-900/40 dark:bg-amber-950 dark:text-amber-200 {% if not pending %}hidden{% endif %}">
               <i data-lucide="triangle-alert" class="h-3.5 w-3.5"></i>
@@ -2075,7 +2116,7 @@
 
     <footer class="border-t border-slate-200 bg-white/60 py-6 dark:border-slate-800 dark:bg-slate-950/40">
       <div class="mx-auto flex max-w-7xl flex-col gap-3 px-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8 dark:text-slate-400">
-        <div>Made with ❤️ — Simple M365 Relay</div>
+        <div>Made with ❤️ — Simple M365 Relay <span class="opacity-70">v{{ APP_VERSION }}</span></div>
         <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
           <a class="inline-flex items-center gap-1 font-semibold text-slate-600 hover:underline dark:text-slate-300" href="https://github.com/LickABrick/simple-m365-relay" target="_blank" rel="noopener">
             <i data-lucide="github" class="h-3.5 w-3.5"></i>

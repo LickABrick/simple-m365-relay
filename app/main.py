@@ -20,7 +20,19 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
+# App metadata
+APP_VERSION = (os.environ.get("APP_VERSION") or "").strip() or "0.0.0"
+APP_GITHUB_REPO = (os.environ.get("APP_GITHUB_REPO") or "LickABrick/simple-m365-relay").strip()
+APP_GITHUB_REPO_URL = f"https://github.com/{APP_GITHUB_REPO}"
+
+# Update check (major-only)
+UPDATE_CACHE_PATH = DATA_DIR / "state" / "update_check.json"
+UPDATE_CHECK_TTL_SECONDS = int(os.environ.get("UPDATE_CHECK_TTL_SECONDS") or "43200")  # 12h
+
 templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
+templates.env.globals["APP_VERSION"] = APP_VERSION
+templates.env.globals["APP_GITHUB_REPO_URL"] = APP_GITHUB_REPO_URL
+
 app = FastAPI(title="Simple M365 Relay")
 app.mount("/static", StaticFiles(directory="/opt/ms365-relay/app/static"), name="static")
 
@@ -1609,6 +1621,111 @@ def api_testmail(
         "apply": apply_out,
         "note": "OK means queued/accepted locally; check Mail Log / queue for delivery.",
     }
+
+
+def _semver_major(v: str) -> Optional[int]:
+    s = str(v or "").strip()
+    if s.startswith("v"):
+        s = s[1:]
+    # Extract first x.y.z occurrence (tolerates suffixes like -dev)
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", s)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _read_update_cache() -> Optional[dict]:
+    try:
+        if UPDATE_CACHE_PATH.exists():
+            return json.loads(UPDATE_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return None
+
+
+def _write_update_cache(obj: dict) -> None:
+    try:
+        UPDATE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        UPDATE_CACHE_PATH.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _fetch_latest_stable_release() -> dict:
+    """Fetch GitHub latest stable release info.
+
+    Uses the public API endpoint that excludes prereleases.
+    """
+    import urllib.request
+
+    url = f"https://api.github.com/repos/{APP_GITHUB_REPO}/releases/latest"
+    req = urllib.request.Request(url)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("User-Agent", "simple-m365-relay-ui")
+    with urllib.request.urlopen(req, timeout=6) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    return json.loads(raw)
+
+
+def get_update_status_major_only() -> dict:
+    """Return update status (major updates only, no RC/prerelease).
+
+    Cached on disk so the UI can poll without hitting GitHub frequently.
+    """
+    now = int(time.time())
+    cached = _read_update_cache() or {}
+    checked_at = int(cached.get("checked_at") or 0)
+
+    if checked_at and (now - checked_at) < max(60, UPDATE_CHECK_TTL_SECONDS):
+        # Ensure required fields exist
+        cached.setdefault("ok", True)
+        cached.setdefault("major_only", True)
+        cached.setdefault("current_version", APP_VERSION)
+        cached.setdefault("repo_url", APP_GITHUB_REPO_URL)
+        return cached
+
+    out = {
+        "ok": True,
+        "major_only": True,
+        "checked_at": now,
+        "current_version": APP_VERSION,
+        "current_major": _semver_major(APP_VERSION),
+        "repo_url": APP_GITHUB_REPO_URL,
+        "update_available": False,
+        "latest_version": None,
+        "latest_major": None,
+        "url": APP_GITHUB_REPO_URL + "/releases/latest",
+    }
+
+    try:
+        rel = _fetch_latest_stable_release() or {}
+        tag = str(rel.get("tag_name") or "").strip()
+        html_url = str(rel.get("html_url") or "").strip()
+        latest_major = _semver_major(tag)
+
+        out["latest_version"] = tag
+        out["latest_major"] = latest_major
+        if html_url:
+            out["url"] = html_url
+
+        cm = out.get("current_major")
+        if (cm is not None) and (latest_major is not None) and (latest_major > cm):
+            out["update_available"] = True
+    except Exception as e:
+        # Best-effort: never fail the UI
+        out["ok"] = False
+        out["error"] = f"{type(e).__name__}"
+
+    _write_update_cache(out)
+    return out
+
+
+@app.get("/api/update")
+def api_update():
+    return get_update_status_major_only()
 
 
 @app.get("/api/status")
