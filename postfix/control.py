@@ -627,9 +627,11 @@ def start_device_flow_background() -> None:
                 f.write(f"\n[exit {proc.returncode}]\n")
 
             # If token was created/updated, ensure Postfix can read it.
+            # Also flush the queue so previously deferred messages retry immediately.
             try:
                 if proc.returncode == 0 and Path(tok_path).exists():
                     _fix_token_perms(tok_path)
+                    sh(["postqueue", "-f"], check=False)
             except Exception:
                 pass
         finally:
@@ -769,8 +771,14 @@ class H(BaseHTTPRequestHandler):
             from_addr = (body.get("from_addr") or "").strip()
             subject = (body.get("subject") or "Test message").strip()
             mail_body = body.get("body") or "Does it work?"
-            if not to_addr or not from_addr:
-                return self._json(400, {"error": "missing to_addr/from_addr"})
+            if not to_addr:
+                return self._json(400, {"error": "missing to_addr"})
+            if not from_addr:
+                # fallback to configured MS365 identity
+                cfg = load_cfg()
+                from_addr = _ms365_user(cfg)
+            if not from_addr:
+                return self._json(400, {"error": "missing from_addr (and no MS365_SMTP_USER configured)"})
             try:
                 out = send_test_mail(to_addr, from_addr, subject, mail_body)
             except Exception as e:

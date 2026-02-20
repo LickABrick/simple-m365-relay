@@ -4,6 +4,13 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.2-rc.3] - 2026-02-20
+
+### Fixed
+- OAuth apply: render `/etc/sasl-xoauth2.conf` on apply/reload so onboarding OAuth settings work without container restart.
+- Token device flow: flush Postfix queue after successful token creation (reduces “stuck until restart” reports).
+- Test Mail: allow blank From (fallback to configured MS365 identity) and normalize confusing sendmail DSN output to `queued`.
+
 ## [1.1.2-rc.2] - 2026-02-19
 
 ### Fixed

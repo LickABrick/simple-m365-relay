@@ -183,6 +183,10 @@ def main():
 
     ms365_user = os.environ.get("MS365_SMTP_USER", "").strip() or str((cfg or {}).get("ms365_smtp_user") or "").strip()
 
+    oauth = (cfg or {}).get("oauth") or {}
+    tenant_id = str(oauth.get("tenant_id") or os.environ.get("MS365_TENANT_ID") or "").strip()
+    client_id = str(oauth.get("client_id") or os.environ.get("MS365_CLIENT_ID") or "").strip()
+
     if ms365_user:
         outbound_sasl_block = "\n".join(
             [
@@ -208,6 +212,30 @@ def main():
     )
     (outdir / "main.cf").write_text(main_cf, encoding="utf-8")
     (outdir / "master.cf").write_text(MASTER_CF.format(tls_25=tls_25, tls_587=tls_587), encoding="utf-8")
+
+    # Render sasl-xoauth2 config so OAuth settings take effect without container restart.
+    # (The sasl-xoauth2 plugin reads this file at runtime.)
+    sx_path = os.environ.get("SASL_XOAUTH2_CONFIG", "/etc/sasl-xoauth2.conf")
+    try:
+        sxp = Path(sx_path)
+        if tenant_id and client_id:
+            cfg_obj = {
+                "client_id": client_id,
+                "client_secret": "",
+                "token_endpoint": f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+                "log_full_trace_on_failure": os.environ.get("OAUTH_LOG_FULL_TRACE", "no"),
+                "log_to_syslog_on_failure": os.environ.get("OAUTH_LOG_TO_SYSLOG", "yes"),
+            }
+            sxp.write_text(json.dumps(cfg_obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        else:
+            # Avoid keeping stale config around on fresh installs.
+            try:
+                sxp.unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception:
+        # Best-effort only
+        pass
 
     # Outbound xoauth2 token file mapping
     sasl_passwd = outdir / "sasl_passwd"
