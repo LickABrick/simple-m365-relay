@@ -25,7 +25,7 @@ APP_VERSION = (os.environ.get("APP_VERSION") or "").strip() or "0.0.0"
 APP_GITHUB_REPO = (os.environ.get("APP_GITHUB_REPO") or "LickABrick/simple-m365-relay").strip()
 APP_GITHUB_REPO_URL = f"https://github.com/{APP_GITHUB_REPO}"
 
-# Update check (major-only)
+# Update check (stable latest; ignore prereleases/RCs)
 UPDATE_CACHE_PATH = DATA_DIR / "state" / "update_check.json"
 UPDATE_CHECK_TTL_SECONDS = int(os.environ.get("UPDATE_CHECK_TTL_SECONDS") or "43200")  # 12h
 
@@ -1623,16 +1623,16 @@ def api_testmail(
     }
 
 
-def _semver_major(v: str) -> Optional[int]:
+def _semver_tuple(v: str) -> Optional[tuple]:
+    """Parse x.y.z from a string (tolerates leading v and suffixes like -rc.1)."""
     s = str(v or "").strip()
     if s.startswith("v"):
         s = s[1:]
-    # Extract first x.y.z occurrence (tolerates suffixes like -dev)
     m = re.search(r"(\d+)\.(\d+)\.(\d+)", s)
     if not m:
         return None
     try:
-        return int(m.group(1))
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
     except Exception:
         return None
 
@@ -1670,8 +1670,8 @@ def _fetch_latest_stable_release() -> dict:
     return json.loads(raw)
 
 
-def get_update_status_major_only() -> dict:
-    """Return update status (major updates only, no RC/prerelease).
+def get_update_status() -> dict:
+    """Return update status (any newer STABLE release; ignore RC/prerelease).
 
     Cached on disk so the UI can poll without hitting GitHub frequently.
     """
@@ -1680,23 +1680,24 @@ def get_update_status_major_only() -> dict:
     checked_at = int(cached.get("checked_at") or 0)
 
     if checked_at and (now - checked_at) < max(60, UPDATE_CHECK_TTL_SECONDS):
-        # Ensure required fields exist
         cached.setdefault("ok", True)
-        cached.setdefault("major_only", True)
+        cached.setdefault("policy", "stable")
         cached.setdefault("current_version", APP_VERSION)
         cached.setdefault("repo_url", APP_GITHUB_REPO_URL)
         return cached
 
+    cur = _semver_tuple(APP_VERSION)
+
     out = {
         "ok": True,
-        "major_only": True,
+        "policy": "stable",
         "checked_at": now,
         "current_version": APP_VERSION,
-        "current_major": _semver_major(APP_VERSION),
+        "current_semver": cur,
         "repo_url": APP_GITHUB_REPO_URL,
         "update_available": False,
         "latest_version": None,
-        "latest_major": None,
+        "latest_semver": None,
         "url": APP_GITHUB_REPO_URL + "/releases/latest",
     }
 
@@ -1704,18 +1705,16 @@ def get_update_status_major_only() -> dict:
         rel = _fetch_latest_stable_release() or {}
         tag = str(rel.get("tag_name") or "").strip()
         html_url = str(rel.get("html_url") or "").strip()
-        latest_major = _semver_major(tag)
+        latest = _semver_tuple(tag)
 
         out["latest_version"] = tag
-        out["latest_major"] = latest_major
+        out["latest_semver"] = latest
         if html_url:
             out["url"] = html_url
 
-        cm = out.get("current_major")
-        if (cm is not None) and (latest_major is not None) and (latest_major > cm):
+        if cur and latest and latest > cur:
             out["update_available"] = True
     except Exception as e:
-        # Best-effort: never fail the UI
         out["ok"] = False
         out["error"] = f"{type(e).__name__}"
 
@@ -1725,7 +1724,7 @@ def get_update_status_major_only() -> dict:
 
 @app.get("/api/update")
 def api_update():
-    return get_update_status_major_only()
+    return get_update_status()
 
 
 @app.get("/api/status")

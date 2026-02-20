@@ -582,8 +582,7 @@
       if (!avail) return;
 
       let label = 'Update available';
-      if (st && st.latest_major) label = `Update available (v${st.latest_major}.x)`;
-      else if (st && st.latest_version) label = `Update available (${st.latest_version})`;
+      if (st && st.latest_version) label = `Update available (${st.latest_version})`;
       txt.textContent = label;
 
       const url = (st && st.url) ? String(st.url) : '';
@@ -591,7 +590,7 @@
     }
 
     async function checkUpdateMaybe(){
-      // Major-only update check; run at most once per day per browser.
+      // Update check (stable only, ignores prereleases/RCs); run at most once per day per browser.
       try {
         const key = 'simple-m365-relay-update-check-ts';
         const last = parseInt(localStorage.getItem(key) || '0', 10) || 0;
@@ -1386,7 +1385,7 @@
               <span id="headerHealthText">{{ 'Postfix OK' if postfix_ok else 'Postfix not reachable' }}</span>
             </span>
 
-            <a id="headerUpdateChip" href="{{ APP_GITHUB_REPO_URL }}/releases/latest" target="_blank" rel="noopener" class="hidden inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-100 dark:border-violet-900/40 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-950/60" title="A newer MAJOR version is available">
+            <a id="headerUpdateChip" href="{{ APP_GITHUB_REPO_URL }}/releases/latest" target="_blank" rel="noopener" class="hidden inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-100 dark:border-violet-900/40 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-950/60" title="A newer stable version is available">
               <i data-lucide="arrow-up-right" class="h-3.5 w-3.5"></i>
               <span id="headerUpdateText">Update available</span>
             </a>
