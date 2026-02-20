@@ -67,11 +67,14 @@ def cmd_admin_reset(args: argparse.Namespace) -> int:
 
     # Optionally wipe pending/applied state
     if args.wipe_state:
-        try:
-            if main.APPLIED_HASH_PATH.exists():
-                main.APPLIED_HASH_PATH.unlink()
-        except Exception as e:
-            print(f"WARN: could not delete {main.APPLIED_HASH_PATH}: {e}", file=sys.stderr)
+        for p in (main.APPLIED_HASH_PATH, getattr(main, 'APPLIED_CFG_PATH', None)):
+            if not p:
+                continue
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception as e:
+                print(f"WARN: could not delete {p}: {e}", file=sys.stderr)
 
     print("OK: admin reset. Next web request should redirect to /setup.")
     return 0
@@ -116,7 +119,10 @@ def cmd_apply(args: argparse.Namespace) -> int:
     out = main.render_and_reload()
 
     cfg = main.load_cfg()
-    main.set_applied_hash(main.cfg_hash(cfg))
+    try:
+        main.set_applied_state(cfg)
+    except Exception:
+        main.set_applied_hash(main.cfg_hash(cfg))
 
     msg = (out or "ok").strip() or "ok"
     print(msg)
