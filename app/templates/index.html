@@ -1077,10 +1077,32 @@
         const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         const r = await apiFetch('/api/testmail', { method: 'POST', body: data });
         const j = await r.json();
-        const out = (j.output || '').trim() || 'ok';
+
+        let out = (j.output || '').trim() || 'ok';
+
+        // Append verify info (best-effort)
+        if (j.queue_id) {
+          out += `\n\nQueue-ID: ${j.queue_id}`;
+        }
+        if (j.delivery && j.delivery.state) {
+          out += `\nVerify: ${j.delivery.state}`;
+          if (j.delivery.line) out += `\n${j.delivery.line}`;
+        }
+
         const pre = document.getElementById('testmailOut');
         if (pre) pre.textContent = out;
-        showToast(out.length > 120 ? (out.slice(0,120) + '…') : out, j.level === 'error' ? 'error' : 'ok');
+
+        let toastMsg = out;
+        if (j.delivery && j.delivery.state) {
+          const st = String(j.delivery.state);
+          if (st === 'sent') toastMsg = 'Sent (verified).';
+          else if (st === 'queued') toastMsg = 'Queued (not delivered yet).';
+          else if (st === 'deferred') toastMsg = 'Deferred (delivery failed for now).';
+          else if (st === 'bounced') toastMsg = 'Bounced.';
+          else if (st === 'rejected') toastMsg = 'Rejected.';
+        }
+
+        showToast(toastMsg.length > 140 ? (toastMsg.slice(0,140) + '…') : toastMsg, j.level === 'error' ? 'error' : 'ok');
         await refreshStatus();
       } catch (e) {
         showToast('Send test mail failed.', 'error');
@@ -1198,8 +1220,12 @@
         if (!r.ok) {
           let msg = 'Discard failed.';
           if (j && j.detail) {
-            const nice = _formatFastApiDetail(j.detail);
-            msg = 'Discard failed: ' + (nice || JSON.stringify(j.detail));
+            if (typeof j.detail === 'string') {
+              msg = 'Discard failed: ' + j.detail;
+            } else {
+              const nice = _formatFastApiDetail(j.detail);
+              msg = 'Discard failed: ' + (nice || JSON.stringify(j.detail));
+            }
           }
           showToast(msg, 'error');
           return;
@@ -1877,12 +1903,19 @@
             </div>
           </div>
 
+          <!-- Suggestions sourced from SMTP AUTH users -->
+          <datalist id="smtpUsersDatalist">
+            {% for u in (users_list or []) %}
+              <option value="{{ u }}"></option>
+            {% endfor %}
+          </datalist>
+
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <form id="fromAllowForm" method="post" action="/from/allow" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Add allowed From</div>
-              <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same login again to add more From addresses.</div>
-              <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same SMTP user again to add more From addresses.</div>
+              <input name="login" list="smtpUsersDatalist" placeholder="SMTP user (login)" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
               <textarea name="from_addr" rows="3" placeholder="from1@example.com&#10;from2@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900"></textarea>
               <div class="text-xs text-slate-500 dark:text-slate-400">Enter one address per line (or comma/space separated).</div>
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
@@ -1895,7 +1928,7 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Set fallback From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Stored per SMTP AUTH user (login). Used when clients don’t specify a From address.</div>
-              <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <input name="login" list="smtpUsersDatalist" placeholder="SMTP user (login)" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
               <input name="from_addr" placeholder="fallback-from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="pin" class="h-4 w-4"></i>

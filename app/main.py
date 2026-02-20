@@ -547,6 +547,98 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         return _normalize_testmail_output(out) or "queued"
 
 
+_QUEUE_ID_RE = re.compile(r"queued as\s+([A-Z0-9]{5,})", re.IGNORECASE)
+
+
+def extract_queue_id_best_effort(sendmail_out: str) -> Optional[str]:
+    """Extract the Postfix queue ID from sendmail -v output."""
+    txt = (sendmail_out or "").strip()
+    if not txt:
+        return None
+
+    # Search line-by-line for stability.
+    for ln in txt.splitlines():
+        m = _QUEUE_ID_RE.search(ln)
+        if m:
+            return m.group(1).strip().upper()
+
+    # Fallback: search in entire blob.
+    m = _QUEUE_ID_RE.search(txt)
+    if m:
+        return m.group(1).strip().upper()
+
+    return None
+
+
+def _delivery_state_from_line(line: str) -> Optional[str]:
+    ll = (line or "").lower()
+    if "status=sent" in ll:
+        return "sent"
+    if "status=deferred" in ll:
+        return "deferred"
+    if "status=bounced" in ll:
+        return "bounced"
+    if "status=reject" in ll or "reject:" in ll:
+        return "rejected"
+    return None
+
+
+def verify_delivery_best_effort(queue_id: str, max_wait_seconds: int = 8) -> dict:
+    """Best-effort delivery verification.
+
+    We look for the queue id in recent maillog lines and in mailq.
+    This is inherently heuristic.
+    """
+    qid = (queue_id or "").strip().upper()
+    if not qid:
+        return {"queue_id": None, "state": "unknown"}
+
+    last_line = ""
+    last_state = "unknown"
+    in_queue = None
+
+    for i in range(max(1, int(max_wait_seconds))):
+        try:
+            mail_log = _redact_mail_log((_control_get("/maillog").get("maillog") or ""))
+        except Exception:
+            mail_log = ""
+
+        try:
+            mailq = str((_control_get("/mailq").get("mailq") or ""))
+        except Exception:
+            mailq = ""
+
+        in_queue = (qid in mailq)
+
+        # Find the most recent log line referencing the queue id.
+        lines = [ln for ln in (mail_log or "").splitlines() if qid in ln]
+        if lines:
+            last_line = lines[-1]
+            st = _delivery_state_from_line(last_line)
+            if st:
+                last_state = st
+
+        if last_state in ("sent", "bounced", "rejected"):
+            break
+
+        if in_queue:
+            last_state = "queued"
+        elif last_state == "unknown" and last_line:
+            # We saw it in logs but couldn't classify.
+            last_state = "seen"
+
+        # Wait for log/queue to update.
+        if i < max_wait_seconds - 1:
+            time.sleep(1)
+
+    return {
+        "queue_id": qid,
+        "state": last_state,
+        "in_queue": in_queue,
+        "line": last_line,
+    }
+
+
 def start_device_flow_background() -> None:
     # Delegate to postfix control API
     _control_post("/token/start")
@@ -1626,7 +1718,8 @@ def _ensure_applied_best_effort() -> str:
         pending = (applied_hash is None) or (current_hash != applied_hash)
         if pending:
             out = render_and_reload()
-            set_applied_hash(current_hash)
+            # Mark the saved config as applied (+ snapshot for discard)
+            set_applied_state(cfg)
             return (out or "ok").strip() or "ok"
     except Exception as e:
         return f"apply_error:{type(e).__name__}"
@@ -1639,6 +1732,7 @@ def api_testmail(
     from_addr: str = Form(""),
     subject: str = Form("Test"),
     body: str = Form("Does it work?"),
+    verify: str = Form("1"),
 ):
     apply_out = _ensure_applied_best_effort()
     out = send_test_mail(to_addr, from_addr, subject, body)
@@ -1648,16 +1742,36 @@ def api_testmail(
     ok = True
     if not msg:
         msg = "queued"
+
     if ("sendmail exit" in msg.lower()) or ("error" in msg.lower()) or ("apply_error" in apply_out.lower()):
         ok = False
 
-    level = "ok" if ok else "error"
+    qid = extract_queue_id_best_effort(msg)
+
+    do_verify = str(verify or "").strip().lower() not in ("0", "false", "no", "off")
+    delivery = None
+    if ok and do_verify and qid:
+        delivery = verify_delivery_best_effort(qid, max_wait_seconds=8)
+
+    # Determine toast severity
+    level = "ok"
+    if not ok:
+        level = "error"
+    elif delivery and delivery.get("state") in ("deferred", "bounced", "rejected"):
+        level = "error"
+
+    note = "OK means queued/accepted locally; check Mail Log / queue for delivery."
+    if delivery and delivery.get("state") == "sent":
+        note = "Verified: message was sent upstream (status=sent in mail log)."
+
     return {
         "ok": ok,
         "output": msg,
         "level": level,
         "apply": apply_out,
-        "note": "OK means queued/accepted locally; check Mail Log / queue for delivery.",
+        "queue_id": qid,
+        "delivery": delivery,
+        "note": note,
     }
 
 
