@@ -852,7 +852,7 @@
               <div class="text-sm font-semibold mono">${uu}</div>
             </div>
             <div class="col-span-12 sm:col-span-4 flex justify-end">
-              <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/40" title="Delete user" onclick="usersDeleteInline('${uu}')">
+              <button type="button" data-action="user-delete" data-login="${uu}" class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/40" title="Delete user">
                 <i data-lucide="trash-2" class="h-4 w-4"></i>
                 Delete
               </button>
@@ -902,7 +902,15 @@
         const data = new FormData();
         data.set('login', ll);
         const r = await apiFetch('/api/users/delete', { method: 'POST', body: data });
-        const j = await r.json();
+        let j = null;
+        try { j = await r.json(); } catch(e) {}
+
+        if (!r.ok) {
+          const msg = (j && j.error) ? ('Delete failed: ' + j.error) : 'Failed to delete user.';
+          showToast(msg, 'error');
+          return;
+        }
+
         if (j && j.ok) {
           showToast('User deleted.', 'ok');
           if (typeof j.users_list !== 'undefined') _renderUsersTable(j.users_list);
@@ -967,7 +975,7 @@
               const aa = _escapeHtml(a);
               const ll = _escapeHtml(login);
               return `
-                <button type="button" class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Click to remove" onclick="disallowFrom('${ll}','${aa}')">
+                <button type="button" data-action="from-disallow" data-login="${ll}" data-from="${aa}" class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Click to remove">
                   <i data-lucide="x" class="h-3.5 w-3.5"></i>
                   <span class="mono">${aa}</span>
                 </button>`;
@@ -1148,6 +1156,14 @@
           const fd = new FormData(form);
           usersDeleteInline(fd.get('login') || '');
         }, true);
+
+        // Safe click handler for dynamically-rendered rows (no inline onclick)
+        container.addEventListener('click', (e) => {
+          const btn = e.target?.closest?.('button[data-action="user-delete"]');
+          if (!btn) return;
+          e.preventDefault();
+          usersDeleteInline(btn.getAttribute('data-login') || '');
+        }, true);
       }
     }
 
@@ -1157,7 +1173,6 @@
       const d = document.getElementById('defaultFromForm');
       if (d) d.addEventListener('submit', (e) => { e.preventDefault(); defaultFromNoReload(); });
 
-      // disallow handled via onclick buttons after we render (and initial HTML still has forms, but those will submit normally).
       // To prevent page reload on initial-render disallow forms, intercept submit events in the senders section.
       const container = document.getElementById('senders');
       if (container) {
@@ -1169,6 +1184,14 @@
           e.preventDefault();
           const fd = new FormData(form);
           disallowFrom(fd.get('login') || '', fd.get('from_addr') || '');
+        }, true);
+
+        // Safe click handler for dynamically-rendered disallow chips (no inline onclick)
+        container.addEventListener('click', (e) => {
+          const btn = e.target?.closest?.('button[data-action="from-disallow"]');
+          if (!btn) return;
+          e.preventDefault();
+          disallowFrom(btn.getAttribute('data-login') || '', btn.getAttribute('data-from') || '');
         }, true);
       }
     }

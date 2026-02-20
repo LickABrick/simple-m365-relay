@@ -105,6 +105,11 @@ APPLIED_CFG_PATH = DATA_DIR / "state" / "applied_config.json"
 def save_cfg(cfg: Dict[str, Any]) -> None:
     CFG_JSON.parent.mkdir(parents=True, exist_ok=True)
     CFG_JSON.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Best-effort perms hardening
+    try:
+        os.chmod(CFG_JSON, 0o600)
+    except Exception:
+        pass
 
 
 def cfg_hash(cfg: Dict[str, Any]) -> str:
@@ -368,9 +373,22 @@ def _unix_http_json(method: str, path: str, body: bytes = b"", headers: Optional
             status = int(status_line.split()[1])
         except Exception:
             status = 0
+        try:
+            payload = json.loads(body_bytes.decode("utf-8"))
+        except Exception:
+            payload = {"_raw": body_bytes.decode("utf-8", errors="replace")}
+
         if status >= 400:
-            raise RuntimeError(f"control api error HTTP {status}")
-        return json.loads(body_bytes.decode("utf-8"))
+            # Preserve error details from the control API when possible.
+            err = None
+            if isinstance(payload, dict):
+                err = payload.get("error") or payload.get("detail")
+            msg = f"control api error HTTP {status}"
+            if err:
+                msg += f": {err}"
+            raise RuntimeError(msg)
+
+        return payload
     finally:
         try:
             s.close()
@@ -481,12 +499,9 @@ def list_users_raw() -> str:
 
 
 def parse_sasl_users(text: str) -> list[str]:
-    # sasldblistusers2 output looks like:
-    #   user@example.internal: userPassword
-    # On errors it may print lines like:
-    #   listusers failed
-    #   BDB0004 fop_read_meta ...
-    # Filter strictly to avoid showing error text as "users".
+    # Dovecot passwd-file (or sasldblistusers2 legacy) output looks like:
+    #   user@example.internal: ...
+    # Filter strictly to avoid showing error text or weird entries as "users".
     out: list[str] = []
     for ln in (text or "").splitlines():
         ln = ln.strip()
@@ -497,7 +512,12 @@ def parse_sasl_users(text: str) -> list[str]:
         name = ln.split(":", 1)[0].strip()
         if not name or any(ch.isspace() for ch in name):
             continue
-        out.append(name)
+        try:
+            name2 = _validate_login(name)
+        except Exception:
+            continue
+        out.append(name2)
+
     # stable unique
     seen = set()
     uniq = []
@@ -1277,14 +1297,36 @@ def api_users_list():
 
 @app.post("/api/users/add")
 def api_users_add(login: str = Form(...), password: str = Form(...)):
-    ensure_user(login.strip(), password)
+    try:
+        login2 = _validate_login(login)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e) or "invalid login")
+
+    pw = str(password or "")
+    if not pw:
+        raise HTTPException(status_code=400, detail="missing password")
+
+    try:
+        ensure_user(login2, pw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     raw = list_users_raw()
     return {"ok": True, "users": raw, "users_list": parse_sasl_users(raw)}
 
 
 @app.post("/api/users/delete")
 def api_users_delete(login: str = Form(...)):
-    delete_user(login.strip())
+    try:
+        login2 = _validate_login(login)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e) or "invalid login")
+
+    try:
+        delete_user(login2)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     raw = list_users_raw()
     return {"ok": True, "users": raw, "users_list": parse_sasl_users(raw)}
 

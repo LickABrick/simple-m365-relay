@@ -67,6 +67,16 @@ jobs:
           # Accept both v1.2.3 and 1.2.3
           ver_no_v="${ver#v}"
 
+          # Validate version input (prevent newline/whitespace/tag injection)
+          if [[ "$ver_no_v" =~ [[:space:]] ]] || [[ "$ver_no_v" == *$'\n'* ]] || [[ "$ver_no_v" == *$'\r'* ]]; then
+            echo "Invalid version (whitespace/newlines not allowed): $ver_no_v" >&2
+            exit 1
+          fi
+          if [[ ! "$ver_no_v" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+            echo "Invalid version (expected semver): $ver_no_v" >&2
+            exit 1
+          fi
+
           sha_short="${GITHUB_SHA::7}"
 
           owner_lc="${{ github.repository_owner }}"
