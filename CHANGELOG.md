@@ -4,6 +4,11 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.2-rc.5] - 2026-02-20
+
+### Fixed
+- UX: clearer validation error when Allowed From is submitted without a From address (instead of raw 422 JSON).
+
 ## [1.1.2-rc.4] - 2026-02-20
 
 ### Fixed
