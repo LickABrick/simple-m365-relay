@@ -1092,7 +1092,9 @@
       } catch (e) {
         showToast(o.validateOnly ? 'Validation failed.' : 'Apply failed.', 'error');
       } finally {
-        // keep disabled state correct after refreshStatus
+        // Re-enable buttons; whether Apply should be used is driven by pending state.
+        if (btn) btn.disabled = false;
+        if (vbtn) vbtn.disabled = false;
       }
     }
 
