@@ -4,6 +4,11 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.2-rc.4] - 2026-02-20
+
+### Fixed
+- UI: Apply/Validate buttons no longer get stuck disabled after AJAX apply/validate.
+
 ## [1.1.2-rc.3] - 2026-02-20
 
 ### Fixed
