@@ -572,6 +572,27 @@
       // updated elsewhere in refreshStatus
     }
 
+    function _formatFastApiDetail(detail){
+      try {
+        if (!Array.isArray(detail)) return null;
+        const missing = [];
+        for (const d of detail) {
+          if (!d) continue;
+          if (String(d.type || '') === 'missing') {
+            const loc = Array.isArray(d.loc) ? d.loc : [];
+            const field = loc.length ? String(loc[loc.length - 1]) : null;
+            if (field) missing.push(field);
+          }
+        }
+        if (missing.length) {
+          // Stable unique
+          const uniq = [...new Set(missing)];
+          return 'Missing required field: ' + uniq.join(', ');
+        }
+      } catch(e) {}
+      return null;
+    }
+
     async function saveSettingsNoReload(){
       const form = document.getElementById('settingsForm');
       if (!form) return;
@@ -583,7 +604,11 @@
         try { j = await r.json(); } catch(e) {}
 
         if (!r.ok) {
-          const msg = (j && j.detail) ? ('Save failed: ' + JSON.stringify(j.detail)) : 'Save failed.';
+          let msg = 'Save failed.';
+          if (j && j.detail) {
+            const nice = _formatFastApiDetail(j.detail);
+            msg = 'Save failed: ' + (nice || JSON.stringify(j.detail));
+          }
           showToast(msg, 'error');
           return;
         }
@@ -940,9 +965,32 @@
       if (!form) return;
       try {
         const data = new FormData(form);
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+        const login = String(data.get('login') || '').trim();
+        const fromAddr = String(data.get('from_addr') || '').trim();
+        if (!login) {
+          showToast('Please enter an SMTP user.', 'error');
+          return;
+        }
+        if (!fromAddr) {
+          showToast('Please enter at least one From address.', 'error');
+          return;
+        }
+
         const r = await apiFetch('/api/from/allow', { method: 'POST', body: data });
-        const j = await r.json();
+        let j = null;
+        try { j = await r.json(); } catch(e) {}
+
+        if (!r.ok) {
+          let msg = 'Save failed.';
+          if (j && j.detail) {
+            const nice = _formatFastApiDetail(j.detail);
+            msg = 'Save failed: ' + (nice || JSON.stringify(j.detail));
+          }
+          showToast(msg, 'error');
+          return;
+        }
+
         if (j && j.ok) {
           let msg = 'Saved (not applied). Click Apply Changes.';
           if ((j.added === 0) && (j.skipped > 0)) msg = 'No changes (addresses already allowed).';
@@ -1092,7 +1140,9 @@
       } catch (e) {
         showToast(o.validateOnly ? 'Validation failed.' : 'Apply failed.', 'error');
       } finally {
-        // keep disabled state correct after refreshStatus
+        // Re-enable buttons; whether Apply should be used is driven by pending state.
+        if (btn) btn.disabled = false;
+        if (vbtn) vbtn.disabled = false;
       }
     }
 
@@ -1752,7 +1802,7 @@
               <div class="text-sm font-semibold">Add allowed From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same login again to add more From addresses.</div>
               <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-              <textarea name="from_addr" rows="3" placeholder="from1@example.com\nfrom2@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900"></textarea>
+              <textarea name="from_addr" rows="3" placeholder="from1@example.com&#10;from2@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900"></textarea>
               <div class="text-xs text-slate-500 dark:text-slate-400">Enter one address per line (or comma/space separated).</div>
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="plus" class="h-4 w-4"></i>

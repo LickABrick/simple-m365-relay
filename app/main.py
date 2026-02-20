@@ -472,8 +472,22 @@ def parse_sasl_users(text: str) -> list[str]:
     return uniq
 
 
+def _normalize_testmail_output(out: str) -> str:
+    # sendmail sometimes returns a DSN-related line like:
+    #   "Mail Delivery Status Report will be mailed to <user@domain>"
+    # That is confusing in UI; treat it as queued.
+    txt = (out or "").strip()
+    if "Mail Delivery Status Report will be mailed to" in txt:
+        return "queued"
+    return txt
+
+
 def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str:
     import urllib.request, ssl
+
+    # Allow blank From in UI: fallback to configured MS365 identity.
+    if not (from_addr or "").strip():
+        from_addr = effective_ms365_user(load_cfg())
 
     payload = json.dumps({
         "to_addr": to_addr,
@@ -484,7 +498,7 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
 
     if POSTFIX_CONTROL_SOCKET:
         j = _unix_http_json("POST", "/testmail", body=payload, headers={"Content-Type": "application/json"}, timeout=20)
-        return j.get("output") or "ok"
+        return _normalize_testmail_output(j.get("output") or "") or "queued"
 
     req = urllib.request.Request(
         POSTFIX_CONTROL_URL + "/testmail",
@@ -493,7 +507,8 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         headers=_control_headers({"Content-Type": "application/json"}),
     )
     with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as r:
-        return json.loads(r.read().decode("utf-8")).get("output") or "ok"
+        out = json.loads(r.read().decode("utf-8")).get("output") or ""
+        return _normalize_testmail_output(out) or "queued"
 
 
 def start_device_flow_background() -> None:
@@ -626,7 +641,7 @@ def from_identities(cfg: Dict[str, Any], ms365_user: str) -> list[str]:
 
 
 def _is_public_path(path: str) -> bool:
-    if path in ("/login", "/logout", "/setup"):
+    if path in ("/login", "/logout", "/setup", "/healthz"):
         return True
     if path.startswith("/static"):
         return True
@@ -1525,7 +1540,7 @@ def testmail(
     request: Request,
     csrf_token: str = Form(""),
     to_addr: str = Form(...),
-    from_addr: str = Form(...),
+    from_addr: str = Form(""),
     subject: str = Form("Test"),
     body: str = Form("Does it work?"),
 ):
@@ -1533,9 +1548,10 @@ def testmail(
     require_csrf(request, csrf_token)
     from urllib.parse import quote
 
+    _ensure_applied_best_effort()
     out = send_test_mail(to_addr, from_addr, subject, body)
 
-    msg = (out or "ok").strip()
+    msg = (out or "queued").strip()
     if len(msg) > 600:
         msg = msg[:600] + "…"
 
@@ -1544,17 +1560,55 @@ def testmail(
     return RedirectResponse(url=f"/?toast={quote(msg)}&toastLevel={level}#testmail", status_code=303)
 
 
+def _ensure_applied_best_effort() -> str:
+    """Best-effort: ensure Postfix has current config rendered + reloaded.
+
+    Users can run the onboarding test-mail step before hitting Finish.
+    If config changes (e.g. ms365_smtp_user) haven't been applied yet,
+    Postfix may miss generated lmdb maps (e.g. sasl_passwd.lmdb) until a restart.
+
+    Returns a short status string ("ok" or output from render/reload).
+    """
+    try:
+        cfg = load_cfg()
+        current_hash = cfg_hash(cfg)
+        applied_hash = get_applied_hash()
+        pending = (applied_hash is None) or (current_hash != applied_hash)
+        if pending:
+            out = render_and_reload()
+            set_applied_hash(current_hash)
+            return (out or "ok").strip() or "ok"
+    except Exception as e:
+        return f"apply_error:{type(e).__name__}"
+    return "ok"
+
+
 @app.post("/api/testmail")
 def api_testmail(
     to_addr: str = Form(...),
-    from_addr: str = Form(...),
+    from_addr: str = Form(""),
     subject: str = Form("Test"),
     body: str = Form("Does it work?"),
 ):
+    apply_out = _ensure_applied_best_effort()
     out = send_test_mail(to_addr, from_addr, subject, body)
-    msg = (out or "ok").strip() or "ok"
-    level = "error" if "exit" in msg.lower() else "ok"
-    return {"ok": True, "output": msg, "level": level}
+
+    msg = (out or "").strip()
+
+    ok = True
+    if not msg:
+        msg = "queued"
+    if ("sendmail exit" in msg.lower()) or ("error" in msg.lower()) or ("apply_error" in apply_out.lower()):
+        ok = False
+
+    level = "ok" if ok else "error"
+    return {
+        "ok": ok,
+        "output": msg,
+        "level": level,
+        "apply": apply_out,
+        "note": "OK means queued/accepted locally; check Mail Log / queue for delivery.",
+    }
 
 
 @app.get("/api/status")
@@ -1633,6 +1687,13 @@ def _redact_mail_log(text: str) -> str:
         else:
             out_lines.append(ln)
     return "\n".join(out_lines)
+
+
+@app.get("/healthz")
+@app.head("/healthz")
+@app.options("/healthz")
+def healthz():
+    return PlainTextResponse("ok")
 
 
 @app.get("/favicon.ico")

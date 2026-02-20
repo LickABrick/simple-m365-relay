@@ -4,6 +4,36 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.2-rc.5] - 2026-02-20
+
+### Fixed
+- UX: clearer validation error when Allowed From is submitted without a From address (instead of raw 422 JSON).
+
+## [1.1.2-rc.4] - 2026-02-20
+
+### Fixed
+- UI: Apply/Validate buttons no longer get stuck disabled after AJAX apply/validate.
+
+## [1.1.2-rc.3] - 2026-02-20
+
+### Fixed
+- OAuth apply: render `/etc/sasl-xoauth2.conf` on apply/reload so onboarding OAuth settings work without container restart.
+- Token device flow: flush Postfix queue after successful token creation (reduces “stuck until restart” reports).
+- Test Mail: allow blank From (fallback to configured MS365 identity) and normalize confusing sendmail DSN output to `queued`.
+
+## [1.1.2-rc.2] - 2026-02-19
+
+### Fixed
+- UI: multi-line placeholder for Allowed From textarea now uses `&#10;` to avoid leading whitespace on line 2.
+
+## [1.1.2-rc.1] - 2026-02-19
+
+### Fixed
+- Inbound SMTP AUTH reliability: switch from Cyrus SASL/sasldb2 to Dovecot SASL (passwd-file) (issue #11).
+- Healthcheck endpoint: make `/healthz` public (no auth redirect) (issue #12).
+- Test Mail: apply config before sending + improved reporting semantics to avoid false OK (issue #8).
+- Rewrite locally-generated envelope senders (MAILER-DAEMON/postmaster) to the configured MS365 identity to avoid M365 SendAsDenied noise.
+
 ## [1.1.1] - 2026-02-18
 
 ### Fixed
