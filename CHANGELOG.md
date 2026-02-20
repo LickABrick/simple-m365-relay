@@ -4,6 +4,22 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.2] - 2026-02-20
+
+### Fixed
+- Inbound SMTP AUTH reliability: switch to Dovecot SASL (passwd-file) (issue #11).
+- Healthcheck endpoint: make `/healthz` public (issue #12).
+- OAuth apply: render `/etc/sasl-xoauth2.conf` on apply/reload so onboarding OAuth settings work without container restart.
+- Token device flow: flush Postfix queue after successful token creation.
+- Test Mail: allow blank From (fallback to configured MS365 identity) and normalize confusing sendmail DSN output to `queued` (issue #8).
+- UI: Apply/Validate buttons no longer get stuck disabled after AJAX apply/validate.
+- UX: clearer validation error when Allowed From is submitted without a From address (instead of raw 422 JSON).
+
+### Added
+- Dev outbound testing harness: `docker-compose.dev.mailhog.yml` (MailHog + smtpclient).
+
+---
+
 ## [1.1.2-rc.5] - 2026-02-20
 
 ### Fixed
@@ -102,6 +118,8 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[1.1.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.2
+[1.1.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.1
 [1.1.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.0
 [1.0.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.2
 [1.0.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.0.1
