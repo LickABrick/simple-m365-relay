@@ -649,11 +649,17 @@ def refresh_token_now() -> str:
 
 
 def get_device_flow_log() -> str:
-    return (_control_get("/device-flow-log").get("log") or "")
+    try:
+        return (_control_get("/device-flow-log").get("log") or "")
+    except Exception:
+        return ""
 
 
 def get_token_refresh_log() -> str:
-    return (_control_get("/token/refresh-log").get("log") or "")
+    try:
+        return (_control_get("/token/refresh-log").get("log") or "")
+    except Exception:
+        return ""
 
 
 def device_flow_log() -> str:
@@ -1012,9 +1018,18 @@ def index(request: Request):
         applied_hash = cfg_hash(cfg)
     pending = (current_hash != applied_hash)
 
-    mailq_out = (_control_get("/mailq").get("mailq") or "")
+    # Best-effort: dashboard should not 500 if postfix/control socket is still starting.
+    try:
+        mailq_out = (_control_get("/mailq").get("mailq") or "")
+    except Exception:
+        mailq_out = ""
     qsize = parse_queue_size(mailq_out)
-    mail_log = _redact_mail_log((_control_get("/maillog").get("maillog") or ""))
+
+    try:
+        mail_log_raw = (_control_get("/maillog").get("maillog") or "")
+    except Exception:
+        mail_log_raw = ""
+    mail_log = _redact_mail_log(mail_log_raw)
     warn_tail = _extract_recent_warnings(mail_log)
 
     ms365_user = effective_ms365_user(cfg)
@@ -1974,8 +1989,18 @@ def favicon_ico():
 def diagnostics_txt():
     # No secrets: we do NOT include token files, and we redact token-like content from logs.
     cfg = load_cfg()
-    mailq_out = (_control_get("/mailq").get("mailq") or "")
-    mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
+
+    # Best-effort: diagnostics should still render even if the postfix control API isn't reachable yet.
+    try:
+        mailq_out = (_control_get("/mailq").get("mailq") or "")
+    except Exception:
+        mailq_out = ""
+
+    try:
+        mail_log_raw = (_control_get("/maillog").get("maillog") or "")
+    except Exception:
+        mail_log_raw = ""
+    mail_log = _redact_mail_log(mail_log_raw)
 
     ms365_user = effective_ms365_user(cfg)
     token_exp_ts = None
