@@ -31,6 +31,40 @@ def _ensure_dovecot_readable(path: Path) -> None:
         pass
 
 
+def _has_ctl(s: str) -> bool:
+    return any((ord(ch) < 32) or (ord(ch) == 127) for ch in (s or ""))
+
+
+def _reject_ctl(s: str) -> str:
+    ss = str(s or "")
+    if _has_ctl(ss) or "\n" in ss or "\r" in ss or "\x00" in ss:
+        raise ValueError("invalid characters")
+    return ss
+
+
+def _validate_login(login: str) -> str:
+    import re
+
+    v = _reject_ctl(login).strip()
+    if not v or len(v) > 254:
+        raise ValueError("invalid login")
+    if re.search(r"\s", v):
+        raise ValueError("invalid login")
+    if not re.fullmatch(r"[A-Za-z0-9._%+\-@]+", v):
+        raise ValueError("invalid login")
+    return v
+
+
+def _validate_password(pw: str) -> str:
+    v = _reject_ctl(pw)
+    # Dovecot passwd-file is colon-separated. Keep it simple to avoid format ambiguity.
+    if ":" in v:
+        raise ValueError("invalid password")
+    if len(v) < 1 or len(v) > 200:
+        raise ValueError("invalid password")
+    return v
+
+
 def _write_dovecot_user(login: str, password: str) -> None:
     # Dovecot passwd-file format: user:{PLAIN}password
     p = _dovecot_users_path()
@@ -43,7 +77,10 @@ def _write_dovecot_user(login: str, password: str) -> None:
                 continue
             u, rest = ln.split(":", 1)
             users[u.strip()] = rest.strip()
-    users[login] = f"{{PLAIN}}{password}"
+    login2 = _validate_login(login)
+    pw2 = _validate_password(password)
+
+    users[login2] = f"{{PLAIN}}{pw2}"
 
     out = "".join(f"{u}:{rest}\n" for u, rest in sorted(users.items()))
     tmp = p.with_suffix(".tmp")
@@ -54,6 +91,7 @@ def _write_dovecot_user(login: str, password: str) -> None:
 
 
 def _delete_dovecot_user(login: str) -> None:
+    login = _validate_login(login)
     p = _dovecot_users_path()
     if not p.exists():
         return

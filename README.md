@@ -3,7 +3,7 @@
 Reusable Docker Compose stack that:
 
 - Listens on **25** and **587** (submission)
-- Accepts client mail with **SMTP AUTH** (Cyrus SASL `sasldb2`) and/or **trusted subnets** (`mynetworks`)
+- Accepts client mail with **SMTP AUTH** (Dovecot SASL `passwd-file`) and/or **trusted subnets** (`mynetworks`)
 - Relays outbound mail via **smtp.office365.com:587** using **XOAUTH2** (`sasl-xoauth2`)
 - Includes a web UI (FastAPI) for status + settings + OAuth device flow + user management
 - Persists configuration, SMTP AUTH DB, and OAuth tokens in a Docker volume 💾
@@ -112,6 +112,23 @@ docker compose up -d
 
 Open the UI and complete `/setup` + `/onboarding`.
 
+#### Healthcheck (UI)
+The UI exposes a public health endpoint:
+- `GET/HEAD/OPTIONS /healthz` → `200 OK`
+
+Example Docker healthcheck (inside the UI container):
+
+```yaml
+    healthcheck:
+      test: |
+        curl -ILkfs --max-time 3 http://localhost:8000/healthz > /dev/null \
+          || exit 1
+      start_period: 10s
+      interval: 30s
+      timeout: 20s
+      retries: 3
+```
+
 > Note: The images are published by GitHub Actions on **GitHub Releases** (not on every push). Use `:<version>` tags for releases (and `:sha-<shortsha>` for traceability).
 
 ### First login 🔐
@@ -178,7 +195,7 @@ Instead, the UI asks the internal Postfix control API for token expiry.
 
 ## UI capabilities ✨
 
-- **Manage SMTP AUTH users** (adds/removes entries in `sasldb2`)
+- **Manage SMTP AUTH users** (adds/removes entries in Dovecot `passwd-file`)
 - Configure:
   - `hostname`, `domain`
   - `mynetworks` (trusted subnets)
@@ -229,7 +246,7 @@ Admin reset details:
 A single named volume is used:
 
 - `/data/config/config.json` (UI settings)
-- `/data/sasl/sasldb2` (SMTP AUTH user DB)
+- `/data/sasl/users` (SMTP AUTH user DB; Dovecot passwd-file)
 - `/data/tokens/` (OAuth token files)
 - `/data/certs/` (TLS cert/key; self-signed by default)
 - `/data/state/` (UI/app state + logs)

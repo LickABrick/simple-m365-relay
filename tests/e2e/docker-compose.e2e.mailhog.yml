@@ -1,0 +1,22 @@
+services:
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    expose:
+      - "1025"
+
+  postfix:
+    environment:
+      RELAYHOST: "[mailhog]:1025"
+      RELAY_SMTP_TLS_SECURITY_LEVEL: "may"
+      MS365_SMTP_USER: ""
+      MS365_TENANT_ID: ""
+      MS365_CLIENT_ID: ""
+
+  e2e:
+    volumes:
+      - ./e2e_mailhog.py:/tests/e2e_mailhog.py:ro
+    command: ["sh","-lc","python -u e2e_mailhog.py"]
+    depends_on:
+      - ui
+      - mailhog

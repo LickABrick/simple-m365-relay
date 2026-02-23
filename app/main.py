@@ -20,7 +20,19 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
+# App metadata
+APP_VERSION = (os.environ.get("APP_VERSION") or "").strip() or "0.0.0"
+APP_GITHUB_REPO = (os.environ.get("APP_GITHUB_REPO") or "LickABrick/simple-m365-relay").strip()
+APP_GITHUB_REPO_URL = f"https://github.com/{APP_GITHUB_REPO}"
+
+# Update check (stable latest; ignore prereleases/RCs)
+UPDATE_CACHE_PATH = DATA_DIR / "state" / "update_check.json"
+UPDATE_CHECK_TTL_SECONDS = int(os.environ.get("UPDATE_CHECK_TTL_SECONDS") or "43200")  # 12h
+
 templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
+templates.env.globals["APP_VERSION"] = APP_VERSION
+templates.env.globals["APP_GITHUB_REPO_URL"] = APP_GITHUB_REPO_URL
+
 app = FastAPI(title="Simple M365 Relay")
 app.mount("/static", StaticFiles(directory="/opt/ms365-relay/app/static"), name="static")
 
@@ -87,11 +99,17 @@ def load_cfg() -> Dict[str, Any]:
 
 
 APPLIED_HASH_PATH = DATA_DIR / "state" / "applied.hash"
+APPLIED_CFG_PATH = DATA_DIR / "state" / "applied_config.json"
 
 
 def save_cfg(cfg: Dict[str, Any]) -> None:
     CFG_JSON.parent.mkdir(parents=True, exist_ok=True)
     CFG_JSON.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # Best-effort perms hardening
+    try:
+        os.chmod(CFG_JSON, 0o600)
+    except Exception:
+        pass
 
 
 def cfg_hash(cfg: Dict[str, Any]) -> str:
@@ -109,9 +127,32 @@ def get_applied_hash() -> Optional[str]:
     return None
 
 
+def _write_applied_cfg_snapshot(cfg: Dict[str, Any]) -> None:
+    try:
+        APPLIED_CFG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        APPLIED_CFG_PATH.write_text(json.dumps(cfg, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def read_applied_cfg_snapshot() -> Optional[Dict[str, Any]]:
+    try:
+        if APPLIED_CFG_PATH.exists():
+            return json.loads(APPLIED_CFG_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return None
+
+
 def set_applied_hash(h: str) -> None:
     APPLIED_HASH_PATH.parent.mkdir(parents=True, exist_ok=True)
     APPLIED_HASH_PATH.write_text((h or "") + "\n", encoding="utf-8")
+
+
+def set_applied_state(cfg: Dict[str, Any]) -> None:
+    # Persist both the hash and a snapshot so we can discard saved-but-not-applied changes later.
+    set_applied_hash(cfg_hash(cfg))
+    _write_applied_cfg_snapshot(cfg)
 
 
 def sh(cmd, check=True) -> subprocess.CompletedProcess:
@@ -332,9 +373,22 @@ def _unix_http_json(method: str, path: str, body: bytes = b"", headers: Optional
             status = int(status_line.split()[1])
         except Exception:
             status = 0
+        try:
+            payload = json.loads(body_bytes.decode("utf-8"))
+        except Exception:
+            payload = {"_raw": body_bytes.decode("utf-8", errors="replace")}
+
         if status >= 400:
-            raise RuntimeError(f"control api error HTTP {status}")
-        return json.loads(body_bytes.decode("utf-8"))
+            # Preserve error details from the control API when possible.
+            err = None
+            if isinstance(payload, dict):
+                err = payload.get("error") or payload.get("detail")
+            msg = f"control api error HTTP {status}"
+            if err:
+                msg += f": {err}"
+            raise RuntimeError(msg)
+
+        return payload
     finally:
         try:
             s.close()
@@ -445,12 +499,9 @@ def list_users_raw() -> str:
 
 
 def parse_sasl_users(text: str) -> list[str]:
-    # sasldblistusers2 output looks like:
-    #   user@example.internal: userPassword
-    # On errors it may print lines like:
-    #   listusers failed
-    #   BDB0004 fop_read_meta ...
-    # Filter strictly to avoid showing error text as "users".
+    # Dovecot passwd-file (or sasldblistusers2 legacy) output looks like:
+    #   user@example.internal: ...
+    # Filter strictly to avoid showing error text or weird entries as "users".
     out: list[str] = []
     for ln in (text or "").splitlines():
         ln = ln.strip()
@@ -461,7 +512,12 @@ def parse_sasl_users(text: str) -> list[str]:
         name = ln.split(":", 1)[0].strip()
         if not name or any(ch.isspace() for ch in name):
             continue
-        out.append(name)
+        try:
+            name2 = _validate_login(name)
+        except Exception:
+            continue
+        out.append(name2)
+
     # stable unique
     seen = set()
     uniq = []
@@ -511,6 +567,98 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         return _normalize_testmail_output(out) or "queued"
 
 
+_QUEUE_ID_RE = re.compile(r"queued as\s+([A-Z0-9]{5,})", re.IGNORECASE)
+
+
+def extract_queue_id_best_effort(sendmail_out: str) -> Optional[str]:
+    """Extract the Postfix queue ID from sendmail -v output."""
+    txt = (sendmail_out or "").strip()
+    if not txt:
+        return None
+
+    # Search line-by-line for stability.
+    for ln in txt.splitlines():
+        m = _QUEUE_ID_RE.search(ln)
+        if m:
+            return m.group(1).strip().upper()
+
+    # Fallback: search in entire blob.
+    m = _QUEUE_ID_RE.search(txt)
+    if m:
+        return m.group(1).strip().upper()
+
+    return None
+
+
+def _delivery_state_from_line(line: str) -> Optional[str]:
+    ll = (line or "").lower()
+    if "status=sent" in ll:
+        return "sent"
+    if "status=deferred" in ll:
+        return "deferred"
+    if "status=bounced" in ll:
+        return "bounced"
+    if "status=reject" in ll or "reject:" in ll:
+        return "rejected"
+    return None
+
+
+def verify_delivery_best_effort(queue_id: str, max_wait_seconds: int = 8) -> dict:
+    """Best-effort delivery verification.
+
+    We look for the queue id in recent maillog lines and in mailq.
+    This is inherently heuristic.
+    """
+    qid = (queue_id or "").strip().upper()
+    if not qid:
+        return {"queue_id": None, "state": "unknown"}
+
+    last_line = ""
+    last_state = "unknown"
+    in_queue = None
+
+    for i in range(max(1, int(max_wait_seconds))):
+        try:
+            mail_log = _redact_mail_log((_control_get("/maillog").get("maillog") or ""))
+        except Exception:
+            mail_log = ""
+
+        try:
+            mailq = str((_control_get("/mailq").get("mailq") or ""))
+        except Exception:
+            mailq = ""
+
+        in_queue = (qid in mailq)
+
+        # Find the most recent log line referencing the queue id.
+        lines = [ln for ln in (mail_log or "").splitlines() if qid in ln]
+        if lines:
+            last_line = lines[-1]
+            st = _delivery_state_from_line(last_line)
+            if st:
+                last_state = st
+
+        if last_state in ("sent", "bounced", "rejected"):
+            break
+
+        if in_queue:
+            last_state = "queued"
+        elif last_state == "unknown" and last_line:
+            # We saw it in logs but couldn't classify.
+            last_state = "seen"
+
+        # Wait for log/queue to update.
+        if i < max_wait_seconds - 1:
+            time.sleep(1)
+
+    return {
+        "queue_id": qid,
+        "state": last_state,
+        "in_queue": in_queue,
+        "line": last_line,
+    }
+
+
 def start_device_flow_background() -> None:
     # Delegate to postfix control API
     _control_post("/token/start")
@@ -521,11 +669,17 @@ def refresh_token_now() -> str:
 
 
 def get_device_flow_log() -> str:
-    return (_control_get("/device-flow-log").get("log") or "")
+    try:
+        return (_control_get("/device-flow-log").get("log") or "")
+    except Exception:
+        return ""
 
 
 def get_token_refresh_log() -> str:
-    return (_control_get("/token/refresh-log").get("log") or "")
+    try:
+        return (_control_get("/token/refresh-log").get("log") or "")
+    except Exception:
+        return ""
 
 
 def device_flow_log() -> str:
@@ -880,13 +1034,22 @@ def index(request: Request):
     applied_hash = get_applied_hash()
     if not applied_hash:
         # On first run, assume current config was already applied by the container entrypoint.
-        set_applied_hash(current_hash)
-        applied_hash = current_hash
+        set_applied_state(cfg)
+        applied_hash = cfg_hash(cfg)
     pending = (current_hash != applied_hash)
 
-    mailq_out = (_control_get("/mailq").get("mailq") or "")
+    # Best-effort: dashboard should not 500 if postfix/control socket is still starting.
+    try:
+        mailq_out = (_control_get("/mailq").get("mailq") or "")
+    except Exception:
+        mailq_out = ""
     qsize = parse_queue_size(mailq_out)
-    mail_log = _redact_mail_log((_control_get("/maillog").get("maillog") or ""))
+
+    try:
+        mail_log_raw = (_control_get("/maillog").get("maillog") or "")
+    except Exception:
+        mail_log_raw = ""
+    mail_log = _redact_mail_log(mail_log_raw)
     warn_tail = _extract_recent_warnings(mail_log)
 
     ms365_user = effective_ms365_user(cfg)
@@ -1134,14 +1297,36 @@ def api_users_list():
 
 @app.post("/api/users/add")
 def api_users_add(login: str = Form(...), password: str = Form(...)):
-    ensure_user(login.strip(), password)
+    try:
+        login2 = _validate_login(login)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e) or "invalid login")
+
+    pw = str(password or "")
+    if not pw:
+        raise HTTPException(status_code=400, detail="missing password")
+
+    try:
+        ensure_user(login2, pw)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     raw = list_users_raw()
     return {"ok": True, "users": raw, "users_list": parse_sasl_users(raw)}
 
 
 @app.post("/api/users/delete")
 def api_users_delete(login: str = Form(...)):
-    delete_user(login.strip())
+    try:
+        login2 = _validate_login(login)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e) or "invalid login")
+
+    try:
+        delete_user(login2)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     raw = list_users_raw()
     return {"ok": True, "users": raw, "users_list": parse_sasl_users(raw)}
 
@@ -1295,7 +1480,7 @@ def apply_changes(request: Request, csrf_token: str = Form("")):
 
     # Mark current config as applied.
     cfg = load_cfg()
-    set_applied_hash(cfg_hash(cfg))
+    set_applied_state(cfg)
 
     # Return to dashboard with a toast.
     from urllib.parse import quote
@@ -1322,12 +1507,25 @@ def api_apply_changes(validate_only: str = Form("0")):
     out = render_and_reload()
 
     cfg = load_cfg()
-    set_applied_hash(cfg_hash(cfg))
+    set_applied_state(cfg)
 
     msg = (out or "ok").strip() or "ok"
     level = "error" if ("fatal" in msg.lower() or "error" in msg.lower()) else "ok"
 
     return {"ok": True, "output": msg, "level": level, "pending": False, "validated": False}
+
+
+@app.post("/api/discard")
+def api_discard_changes():
+    snap = read_applied_cfg_snapshot()
+    if not snap:
+        raise HTTPException(status_code=409, detail="No applied config snapshot found yet.")
+
+    # Restore saved config to last applied snapshot.
+    save_cfg(snap)
+    set_applied_state(snap)
+
+    return {"ok": True, "pending": False}
 
 
 @app.post("/token/start")
@@ -1446,6 +1644,7 @@ def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile
     # Reason: if the imported config happens to match the last applied hash (or if hashes are missing),
     # the UI would not show the Apply reminder. Import should always be treated as "saved, not applied".
     try:
+        # Keep discard functionality safe: after an import, treat the last-applied snapshot as unknown.
         set_applied_hash("import_pending")
     except Exception:
         pass
@@ -1576,7 +1775,8 @@ def _ensure_applied_best_effort() -> str:
         pending = (applied_hash is None) or (current_hash != applied_hash)
         if pending:
             out = render_and_reload()
-            set_applied_hash(current_hash)
+            # Mark the saved config as applied (+ snapshot for discard)
+            set_applied_state(cfg)
             return (out or "ok").strip() or "ok"
     except Exception as e:
         return f"apply_error:{type(e).__name__}"
@@ -1589,6 +1789,7 @@ def api_testmail(
     from_addr: str = Form(""),
     subject: str = Form("Test"),
     body: str = Form("Does it work?"),
+    verify: str = Form("1"),
 ):
     apply_out = _ensure_applied_best_effort()
     out = send_test_mail(to_addr, from_addr, subject, body)
@@ -1598,17 +1799,141 @@ def api_testmail(
     ok = True
     if not msg:
         msg = "queued"
+
     if ("sendmail exit" in msg.lower()) or ("error" in msg.lower()) or ("apply_error" in apply_out.lower()):
         ok = False
 
-    level = "ok" if ok else "error"
+    qid = extract_queue_id_best_effort(msg)
+
+    do_verify = str(verify or "").strip().lower() not in ("0", "false", "no", "off")
+    delivery = None
+    if ok and do_verify and qid:
+        delivery = verify_delivery_best_effort(qid, max_wait_seconds=8)
+
+    # Determine toast severity
+    level = "ok"
+    if not ok:
+        level = "error"
+    elif delivery and delivery.get("state") in ("deferred", "bounced", "rejected"):
+        level = "error"
+
+    note = "OK means queued/accepted locally; check Mail Log / queue for delivery."
+    if delivery and delivery.get("state") == "sent":
+        note = "Verified: message was sent upstream (status=sent in mail log)."
+
     return {
         "ok": ok,
         "output": msg,
         "level": level,
         "apply": apply_out,
-        "note": "OK means queued/accepted locally; check Mail Log / queue for delivery.",
+        "queue_id": qid,
+        "delivery": delivery,
+        "note": note,
     }
+
+
+def _semver_tuple(v: str) -> Optional[tuple]:
+    """Parse x.y.z from a string (tolerates leading v and suffixes like -rc.1)."""
+    s = str(v or "").strip()
+    if s.startswith("v"):
+        s = s[1:]
+    m = re.search(r"(\d+)\.(\d+)\.(\d+)", s)
+    if not m:
+        return None
+    try:
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except Exception:
+        return None
+
+
+def _read_update_cache() -> Optional[dict]:
+    try:
+        if UPDATE_CACHE_PATH.exists():
+            return json.loads(UPDATE_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return None
+
+
+def _write_update_cache(obj: dict) -> None:
+    try:
+        UPDATE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        UPDATE_CACHE_PATH.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _fetch_latest_stable_release() -> dict:
+    """Fetch GitHub latest stable release info.
+
+    Uses the public API endpoint that excludes prereleases.
+    """
+    import urllib.request
+
+    url = f"https://api.github.com/repos/{APP_GITHUB_REPO}/releases/latest"
+    req = urllib.request.Request(url)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("User-Agent", "simple-m365-relay-ui")
+    with urllib.request.urlopen(req, timeout=6) as resp:
+        raw = resp.read().decode("utf-8", errors="replace")
+    return json.loads(raw)
+
+
+def get_update_status() -> dict:
+    """Return update status (any newer STABLE release; ignore RC/prerelease).
+
+    Cached on disk so the UI can poll without hitting GitHub frequently.
+    """
+    now = int(time.time())
+    cached = _read_update_cache() or {}
+    checked_at = int(cached.get("checked_at") or 0)
+
+    if checked_at and (now - checked_at) < max(60, UPDATE_CHECK_TTL_SECONDS):
+        cached.setdefault("ok", True)
+        cached.setdefault("policy", "stable")
+        cached.setdefault("current_version", APP_VERSION)
+        cached.setdefault("repo_url", APP_GITHUB_REPO_URL)
+        return cached
+
+    cur = _semver_tuple(APP_VERSION)
+
+    out = {
+        "ok": True,
+        "policy": "stable",
+        "checked_at": now,
+        "current_version": APP_VERSION,
+        "current_semver": cur,
+        "repo_url": APP_GITHUB_REPO_URL,
+        "update_available": False,
+        "latest_version": None,
+        "latest_semver": None,
+        "url": APP_GITHUB_REPO_URL + "/releases/latest",
+    }
+
+    try:
+        rel = _fetch_latest_stable_release() or {}
+        tag = str(rel.get("tag_name") or "").strip()
+        html_url = str(rel.get("html_url") or "").strip()
+        latest = _semver_tuple(tag)
+
+        out["latest_version"] = tag
+        out["latest_semver"] = latest
+        if html_url:
+            out["url"] = html_url
+
+        if cur and latest and latest > cur:
+            out["update_available"] = True
+    except Exception as e:
+        out["ok"] = False
+        out["error"] = f"{type(e).__name__}"
+
+    _write_update_cache(out)
+    return out
+
+
+@app.get("/api/update")
+def api_update():
+    return get_update_status()
 
 
 @app.get("/api/status")
@@ -1706,8 +2031,18 @@ def favicon_ico():
 def diagnostics_txt():
     # No secrets: we do NOT include token files, and we redact token-like content from logs.
     cfg = load_cfg()
-    mailq_out = (_control_get("/mailq").get("mailq") or "")
-    mail_log = _redact_mail_log(_control_get("/maillog").get("maillog") or "")
+
+    # Best-effort: diagnostics should still render even if the postfix control API isn't reachable yet.
+    try:
+        mailq_out = (_control_get("/mailq").get("mailq") or "")
+    except Exception:
+        mailq_out = ""
+
+    try:
+        mail_log_raw = (_control_get("/maillog").get("maillog") or "")
+    except Exception:
+        mail_log_raw = ""
+    mail_log = _redact_mail_log(mail_log_raw)
 
     ms365_user = effective_ms365_user(cfg)
     token_exp_ts = None

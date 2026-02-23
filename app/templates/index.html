@@ -572,6 +572,40 @@
       // updated elsewhere in refreshStatus
     }
 
+    function setUpdateChip(st){
+      const chip = document.getElementById('headerUpdateChip');
+      const txt = document.getElementById('headerUpdateText');
+      if (!chip || !txt) return;
+
+      const avail = !!(st && st.update_available);
+      chip.classList.toggle('hidden', !avail);
+      if (!avail) return;
+
+      let label = 'Update available';
+      if (st && st.latest_version) label = `Update available (${st.latest_version})`;
+      txt.textContent = label;
+
+      const url = (st && st.url) ? String(st.url) : '';
+      if (url) chip.setAttribute('href', url);
+    }
+
+    async function checkUpdateMaybe(){
+      // Update check (stable only, ignores prereleases/RCs); run at most once per day per browser.
+      try {
+        const key = 'simple-m365-relay-update-check-ts';
+        const last = parseInt(localStorage.getItem(key) || '0', 10) || 0;
+        const now = Math.floor(Date.now() / 1000);
+        if ((now - last) < 86400) return;
+        localStorage.setItem(key, String(now));
+
+        const r = await fetch('/api/update', { cache: 'no-store' });
+        if (!r.ok) return;
+        const j = await r.json();
+        setUpdateChip(j);
+        try { lucide.createIcons(); } catch(e) {}
+      } catch (e) {}
+    }
+
     function _formatFastApiDetail(detail){
       try {
         if (!Array.isArray(detail)) return null;
@@ -818,7 +852,7 @@
               <div class="text-sm font-semibold mono">${uu}</div>
             </div>
             <div class="col-span-12 sm:col-span-4 flex justify-end">
-              <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/40" title="Delete user" onclick="usersDeleteInline('${uu}')">
+              <button type="button" data-action="user-delete" data-login="${uu}" class="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/40 dark:bg-slate-950 dark:text-red-300 dark:hover:bg-red-950/40" title="Delete user">
                 <i data-lucide="trash-2" class="h-4 w-4"></i>
                 Delete
               </button>
@@ -861,11 +895,22 @@
 
     async function usersDeleteInline(login){
       try {
+        const ll = String(login || '').trim();
+        if (!ll) return;
+        if (!window.confirm(`Delete SMTP AUTH user "${ll}"?`)) return;
+
         const data = new FormData();
-        data.set('login', login);
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        data.set('login', ll);
         const r = await apiFetch('/api/users/delete', { method: 'POST', body: data });
-        const j = await r.json();
+        let j = null;
+        try { j = await r.json(); } catch(e) {}
+
+        if (!r.ok) {
+          const msg = (j && j.error) ? ('Delete failed: ' + j.error) : 'Failed to delete user.';
+          showToast(msg, 'error');
+          return;
+        }
+
         if (j && j.ok) {
           showToast('User deleted.', 'ok');
           if (typeof j.users_list !== 'undefined') _renderUsersTable(j.users_list);
@@ -930,7 +975,7 @@
               const aa = _escapeHtml(a);
               const ll = _escapeHtml(login);
               return `
-                <button type="button" class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Click to remove" onclick="disallowFrom('${ll}','${aa}')">
+                <button type="button" data-action="from-disallow" data-login="${ll}" data-from="${aa}" class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" title="Click to remove">
                   <i data-lucide="x" class="h-3.5 w-3.5"></i>
                   <span class="mono">${aa}</span>
                 </button>`;
@@ -1040,10 +1085,32 @@
         const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
         const r = await apiFetch('/api/testmail', { method: 'POST', body: data });
         const j = await r.json();
-        const out = (j.output || '').trim() || 'ok';
+
+        let out = (j.output || '').trim() || 'ok';
+
+        // Append verify info (best-effort)
+        if (j.queue_id) {
+          out += `\n\nQueue-ID: ${j.queue_id}`;
+        }
+        if (j.delivery && j.delivery.state) {
+          out += `\nVerify: ${j.delivery.state}`;
+          if (j.delivery.line) out += `\n${j.delivery.line}`;
+        }
+
         const pre = document.getElementById('testmailOut');
         if (pre) pre.textContent = out;
-        showToast(out.length > 120 ? (out.slice(0,120) + '…') : out, j.level === 'error' ? 'error' : 'ok');
+
+        let toastMsg = out;
+        if (j.delivery && j.delivery.state) {
+          const st = String(j.delivery.state);
+          if (st === 'sent') toastMsg = 'Sent (verified).';
+          else if (st === 'queued') toastMsg = 'Queued (not delivered yet).';
+          else if (st === 'deferred') toastMsg = 'Deferred (delivery failed for now).';
+          else if (st === 'bounced') toastMsg = 'Bounced.';
+          else if (st === 'rejected') toastMsg = 'Rejected.';
+        }
+
+        showToast(toastMsg.length > 140 ? (toastMsg.slice(0,140) + '…') : toastMsg, j.level === 'error' ? 'error' : 'ok');
         await refreshStatus();
       } catch (e) {
         showToast('Send test mail failed.', 'error');
@@ -1089,6 +1156,14 @@
           const fd = new FormData(form);
           usersDeleteInline(fd.get('login') || '');
         }, true);
+
+        // Safe click handler for dynamically-rendered rows (no inline onclick)
+        container.addEventListener('click', (e) => {
+          const btn = e.target?.closest?.('button[data-action="user-delete"]');
+          if (!btn) return;
+          e.preventDefault();
+          usersDeleteInline(btn.getAttribute('data-login') || '');
+        }, true);
       }
     }
 
@@ -1098,7 +1173,6 @@
       const d = document.getElementById('defaultFromForm');
       if (d) d.addEventListener('submit', (e) => { e.preventDefault(); defaultFromNoReload(); });
 
-      // disallow handled via onclick buttons after we render (and initial HTML still has forms, but those will submit normally).
       // To prevent page reload on initial-render disallow forms, intercept submit events in the senders section.
       const container = document.getElementById('senders');
       if (container) {
@@ -1111,6 +1185,14 @@
           const fd = new FormData(form);
           disallowFrom(fd.get('login') || '', fd.get('from_addr') || '');
         }, true);
+
+        // Safe click handler for dynamically-rendered disallow chips (no inline onclick)
+        container.addEventListener('click', (e) => {
+          const btn = e.target?.closest?.('button[data-action="from-disallow"]');
+          if (!btn) return;
+          e.preventDefault();
+          disallowFrom(btn.getAttribute('data-login') || '', btn.getAttribute('data-from') || '');
+        }, true);
       }
     }
 
@@ -1118,15 +1200,16 @@
       const o = Object.assign({ validateOnly: false }, (opts || {}));
       const btn = document.getElementById('applyBtn');
       const vbtn = document.getElementById('validateBtn');
+      const dbtn = document.getElementById('discardBtn');
       if (btn) btn.disabled = true;
       if (vbtn) vbtn.disabled = true;
+      if (dbtn) dbtn.disabled = true;
       try {
         const fd = new FormData();
         if (o.validateOnly) fd.append('validate_only','1');
 
         const r = await apiFetch('/api/apply', { method: 'POST', body: fd });
         const j = await r.json();
-        const out = (j.output || '').trim() || 'ok';
 
         if (o.validateOnly) {
           showToast(j.level === 'error' ? 'Validation failed.' : 'Validation OK.', j.level === 'error' ? 'error' : 'ok');
@@ -1140,9 +1223,44 @@
       } catch (e) {
         showToast(o.validateOnly ? 'Validation failed.' : 'Apply failed.', 'error');
       } finally {
-        // Re-enable buttons; whether Apply should be used is driven by pending state.
         if (btn) btn.disabled = false;
         if (vbtn) vbtn.disabled = false;
+        if (dbtn) dbtn.disabled = false;
+      }
+    }
+
+    async function discardNoReload(){
+      const dbtn = document.getElementById('discardBtn');
+      if (dbtn) dbtn.disabled = true;
+      try {
+        const ok = window.confirm('Discard saved (not applied) changes?\n\nThis will restore the last applied config.');
+        if (!ok) return;
+
+        const r = await apiFetch('/api/discard', { method: 'POST', body: new FormData() });
+        let j = null;
+        try { j = await r.json(); } catch(e) {}
+
+        if (!r.ok) {
+          let msg = 'Discard failed.';
+          if (j && j.detail) {
+            if (typeof j.detail === 'string') {
+              msg = 'Discard failed: ' + j.detail;
+            } else {
+              const nice = _formatFastApiDetail(j.detail);
+              msg = 'Discard failed: ' + (nice || JSON.stringify(j.detail));
+            }
+          }
+          showToast(msg, 'error');
+          return;
+        }
+
+        showToast('Discarded saved changes (restored last applied config).', 'ok');
+        syncPendingFromApi(false);
+        window.setTimeout(() => { window.location.href = '/'; }, 600);
+      } catch (e) {
+        showToast('Discard failed.', 'error');
+      } finally {
+        if (dbtn) dbtn.disabled = false;
       }
     }
 
@@ -1151,6 +1269,8 @@
       if (f) f.addEventListener('submit', (e) => { e.preventDefault(); applyNoReload({ validateOnly:false }); });
       const v = document.getElementById('validateBtn');
       if (v) v.addEventListener('click', (e) => { e.preventDefault(); applyNoReload({ validateOnly:true }); });
+      const d = document.getElementById('discardBtn');
+      if (d) d.addEventListener('click', (e) => { e.preventDefault(); discardNoReload(); });
     }
 
     function initTestmailAjax(){
@@ -1212,6 +1332,7 @@
       initBackupImport();
       syncTokenExpiryFromDom();
       applyLogFilter();
+      checkUpdateMaybe();
     });
   </script>
 
@@ -1347,6 +1468,11 @@
               <span id="headerHealthText">{{ 'Postfix OK' if postfix_ok else 'Postfix not reachable' }}</span>
             </span>
 
+            <a id="headerUpdateChip" href="{{ APP_GITHUB_REPO_URL }}/releases/latest" target="_blank" rel="noopener" class="hidden inline-flex items-center gap-2 rounded-full border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-900 shadow-sm hover:bg-violet-100 dark:border-violet-900/40 dark:bg-violet-950/40 dark:text-violet-200 dark:hover:bg-violet-950/60" title="A newer stable version is available">
+              <i data-lucide="arrow-up-right" class="h-3.5 w-3.5"></i>
+              <span id="headerUpdateText">Update available</span>
+            </a>
+
             <span id="headerPendingChip" class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 shadow-sm dark:border-amber-900/40 dark:bg-amber-950 dark:text-amber-200 {% if not pending %}hidden{% endif %}">
               <i data-lucide="triangle-alert" class="h-3.5 w-3.5"></i>
               Pending changes
@@ -1427,6 +1553,10 @@
                 <button id="validateBtn" type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Validates saved settings by rendering Postfix config (no reload)">
                   <i data-lucide="check" class="h-4 w-4"></i>
                   Validate (no reload)
+                </button>
+                <button id="discardBtn" type="button" class="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800" title="Discards saved changes and restores the last applied config">
+                  <i data-lucide="undo-2" class="h-4 w-4"></i>
+                  Discard saved changes
                 </button>
               </form>
               <div class="mt-2 text-[11px] text-slate-600 dark:text-slate-300">This reminder stays until changes are applied.</div>
@@ -1796,12 +1926,19 @@
             </div>
           </div>
 
+          <!-- Suggestions sourced from SMTP AUTH users -->
+          <datalist id="smtpUsersDatalist">
+            {% for u in (users_list or []) %}
+              <option value="{{ u }}"></option>
+            {% endfor %}
+          </datalist>
+
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <form id="fromAllowForm" method="post" action="/from/allow" class="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Add allowed From</div>
-              <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same login again to add more From addresses.</div>
-              <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same SMTP user again to add more From addresses.</div>
+              <input name="login" list="smtpUsersDatalist" placeholder="SMTP user (login)" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
               <textarea name="from_addr" rows="3" placeholder="from1@example.com&#10;from2@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900"></textarea>
               <div class="text-xs text-slate-500 dark:text-slate-400">Enter one address per line (or comma/space separated).</div>
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
@@ -1814,7 +1951,7 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Set fallback From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Stored per SMTP AUTH user (login). Used when clients don’t specify a From address.</div>
-              <input name="login" placeholder="login" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <input name="login" list="smtpUsersDatalist" placeholder="SMTP user (login)" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
               <input name="from_addr" placeholder="fallback-from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="pin" class="h-4 w-4"></i>
@@ -2069,6 +2206,27 @@
       </section>
 
     </main>
+
+    <footer class="border-t border-slate-200 bg-white/60 py-6 dark:border-slate-800 dark:bg-slate-950/40">
+      <div class="mx-auto flex max-w-7xl flex-col gap-3 px-4 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8 dark:text-slate-400">
+        <div>Made with ❤️ — Simple M365 Relay <span class="opacity-70">v{{ APP_VERSION }}</span></div>
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <a class="inline-flex items-center gap-1 font-semibold text-slate-600 hover:underline dark:text-slate-300" href="https://github.com/LickABrick/simple-m365-relay" target="_blank" rel="noopener">
+            <i data-lucide="github" class="h-3.5 w-3.5"></i>
+            GitHub
+          </a>
+          <a class="inline-flex items-center gap-1 font-semibold text-slate-600 hover:underline dark:text-slate-300" href="https://github.com/LickABrick/simple-m365-relay/issues" target="_blank" rel="noopener">
+            <i data-lucide="bug" class="h-3.5 w-3.5"></i>
+            Report an issue
+          </a>
+          <a class="inline-flex items-center gap-1 font-semibold text-slate-600 hover:underline dark:text-slate-300" href="https://github.com/LickABrick/simple-m365-relay/releases" target="_blank" rel="noopener">
+            <i data-lucide="scroll-text" class="h-3.5 w-3.5"></i>
+            Releases
+          </a>
+        </div>
+      </div>
+    </footer>
+
   </div>
 </body>
 </html>

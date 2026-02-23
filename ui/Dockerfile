@@ -1,5 +1,11 @@
 FROM alpine:3.20
 
+ARG APP_VERSION=dev
+ARG APP_GITHUB_REPO=LickABrick/simple-m365-relay
+
+ENV APP_VERSION="$APP_VERSION"
+ENV APP_GITHUB_REPO="$APP_GITHUB_REPO"
+
 RUN apk add --no-cache \
     python3 py3-pip \
     ca-certificates \
