@@ -56,6 +56,12 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"  # put behind reverse proxy + basic auth
+    healthcheck:
+      test: ["CMD-SHELL", "curl -ILkfs --max-time 3 http://localhost:8000/healthz > /dev/null || exit 1"]
+      start_period: 10s
+      interval: 30s
+      timeout: 20s
+      retries: 3
     security_opt:
       - no-new-privileges:true
     cap_drop:
