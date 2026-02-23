@@ -4,6 +4,26 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.3] - 2026-02-23
+
+### Added
+- Update-available badge (stable releases only; ignores prereleases).
+- Discard saved changes (restore last applied config snapshot).
+- Test Mail: best-effort queue-id extraction + delivery verification.
+- Allowed From UX: SMTP user datalist + clearer placeholders.
+- Docker-based E2E test suite (core + MailHog).
+- UI container healthcheck via public `/healthz` endpoint (compose example + default compose healthcheck).
+
+### Fixed
+- Startup robustness: dashboard/diagnostics are best-effort if the control API/socket isn’t ready yet.
+
+### Security
+- Stored XSS hardening: strict SMTP AUTH username validation in the control plane + remove inline `onclick` handlers.
+- Config file permissions: enforce `0600` on `/data/config/config.json` after UI writes.
+- GitHub Actions hardening: validate `workflow_dispatch` version input.
+
+---
+
 ## [1.1.2] - 2026-02-20
 
 ### Fixed
@@ -118,6 +138,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[1.1.3]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.3
 [1.1.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.2
 [1.1.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.1
 [1.1.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.0
