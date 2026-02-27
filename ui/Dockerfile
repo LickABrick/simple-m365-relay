@@ -24,7 +24,7 @@ COPY app/ /opt/ms365-relay/app/
 COPY tailwind.config.js /opt/ms365-relay/tailwind.config.js
 
 # Build tailwind CSS locally (no CDN). We compile against templates.
-RUN npm install --no-audit --no-fund --silent tailwindcss@3.4.10 \
+RUN npm install --no-audit --no-fund --silent tailwindcss@3.4.19 \
   && npx tailwindcss \
       -c /opt/ms365-relay/tailwind.config.js \
       -i /opt/ms365-relay/app/static/tailwind.input.css \
