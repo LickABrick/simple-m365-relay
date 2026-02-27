@@ -9,40 +9,48 @@
     ":semanticCommitTypeAll(chore)",
     "helpers:pinGitHubActionDigests"
   ],
-
-  "labels": ["dependencies"],
-
+  "labels": [
+    "dependencies"
+  ],
   "prConcurrentLimit": 2,
   "prHourlyLimit": 0,
-
   "schedule": [
     "before 07:00 on monday"
   ],
-
   "packageRules": [
     {
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "all non-major updates"
     },
     {
-      "matchUpdateTypes": ["major"],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "groupName": "major updates (separate)"
     },
     {
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "github actions"
     },
     {
-      "matchDatasources": ["docker"],
+      "matchDatasources": [
+        "docker"
+      ],
       "groupName": "docker images"
     }
   ],
-
   "automerge": false,
-
-  "regexManagers": [
+  "customManagers": [
     {
-      "fileMatch": ["^Dockerfile$"],
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
+      ],
       "matchStrings": [
         "ARG\\s+SASL_XOAUTH2_VERSION=(?<currentValue>\\S+)\\n"
       ],
@@ -52,7 +60,10 @@
       "extractVersionTemplate": "^release-(?<version>.*)$"
     },
     {
-      "fileMatch": ["^ui/Dockerfile$"],
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^ui/Dockerfile$/"
+      ],
       "matchStrings": [
         "tailwindcss@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
       ],
