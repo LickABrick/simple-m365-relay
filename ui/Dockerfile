@@ -1,4 +1,4 @@
-FROM alpine:3.20
+FROM alpine:3.23
 
 ARG APP_VERSION=dev
 ARG APP_GITHUB_REPO=LickABrick/simple-m365-relay
