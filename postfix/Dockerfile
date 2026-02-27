@@ -3,7 +3,7 @@
 ############################
 # Builder: build sasl-xoauth2 (Debian/glibc)
 ############################
-FROM debian:12-slim AS builder
+FROM debian:13-slim AS builder
 
 ARG SASL_XOAUTH2_VERSION=0.25
 
@@ -27,7 +27,7 @@ RUN set -eux; \
 ############################
 # Runtime: postfix relay (Debian 12)
 ############################
-FROM debian:12-slim
+FROM debian:13-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dovecot-core \
     openssl \
     libcurl4 \
-    libjsoncpp25 \
+    libjsoncpp26 \
     busybox \
     busybox-syslogd \
     python3 \

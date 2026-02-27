@@ -3,7 +3,7 @@
 ############################
 # Builder: compile sasl-xoauth2 + build Python venv
 ############################
-FROM debian:12 AS builder
+FROM debian:13 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -34,7 +34,7 @@ RUN python3 -m venv /opt/venv \
 ############################
 # Runtime: slim image
 ############################
-FROM debian:12-slim
+FROM debian:13-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/opt/venv/bin:$PATH"
@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsyslog supervisor \
     openssl \
     python3 \
-    libcurl4 libjsoncpp25 \
+    libcurl4 libjsoncpp26 \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy sasl-xoauth2 plugin + tool from builder
