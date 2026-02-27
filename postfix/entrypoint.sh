@@ -89,13 +89,21 @@ auth_mechanisms = plain login
 EOF
 
 cat > /etc/dovecot/conf.d/auth-passwdfile.conf.ext <<'EOF'
-passdb {
-  driver = passwd-file
-  args = scheme=PLAIN username_format=%u /data/sasl/users
+# passwd-file user store: /data/sasl/users
+# (Dovecot 2.4+ syntax)
+passdb passwd-file {
+  default_password_scheme = PLAIN
+  auth_username_format = %{user}
+  passwd_file_path = /data/sasl/users
 }
-userdb {
-  driver = static
-  args = uid=postfix gid=postfix home=/tmp
+
+# We don't need per-user home dirs; use a static userdb.
+userdb static {
+  fields {
+    uid = postfix
+    gid = postfix
+    home = /tmp
+  }
 }
 EOF
 
