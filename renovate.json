@@ -1,5 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "automerge": false,
+  "enabled": false,
   "extends": [
     "config:recommended",
     ":timezone(Europe/Amsterdam)",
@@ -9,56 +11,64 @@
     ":semanticCommitTypeAll(chore)",
     "helpers:pinGitHubActionDigests"
   ],
-
-  "labels": ["dependencies"],
-
-  "prConcurrentLimit": 2,
-  "prHourlyLimit": 0,
-
-  "schedule": [
-    "before 07:00 on monday"
+  "labels": [
+    "dependencies"
   ],
-
   "packageRules": [
     {
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "all non-major updates"
+      "groupName": "all non-major updates",
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ]
     },
     {
-      "matchUpdateTypes": ["major"],
-      "groupName": "major updates (separate)"
+      "groupName": "major updates (separate)",
+      "matchUpdateTypes": [
+        "major"
+      ]
     },
     {
-      "matchManagers": ["github-actions"],
-      "groupName": "github actions"
+      "groupName": "github actions",
+      "matchManagers": [
+        "github-actions"
+      ]
     },
     {
-      "matchDatasources": ["docker"],
-      "groupName": "docker images"
+      "groupName": "docker images",
+      "matchDatasources": [
+        "docker"
+      ]
     }
   ],
-
-  "automerge": false,
-
+  "prConcurrentLimit": 2,
+  "prHourlyLimit": 0,
   "regexManagers": [
     {
-      "fileMatch": ["^Dockerfile$"],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "tarickb/sasl-xoauth2",
+      "extractVersionTemplate": "^release-(?<version>.*)$",
+      "fileMatch": [
+        "^Dockerfile$"
+      ],
       "matchStrings": [
         "ARG\\s+SASL_XOAUTH2_VERSION=(?<currentValue>\\S+)\\n"
       ],
-      "depNameTemplate": "tarickb/sasl-xoauth2",
-      "datasourceTemplate": "github-releases",
-      "versioningTemplate": "semver",
-      "extractVersionTemplate": "^release-(?<version>.*)$"
+      "versioningTemplate": "semver"
     },
     {
-      "fileMatch": ["^ui/Dockerfile$"],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "tailwindcss",
+      "fileMatch": [
+        "^ui/Dockerfile$"
+      ],
       "matchStrings": [
         "tailwindcss@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
       ],
-      "depNameTemplate": "tailwindcss",
-      "datasourceTemplate": "npm",
       "versioningTemplate": "npm"
     }
+  ],
+  "schedule": [
+    "before 07:00 on monday"
   ]
 }
