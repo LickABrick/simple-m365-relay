@@ -3,7 +3,7 @@
 ############################
 # Builder: compile sasl-xoauth2 + build Python venv
 ############################
-FROM debian:12 AS builder
+FROM debian:13 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -34,7 +34,7 @@ RUN python3 -m venv /opt/venv \
 ############################
 # Runtime: slim image
 ############################
-FROM debian:12-slim
+FROM debian:13-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PATH="/opt/venv/bin:$PATH"
