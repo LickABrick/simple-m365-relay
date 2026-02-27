@@ -1,6 +1,64 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:recommended"
+    "config:recommended",
+    ":timezone(Europe/Amsterdam)",
+    ":dependencyDashboard",
+    ":prImmediately",
+    ":semanticCommits",
+    ":semanticCommitTypeAll(chore)",
+    "helpers:pinGitHubActionDigests"
+  ],
+
+  "labels": ["dependencies"],
+
+  "prConcurrentLimit": 2,
+  "prHourlyLimit": 0,
+
+  "schedule": [
+    "before 07:00 on monday"
+  ],
+
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "all non-major updates"
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "groupName": "major updates (separate)"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "matchDatasources": ["docker"],
+      "groupName": "docker images"
+    }
+  ],
+
+  "automerge": false,
+
+  "regexManagers": [
+    {
+      "fileMatch": ["^Dockerfile$"],
+      "matchStrings": [
+        "ARG\\s+SASL_XOAUTH2_VERSION=(?<currentValue>\\S+)\\n"
+      ],
+      "depNameTemplate": "tarickb/sasl-xoauth2",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^release-(?<version>.*)$"
+    },
+    {
+      "fileMatch": ["^ui/Dockerfile$"],
+      "matchStrings": [
+        "tailwindcss@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "tailwindcss",
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "npm"
+    }
   ]
 }
