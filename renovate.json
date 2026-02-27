@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "automerge": false,
-  "enabled": false,
+  "enabled": true,
   "extends": [
     "config:recommended",
     ":timezone(Europe/Amsterdam)",
@@ -41,7 +41,7 @@
       ]
     }
   ],
-  "prConcurrentLimit": 2,
+  "prConcurrentLimit": 10,
   "prHourlyLimit": 0,
   "regexManagers": [
     {
