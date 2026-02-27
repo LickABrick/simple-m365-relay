@@ -19,7 +19,7 @@ services:
       MS365_CLIENT_ID: ""
 
   smtpclient:
-    image: python:3.12-alpine
+    image: python:3.14-alpine
     container_name: simple-m365-relay-smtpclient-dev
     command: ["sh","-lc","sleep infinity"]
     depends_on:
