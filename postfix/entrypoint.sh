@@ -71,6 +71,9 @@ fi
 mkdir -p /etc/dovecot /etc/dovecot/conf.d "$DATA_DIR/sasl" || true
 
 cat > /etc/dovecot/dovecot.conf <<'EOF'
+# Debian 13 ships Dovecot 2.4+, which requires a config version as the first setting.
+dovecot_config_version = 2.4.0
+
 # Dovecot base config
 # Note: do NOT set "protocols = auth" (auth is a service, not a protocol).
 listen = *
