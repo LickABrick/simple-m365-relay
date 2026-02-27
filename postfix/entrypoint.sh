@@ -81,7 +81,9 @@ listen = *
 EOF
 
 cat > /etc/dovecot/conf.d/10-auth.conf <<'EOF'
-disable_plaintext_auth = no
+# Dovecot 2.4+: allow AUTH PLAIN/LOGIN without requiring TLS on the connection.
+auth_allow_cleartext = yes
+
 auth_mechanisms = plain login
 !include auth-passwdfile.conf.ext
 EOF
