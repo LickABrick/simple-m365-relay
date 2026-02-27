@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dovecot-core \
     openssl \
     libcurl4 \
-    libjsoncpp25 \
+    libjsoncpp26 \
     busybox \
     busybox-syslogd \
     python3 \

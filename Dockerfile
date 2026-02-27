@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rsyslog supervisor \
     openssl \
     python3 \
-    libcurl4 libjsoncpp25 \
+    libcurl4 libjsoncpp26 \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy sasl-xoauth2 plugin + tool from builder
