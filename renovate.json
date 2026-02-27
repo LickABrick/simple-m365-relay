@@ -43,13 +43,14 @@
   ],
   "prConcurrentLimit": 10,
   "prHourlyLimit": 0,
-  "regexManagers": [
+  "customManagers": [
     {
+      "customType": "regex",
       "datasourceTemplate": "github-releases",
       "depNameTemplate": "tarickb/sasl-xoauth2",
       "extractVersionTemplate": "^release-(?<version>.*)$",
-      "fileMatch": [
-        "^Dockerfile$"
+      "managerFilePatterns": [
+        "/^Dockerfile$/"
       ],
       "matchStrings": [
         "ARG\\s+SASL_XOAUTH2_VERSION=(?<currentValue>\\S+)\\n"
@@ -57,10 +58,11 @@
       "versioningTemplate": "semver"
     },
     {
+      "customType": "regex",
       "datasourceTemplate": "npm",
       "depNameTemplate": "tailwindcss",
-      "fileMatch": [
-        "^ui/Dockerfile$"
+      "managerFilePatterns": [
+        "/^ui/Dockerfile$/"
       ],
       "matchStrings": [
         "tailwindcss@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
