@@ -4,6 +4,14 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [1.1.4-rc.1] - 2026-02-27
+
+### Fixed
+- Postfix container: Dovecot 2.4 (Debian 13) config compatibility (version pins + passwd-file auth syntax).
+- CI: fix GHCR publish workflow YAML (remove accidental merge conflict markers).
+
+---
+
 ## [1.1.3] - 2026-02-23
 
 ### Added
@@ -138,6 +146,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[1.1.4-rc.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.4-rc.1
 [1.1.3]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.3
 [1.1.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.2
 [1.1.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.1
