@@ -488,6 +488,7 @@ def refresh_token() -> str:
     import time as _time
     import urllib.parse
     import urllib.request
+    import urllib.error
 
     with _refresh_lock:
         cfg = load_cfg()
@@ -539,6 +540,35 @@ def refresh_token() -> str:
             with urllib.request.urlopen(req, timeout=20) as r:
                 resp_raw = r.read().decode("utf-8", errors="ignore")
                 resp = json.loads(resp_raw)
+        except urllib.error.HTTPError as e:
+            # HTTPError contains a response body which often includes a useful JSON payload
+            # (error + error_description, e.g. invalid_grant). Surface it in the log.
+            err_body = ""
+            try:
+                err_body = e.read().decode("utf-8", errors="ignore")
+            except Exception:
+                err_body = ""
+
+            detail = ""
+            try:
+                obj = json.loads(err_body) if err_body else {}
+                if isinstance(obj, dict) and (obj.get("error") or obj.get("error_description")):
+                    ee = str(obj.get("error") or "").strip()
+                    ed = str(obj.get("error_description") or "").strip()
+                    if ee and ed:
+                        detail = f" ({ee}): {ed}"
+                    elif ee:
+                        detail = f" ({ee})"
+                    elif ed:
+                        detail = f": {ed}"
+            except Exception:
+                pass
+
+            out = f"Token refresh failed: HTTPError {getattr(e, 'code', '?')}: {getattr(e, 'reason', str(e))}{detail}"
+            if err_body:
+                out += f"\nResponse body: {err_body[:2000]}"
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
+            return out
         except Exception as e:
             out = f"Token refresh failed: {type(e).__name__}: {e}"
             _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
