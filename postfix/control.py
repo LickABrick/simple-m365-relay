@@ -872,23 +872,49 @@ class H(BaseHTTPRequestHandler):
 def _auto_refresh_loop():
     import time as _time
 
-    last_run = 0
+    # Retry faster after a failed refresh (default 60s) so transient network
+    # outages do not require long manual wait/interaction.
+    try:
+        retry_after_fail_s = max(15, int(os.environ.get("AUTO_TOKEN_REFRESH_RETRY_SECONDS", "60") or "60"))
+    except Exception:
+        retry_after_fail_s = 60
+
+    next_run_at = 0.0
+
     while True:
         mins = get_auto_refresh_minutes()
         if mins <= 0:
             _time.sleep(5)
             continue
 
-        # run at most once per interval
         now = _time.time()
-        if now - last_run >= mins * 60:
-            try:
-                refresh_token()
-            except Exception as e:
-                _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] auto-refresh error: {e}\n")
-            last_run = now
+        if now < next_run_at:
+            _time.sleep(5)
+            continue
+
+        interval_s = max(60, int(mins * 60))
+
+        try:
+            out = str(refresh_token() or "")
+        except Exception as e:
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] auto-refresh error: {e}\n")
+            out = ""
+
+        next_run_at = now + _next_refresh_delay_seconds(out, interval_s, retry_after_fail_s)
 
         _time.sleep(5)
+
+
+def _next_refresh_delay_seconds(refresh_output: str, interval_s: int, retry_after_fail_s: int) -> int:
+    """Return delay until next auto-refresh attempt.
+
+    - Success -> normal interval
+    - Failure/unknown -> faster retry (capped by normal interval)
+    """
+    ok = str(refresh_output or "").startswith("Token refresh succeeded")
+    if ok:
+        return max(1, int(interval_s))
+    return max(1, min(int(interval_s), int(retry_after_fail_s)))
 
 
 class _UnixHTTPServer(socketserver.UnixStreamServer, HTTPServer):
