@@ -46,3 +46,10 @@ def validate_cfg_obj(cfg: Any) -> Dict[str, Any]:
 def dumps_cfg(cfg: Dict[str, Any]) -> bytes:
     validate_cfg_obj(cfg)
     return (json.dumps(cfg, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def export_bundle(data_dir: Path) -> tuple[bytes, Dict[str, Any]]:
+    """Export config + sasldb2 as a bundle ZIP."""
+    # Import here to avoid circular deps; postfix.backup has the real impl.
+    from postfix.backup import export_bundle as _eb
+    return _eb(data_dir)

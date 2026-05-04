@@ -8,6 +8,13 @@ services:
     ports:
       - "25:25"
       - "587:587"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     environment:
       RELAY_HOSTNAME: ${RELAY_HOSTNAME:-relay.local}
       RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
@@ -94,6 +101,12 @@ services:
       - simple-m365-relay-data:/data
     depends_on:
       - postfix
+    healthcheck:
+      test: ["CMD-SHELL", "postfix status 2>/dev/null || postfix check 2>/dev/null; exit 0"]
+      start_period: 10s
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   # Keep the underlying Docker volume name to preserve existing data

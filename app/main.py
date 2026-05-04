@@ -1679,19 +1679,26 @@ def _parse_device_flow_log(log: str) -> dict:
             url = "https://microsoft.com/devicelogin"
 
     # Code (best effort)
+    # Notes:
+    # - Microsoft device codes can be hyphenated (ABCD-EFGH) or plain (H1TY9Q3YK).
+    # - Some clients print lowercase codes; normalize to uppercase.
     code = None
-    m = re.search(r"\b([A-Z0-9]{4,}-[A-Z0-9]{4,})\b", txt)
+
+    m = re.search(r"\b([A-Z0-9]{4,}-[A-Z0-9]{4,})\b", txt, re.IGNORECASE)
     if m:
         code = m.group(1)
     else:
-        # common sasl-xoauth2-tool phrasing: "enter the code ABCDEF..."
-        m2 = re.search(r"enter\s+the\s+code\s+([A-Z0-9]{8,})\b", txt, re.IGNORECASE)
+        # common phrasing: "enter the code ABCDEF..." or "use code ABCDEF..."
+        m2 = re.search(r"(?:enter|use)\s+(?:the\s+)?code\s+([A-Z0-9]{6,})\b", txt, re.IGNORECASE)
         if m2:
             code = m2.group(1)
         else:
-            m3 = re.search(r"code\s*[: ]\s*([A-Z0-9]{8,})\b", txt, re.IGNORECASE)
+            m3 = re.search(r"\bcode(?:\s+is)?\s*[: ]\s*([A-Z0-9]{6,})\b", txt, re.IGNORECASE)
             if m3:
                 code = m3.group(1)
+
+    if code:
+        code = str(code).strip().upper()
 
     # Exit code
     exit_code = None

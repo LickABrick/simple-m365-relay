@@ -8,7 +8,14 @@ import socketserver
 from pathlib import Path
 
 # NOTE: control.py is executed as a script (not a package). Use a local import.
-from backup import b64d, b64e, export_bundle, import_bundle
+# control.py is executed as a script (python /opt/ms365-relay/postfix/control.py)
+# but also imported in tests via sys.path insertion.
+# Use a relative import first; fall back to bare name for the script context.
+try:
+    from .backup import b64d, b64e, export_bundle, import_bundle  # noqa: F401
+except ImportError:
+    # Container: running as __main__ with /opt/ms365-relay/postfix on sys.path
+    from backup import b64d, b64e, export_bundle, import_bundle  # noqa: F401
 
 
 def _dovecot_users_path() -> Path:
@@ -16,19 +23,22 @@ def _dovecot_users_path() -> Path:
 
 
 def _ensure_dovecot_readable(path: Path) -> None:
+    import logging
+    _log = logging.getLogger(__name__)
+
     try:
         import pwd, grp
 
         duid = pwd.getpwnam("dovecot").pw_uid
         dgid = grp.getgrnam("dovecot").gr_gid
         os.chown(path, duid, dgid)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("failed to chown dovecot user for %s: %s", path, e)
 
     try:
         os.chmod(path, 0o640)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("failed to chmod %s: %s", path, e)
 
 
 def _has_ctl(s: str) -> bool:
@@ -488,6 +498,7 @@ def refresh_token() -> str:
     import time as _time
     import urllib.parse
     import urllib.request
+    import urllib.error
 
     with _refresh_lock:
         cfg = load_cfg()
@@ -539,6 +550,35 @@ def refresh_token() -> str:
             with urllib.request.urlopen(req, timeout=20) as r:
                 resp_raw = r.read().decode("utf-8", errors="ignore")
                 resp = json.loads(resp_raw)
+        except urllib.error.HTTPError as e:
+            # HTTPError contains a response body which often includes a useful JSON payload
+            # (error + error_description, e.g. invalid_grant). Surface it in the log.
+            err_body = ""
+            try:
+                err_body = e.read().decode("utf-8", errors="ignore")
+            except Exception:
+                err_body = ""
+
+            detail = ""
+            try:
+                obj = json.loads(err_body) if err_body else {}
+                if isinstance(obj, dict) and (obj.get("error") or obj.get("error_description")):
+                    ee = str(obj.get("error") or "").strip()
+                    ed = str(obj.get("error_description") or "").strip()
+                    if ee and ed:
+                        detail = f" ({ee}): {ed}"
+                    elif ee:
+                        detail = f" ({ee})"
+                    elif ed:
+                        detail = f": {ed}"
+            except Exception:
+                pass
+
+            out = f"Token refresh failed: HTTPError {getattr(e, 'code', '?')}: {getattr(e, 'reason', str(e))}{detail}"
+            if err_body:
+                out += f"\nResponse body: {err_body[:2000]}"
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
+            return out
         except Exception as e:
             out = f"Token refresh failed: {type(e).__name__}: {e}"
             _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
@@ -842,23 +882,49 @@ class H(BaseHTTPRequestHandler):
 def _auto_refresh_loop():
     import time as _time
 
-    last_run = 0
+    # Retry faster after a failed refresh (default 60s) so transient network
+    # outages do not require long manual wait/interaction.
+    try:
+        retry_after_fail_s = max(15, int(os.environ.get("AUTO_TOKEN_REFRESH_RETRY_SECONDS", "60") or "60"))
+    except Exception:
+        retry_after_fail_s = 60
+
+    next_run_at = 0.0
+
     while True:
         mins = get_auto_refresh_minutes()
         if mins <= 0:
             _time.sleep(5)
             continue
 
-        # run at most once per interval
         now = _time.time()
-        if now - last_run >= mins * 60:
-            try:
-                refresh_token()
-            except Exception as e:
-                _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] auto-refresh error: {e}\n")
-            last_run = now
+        if now < next_run_at:
+            _time.sleep(5)
+            continue
+
+        interval_s = max(60, int(mins * 60))
+
+        try:
+            out = str(refresh_token() or "")
+        except Exception as e:
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] auto-refresh error: {e}\n")
+            out = ""
+
+        next_run_at = now + _next_refresh_delay_seconds(out, interval_s, retry_after_fail_s)
 
         _time.sleep(5)
+
+
+def _next_refresh_delay_seconds(refresh_output: str, interval_s: int, retry_after_fail_s: int) -> int:
+    """Return delay until next auto-refresh attempt.
+
+    - Success -> normal interval
+    - Failure/unknown -> faster retry (capped by normal interval)
+    """
+    ok = str(refresh_output or "").startswith("Token refresh succeeded")
+    if ok:
+        return max(1, int(interval_s))
+    return max(1, min(int(interval_s), int(retry_after_fail_s)))
 
 
 class _UnixHTTPServer(socketserver.UnixStreamServer, HTTPServer):
