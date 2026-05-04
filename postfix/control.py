@@ -8,7 +8,14 @@ import socketserver
 from pathlib import Path
 
 # NOTE: control.py is executed as a script (not a package). Use a local import.
-from backup import b64d, b64e, export_bundle, import_bundle
+# control.py is executed as a script (python /opt/ms365-relay/postfix/control.py)
+# but also imported in tests via sys.path insertion.
+# Use a relative import first; fall back to bare name for the script context.
+try:
+    from .backup import b64d, b64e, export_bundle, import_bundle  # noqa: F401
+except ImportError:
+    # Container: running as __main__ with /opt/ms365-relay/postfix on sys.path
+    from backup import b64d, b64e, export_bundle, import_bundle  # noqa: F401
 
 
 def _dovecot_users_path() -> Path:
@@ -16,19 +23,22 @@ def _dovecot_users_path() -> Path:
 
 
 def _ensure_dovecot_readable(path: Path) -> None:
+    import logging
+    _log = logging.getLogger(__name__)
+
     try:
         import pwd, grp
 
         duid = pwd.getpwnam("dovecot").pw_uid
         dgid = grp.getgrnam("dovecot").gr_gid
         os.chown(path, duid, dgid)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("failed to chown dovecot user for %s: %s", path, e)
 
     try:
         os.chmod(path, 0o640)
-    except Exception:
-        pass
+    except Exception as e:
+        _log.warning("failed to chmod %s: %s", path, e)
 
 
 def _has_ctl(s: str) -> bool:
