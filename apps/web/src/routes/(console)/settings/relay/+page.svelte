@@ -21,7 +21,6 @@
 	let pendingChanges = $state(data.pending);
 	// svelte-ignore state_referenced_locally
 	let configDiff = $state(data.diff);
-	// svelte-ignore state_referenced_locally
 	const settings = superForm(
 		untrack(() => data.settingsForm),
 		{
@@ -105,8 +104,7 @@
 				</div>
 				{#if pendingChanges}<Badge variant="secondary">{configDiff.length} CHANGED</Badge>{/if}
 			</div>
-			</Card.Header
-		><Card.Content>
+		</Card.Header><Card.Content>
 			{#if pendingChanges && configDiff.length > 0}
 				<div class="config-diff" aria-label="Pending configuration changes">
 					<div class="config-diff-header">

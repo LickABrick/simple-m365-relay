@@ -19,7 +19,6 @@
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	let users = $state(data.users);
-	// svelte-ignore state_referenced_locally
 	const client = superForm(
 		untrack(() => data.clientForm),
 		{

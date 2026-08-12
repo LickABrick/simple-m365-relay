@@ -72,8 +72,7 @@ export function parseQueue(raw: string): QueueEntry[] {
 		if (value.startsWith('(') && value.endsWith(')')) {
 			current.reason = value.slice(1, -1);
 			current.diagnostic = parseDeliveryDiagnostic(current.reason);
-		}
-		else if (value && !value.startsWith('--')) current.recipients.push(value);
+		} else if (value && !value.startsWith('--')) current.recipients.push(value);
 	}
 	return entries;
 }

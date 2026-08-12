@@ -86,7 +86,7 @@
 								<Table.Cell
 									><div class="queue-status">
 										<Badge variant={entry.reason ? 'destructive' : 'secondary'}
-										>{entry.reason ? 'DEFERRED' : 'QUEUED'}</Badge
+											>{entry.reason ? 'DEFERRED' : 'QUEUED'}</Badge
 										>{#if entry.diagnostic}
 											<DeliveryDiagnostic diagnostic={entry.diagnostic} raw={entry.reason} />
 										{:else if entry.reason}<span>{entry.reason}</span>{/if}

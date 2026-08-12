@@ -13,7 +13,6 @@
 	import { relayState } from '$lib/client/relay-state.svelte';
 	import { untrack } from 'svelte';
 	let { data, form: result } = $props();
-	// svelte-ignore state_referenced_locally
 	const test = superForm(
 		untrack(() => data.testForm),
 		{

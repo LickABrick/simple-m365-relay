@@ -35,6 +35,7 @@ export type ConfigDiffEntry = {
 
 const deploymentConfig = (config: RelayConfig): Omit<RelayConfig, 'onboarding_complete'> => {
 	const { onboarding_complete: _onboardingComplete, ...deployable } = config;
+	void _onboardingComplete;
 	return deployable;
 };
 

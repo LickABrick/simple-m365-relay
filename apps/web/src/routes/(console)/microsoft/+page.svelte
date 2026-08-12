@@ -27,7 +27,6 @@
 		deviceLog = $state(data.deviceLog),
 		refreshLog = $state(data.refreshLog),
 		streamState = $state<LiveState>('loading');
-	// svelte-ignore state_referenced_locally
 	const microsoft = superForm(
 		untrack(() => data.microsoftForm),
 		{

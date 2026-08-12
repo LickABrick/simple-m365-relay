@@ -10,7 +10,6 @@
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { untrack } from 'svelte';
 	let { data } = $props();
-	// svelte-ignore state_referenced_locally
 	const login = superForm(
 		untrack(() => data.loginForm),
 		{ validators: zod4Client(loginSchema) }

@@ -20,7 +20,6 @@
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	let config = $state(data.config);
-	// svelte-ignore state_referenced_locally
 	const sender = superForm(
 		untrack(() => data.senderForm),
 		{

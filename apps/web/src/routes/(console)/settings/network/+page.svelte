@@ -11,7 +11,6 @@
 	import { toast } from 'svelte-sonner';
 	import { untrack } from 'svelte';
 	let { data } = $props();
-	// svelte-ignore state_referenced_locally
 	const network = superForm(
 		untrack(() => data.networkForm),
 		{

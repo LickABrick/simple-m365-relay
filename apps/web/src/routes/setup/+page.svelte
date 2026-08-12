@@ -10,7 +10,6 @@
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { untrack } from 'svelte';
 	let { data } = $props();
-	// svelte-ignore state_referenced_locally
 	const setup = superForm(
 		untrack(() => data.setupForm),
 		{

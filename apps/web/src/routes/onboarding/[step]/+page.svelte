@@ -24,28 +24,24 @@
 	import * as Alert from '$lib/components/ui/alert';
 	import { analyzeOAuthCapabilities } from '$lib/oauth-capabilities';
 	let { data, form } = $props();
-	// svelte-ignore state_referenced_locally
 	const relay = superForm(
 		untrack(() => data.relayForm),
 		{
 			validators: zod4Client(relaySettingsSchema)
 		}
 	);
-	// svelte-ignore state_referenced_locally
 	const network = superForm(
 		untrack(() => data.networkForm),
 		{
 			validators: zod4Client(networkSettingsSchema)
 		}
 	);
-	// svelte-ignore state_referenced_locally
 	const microsoft = superForm(
 		untrack(() => data.microsoftForm),
 		{
 			validators: zod4Client(microsoftSettingsSchema)
 		}
 	);
-	// svelte-ignore state_referenced_locally
 	const client = superForm(
 		untrack(() => data.clientForm),
 		{
