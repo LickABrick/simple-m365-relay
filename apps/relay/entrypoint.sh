@@ -93,7 +93,12 @@ service auth {
 EOF
 
 mkdir -p /var/spool/postfix/private || true
-chown -R postfix:postfix /var/spool/postfix || true
+# The Postfix queue root is a privileged boundary and must remain root-owned.
+# Dovecot only needs the private socket directory it serves to Postfix.
+chown root:postfix /var/spool/postfix || true
+chmod 755 /var/spool/postfix || true
+chown postfix:postfix /var/spool/postfix/private || true
+chmod 700 /var/spool/postfix/private || true
 
 if [ ! -f "$DATA_DIR/sasl/users" ]; then
   touch "$DATA_DIR/sasl/users" || true
