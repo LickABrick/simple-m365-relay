@@ -12,14 +12,15 @@ RUN apk add --no-cache \
     curl \
     nodejs npm \
   && python3 -m venv /opt/venv \
-  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-  && /opt/venv/bin/pip install --no-cache-dir fastapi uvicorn jinja2 python-multipart pyyaml itsdangerous argon2-cffi
+  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip
 
 ENV PATH="/opt/venv/bin:$PATH"
 
 RUN addgroup -S -g 10001 app && adduser -S -D -u 10001 -G app -h /home/app app
 
 WORKDIR /opt/ms365-relay
+COPY requirements-ui.txt /opt/ms365-relay/requirements-ui.txt
+RUN /opt/venv/bin/pip install --no-cache-dir --requirement /opt/ms365-relay/requirements-ui.txt
 COPY app/ /opt/ms365-relay/app/
 COPY tailwind.config.js /opt/ms365-relay/tailwind.config.js
 

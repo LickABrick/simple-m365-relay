@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from typing import Optional
 
 from fastapi import HTTPException, Request
@@ -55,7 +56,7 @@ def require_csrf(request: Request, provided: str) -> None:
     expected = getattr(request.state, "csrf", None)
     if not expected:
         raise HTTPException(status_code=403, detail="CSRF not initialized")
-    if not provided or str(provided) != str(expected):
+    if not provided or not secrets.compare_digest(str(provided), str(expected)):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
 

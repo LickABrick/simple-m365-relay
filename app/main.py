@@ -17,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+APP_DIR = Path(__file__).resolve().parent
 CFG_JSON = DATA_DIR / "config" / "config.json"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 
@@ -29,37 +30,53 @@ APP_GITHUB_REPO_URL = f"https://github.com/{APP_GITHUB_REPO}"
 UPDATE_CACHE_PATH = DATA_DIR / "state" / "update_check.json"
 UPDATE_CHECK_TTL_SECONDS = int(os.environ.get("UPDATE_CHECK_TTL_SECONDS") or "43200")  # 12h
 
-templates = Jinja2Templates(directory="/opt/ms365-relay/app/templates")
+templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 templates.env.globals["APP_VERSION"] = APP_VERSION
 templates.env.globals["APP_GITHUB_REPO_URL"] = APP_GITHUB_REPO_URL
 
+
+def _template_response(name: str, context: dict, status_code: int = 200):
+    """Render using Starlette's current request-first template API."""
+    request = context.get("request")
+    if request is None:
+        raise ValueError("template context requires request")
+    return templates.TemplateResponse(
+        request=request, name=name, context=context, status_code=status_code
+    )
+
 app = FastAPI(title="Simple M365 Relay")
-app.mount("/static", StaticFiles(directory="/opt/ms365-relay/app/static"), name="static")
+app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
 
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    request.state.csp_nonce = secrets.token_urlsafe(24)
     resp = await call_next(request)
-    # Minimal CSP (still allows inline JS due to current template).
     resp.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
         "img-src 'self' data:; "
         "style-src 'self' 'unsafe-inline'; "
-        "script-src 'self' 'unsafe-inline'; "
+        f"script-src 'self' 'nonce-{request.state.csp_nonce}'; "
         "connect-src 'self'; "
+        "form-action 'self'; "
         "base-uri 'self'; "
+        "object-src 'none'; "
         "frame-ancestors 'none'",
     )
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Permissions-Policy", "camera=(), geolocation=(), microphone=()")
+    if is_https_request(request):
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return resp
 
 from . import auth  # noqa: E402
 from . import lockout  # noqa: E402
 from .security import client_ip, get_csrf_from_request, is_https_request, require_csrf  # noqa: E402
-from .backup import b64d, b64e, validate_cfg_obj  # noqa: E402
+from .backup import b64d, b64e  # noqa: E402
+from .config import validate_cfg_obj  # noqa: E402
 
 POSTFIX_CONTROL_URL = os.environ.get("POSTFIX_CONTROL_URL", "http://postfix:18080").rstrip("/")
 POSTFIX_CONTROL_SOCKET = (os.environ.get("POSTFIX_CONTROL_SOCKET") or "").strip()
@@ -861,7 +878,7 @@ def setup_get(request: Request):
 
     # First-run CSRF for setup screen
     tok = secrets.token_urlsafe(24)
-    resp = templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": None, "csrf_token": tok})
+    resp = _template_response("setup.html", {"request": request, "title": "Create admin", "error": None, "csrf_token": tok})
     resp.set_cookie("sm365r_setup_csrf", tok, httponly=True, samesite="lax", secure=is_https_request(request), max_age=3600, path="/")
     return resp
 
@@ -878,19 +895,23 @@ def setup_post(
         return RedirectResponse(url="/", status_code=303)
 
     expected = request.cookies.get("sm365r_setup_csrf", "")
-    if expected and csrf_token != expected:
-        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Invalid CSRF token.", "csrf_token": expected})
+    if not expected or not csrf_token or not secrets.compare_digest(csrf_token, expected):
+        return _template_response(
+            "setup.html",
+            {"request": request, "title": "Create admin", "error": "This form expired. Refresh the page and try again.", "csrf_token": expected},
+            status_code=403,
+        )
 
     username = (username or "").strip()
     if not username:
-        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Username is required."})
+        return _template_response("setup.html", {"request": request, "title": "Create admin", "error": "Username is required."})
     if len(username) < 3:
-        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Username must be at least 3 characters."})
+        return _template_response("setup.html", {"request": request, "title": "Create admin", "error": "Username must be at least 3 characters."})
     if password != password2:
-        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": "Passwords do not match."})
+        return _template_response("setup.html", {"request": request, "title": "Create admin", "error": "Passwords do not match."})
     ok, msg = auth.validate_new_password(password)
     if not ok:
-        return templates.TemplateResponse("setup.html", {"request": request, "title": "Create admin", "error": msg})
+        return _template_response("setup.html", {"request": request, "title": "Create admin", "error": msg})
 
     pw_hash = auth.hash_password(password)
     auth.save_admin(username, pw_hash)
@@ -919,7 +940,7 @@ def login_get(request: Request):
         return RedirectResponse(url="/", status_code=303)
 
     tok = secrets.token_urlsafe(24)
-    resp = templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": None, "csrf_token": tok})
+    resp = _template_response("login.html", {"request": request, "title": "Sign in", "error": None, "csrf_token": tok})
     resp.set_cookie("sm365r_login_csrf", tok, httponly=True, samesite="lax", secure=is_https_request(request), max_age=3600, path="/")
     return resp
 
@@ -935,30 +956,34 @@ def login_post(
         return RedirectResponse(url="/setup", status_code=303)
 
     expected = request.cookies.get("sm365r_login_csrf", "")
-    if expected and csrf_token != expected:
-        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Invalid CSRF token.", "csrf_token": expected})
+    if not expected or not csrf_token or not secrets.compare_digest(csrf_token, expected):
+        return _template_response(
+            "login.html",
+            {"request": request, "title": "Sign in", "error": "This form expired. Refresh the page and try again.", "csrf_token": expected},
+            status_code=403,
+        )
 
     ip = client_ip(request)
     rem = lockout.get_lock_remaining(ip)
     if rem > 0:
-        return templates.TemplateResponse(
+        return _template_response(
             "login.html",
             {"request": request, "title": "Sign in", "error": f"Too many failed attempts. Try again in {rem} seconds.", "csrf_token": expected},
         )
 
     admin = auth.load_admin()
     if not admin:
-        return templates.TemplateResponse("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin.", "csrf_token": expected})
+        return _template_response("login.html", {"request": request, "title": "Sign in", "error": "Auth state missing/corrupt. Recreate admin.", "csrf_token": expected})
 
     username = (username or "").strip()
     if username != admin.username or (not auth.verify_password(password, admin.password_hash)):
         count, lock_for = lockout.record_failure(ip)
         if lock_for:
-            return templates.TemplateResponse(
+            return _template_response(
                 "login.html",
                 {"request": request, "title": "Sign in", "error": f"Too many failed attempts. Locked for {lock_for//60} minutes.", "csrf_token": expected},
             )
-        return templates.TemplateResponse(
+        return _template_response(
             "login.html",
             {"request": request, "title": "Sign in", "error": "Invalid username or password.", "csrf_token": expected},
         )
@@ -1008,7 +1033,7 @@ def onboarding_get(request: Request):
     toast = str(request.query_params.get("toast") or "")
     toast_level = str(request.query_params.get("toastLevel") or "ok")
 
-    return templates.TemplateResponse(
+    return _template_response(
         "onboarding.html",
         {
             "request": request,
@@ -1064,7 +1089,7 @@ def index(request: Request):
     user = getattr(request.state, "user", "")
     csrf_token = getattr(request.state, "csrf", "")
 
-    return templates.TemplateResponse(
+    return _template_response(
         "index.html",
         {
             "request": request,
@@ -1600,11 +1625,12 @@ def backup_import(request: Request, csrf_token: str = Form(""), file: UploadFile
     MAX_ENTRIES = 25
     MAX_META_BYTES = 256 * 1024
     MAX_CONFIG_BYTES = 1 * 1024 * 1024
-    MAX_SASL_BYTES = 50 * 1024 * 1024
+    MAX_USERS_BYTES = 5 * 1024 * 1024
     ALLOWED = {
         "meta.json": MAX_META_BYTES,
         "config/config.json": MAX_CONFIG_BYTES,
-        "sasl/sasldb2": MAX_SASL_BYTES,
+        "sasl/users": MAX_USERS_BYTES,
+        "sasl/sasldb2": MAX_USERS_BYTES,
     }
 
     if len(raw) > MAX_ZIP_BYTES:
@@ -1866,6 +1892,7 @@ def _write_update_cache(obj: dict) -> None:
     try:
         UPDATE_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         UPDATE_CACHE_PATH.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.chmod(UPDATE_CACHE_PATH, 0o600)
     except Exception:
         pass
 

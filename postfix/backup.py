@@ -3,7 +3,7 @@
 
 We export/import ONLY:
 - /data/config/config.json
-- /data/sasl/sasldb2  (SMTP AUTH users)
+- /data/sasl/users  (Dovecot passwd-file SMTP AUTH users)
 
 We intentionally do NOT include:
 - /data/state/auth.json (admin user)
@@ -12,7 +12,7 @@ We intentionally do NOT include:
 Bundle format:
 - zip containing:
   - config/config.json
-  - sasl/sasldb2  (optional)
+  - sasl/users  (optional)
   - meta.json
 
 This module is stdlib-only.
@@ -33,24 +33,26 @@ MAX_ZIP_BYTES = 10 * 1024 * 1024  # 10 MiB (compressed)
 MAX_ENTRIES = 25
 MAX_META_BYTES = 256 * 1024
 MAX_CONFIG_BYTES = 1 * 1024 * 1024
-MAX_SASL_BYTES = 50 * 1024 * 1024
+MAX_USERS_BYTES = 5 * 1024 * 1024
 
 ALLOWED_NAMES = {
     "meta.json": MAX_META_BYTES,
     "config/config.json": MAX_CONFIG_BYTES,
-    "sasl/sasldb2": MAX_SASL_BYTES,
+    "sasl/users": MAX_USERS_BYTES,
+    # Read-only compatibility with pre-Dovecot backup bundles.
+    "sasl/sasldb2": MAX_USERS_BYTES,
 }
 
 
 def export_bundle(data_dir: Path) -> Tuple[bytes, Dict[str, Any]]:
     cfg_path = data_dir / "config" / "config.json"
-    sasl_path = data_dir / "sasl" / "sasldb2"
+    users_path = data_dir / "sasl" / "users"
 
     meta: Dict[str, Any] = {
         "format": "simple-m365-relay-backup",
         "version": 1,
-        "created_at": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        "includes": {"config": bool(cfg_path.exists()), "smtp_auth_users": bool(sasl_path.exists())},
+        "created_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "includes": {"config": bool(cfg_path.exists()), "smtp_auth_users": bool(users_path.exists())},
     }
 
     buf = io.BytesIO()
@@ -58,8 +60,8 @@ def export_bundle(data_dir: Path) -> Tuple[bytes, Dict[str, Any]]:
         z.writestr("meta.json", json.dumps(meta, indent=2, sort_keys=True) + "\n")
         if cfg_path.exists():
             z.writestr("config/config.json", cfg_path.read_bytes())
-        if sasl_path.exists():
-            z.writestr("sasl/sasldb2", sasl_path.read_bytes())
+        if users_path.exists():
+            z.writestr("sasl/users", users_path.read_bytes())
 
     return buf.getvalue(), meta
 
@@ -106,10 +108,11 @@ def validate_and_extract_bundle(zip_bytes: bytes) -> Dict[str, Any]:
             meta = None
 
     cfg_raw = files.get("config/config.json")
-    sasl_raw = files.get("sasl/sasldb2")
+    users_raw = files.get("sasl/users")
+    legacy_sasldb_raw = files.get("sasl/sasldb2")
 
-    if not cfg_raw and not sasl_raw:
-        raise ValueError("Backup bundle is empty (missing config and sasl).")
+    if not cfg_raw and users_raw is None and legacy_sasldb_raw is None:
+        raise ValueError("Backup bundle is empty (missing config and SMTP AUTH users).")
 
     cfg_obj = None
     if cfg_raw:
@@ -123,10 +126,11 @@ def validate_and_extract_bundle(zip_bytes: bytes) -> Dict[str, Any]:
     return {
         "meta": meta,
         "has_config": bool(cfg_raw),
-        "has_sasl": bool(sasl_raw),
+        "has_users": users_raw is not None,
+        "has_legacy_sasldb": legacy_sasldb_raw is not None,
         "config_obj": cfg_obj,
         "config_bytes": cfg_raw,
-        "sasl_bytes": sasl_raw,
+        "users_bytes": users_raw,
     }
 
 
@@ -134,7 +138,9 @@ def import_bundle(data_dir: Path, zip_bytes: bytes) -> Dict[str, Any]:
     info = validate_and_extract_bundle(zip_bytes)
 
     cfg_bytes = info.get("config_bytes")
-    sasl_bytes = info.get("sasl_bytes")
+    users_bytes = info.get("users_bytes")
+    if info.get("has_legacy_sasldb") and users_bytes is None:
+        raise ValueError("Legacy sasldb2 backups cannot be imported after the Dovecot migration; recreate SMTP AUTH users in the UI.")
 
     # Write config.json atomically-ish
     if cfg_bytes:
@@ -144,17 +150,19 @@ def import_bundle(data_dir: Path, zip_bytes: bytes) -> Dict[str, Any]:
         tmp.write_bytes(cfg_bytes)
         tmp.replace(cfg_path)
 
-    # Write sasldb2 atomically-ish
-    if sasl_bytes is not None:
-        sasl_path = data_dir / "sasl" / "sasldb2"
-        sasl_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = sasl_path.with_name(sasl_path.name + ".tmp")
-        tmp.write_bytes(sasl_bytes)
-        tmp.replace(sasl_path)
+    # Write the Dovecot passwd-file atomically. It contains plaintext SMTP AUTH
+    # passwords by design, so never leave it group/world-readable during import.
+    if users_bytes is not None:
+        users_path = data_dir / "sasl" / "users"
+        users_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = users_path.with_name(users_path.name + ".tmp")
+        tmp.write_bytes(users_bytes)
+        tmp.chmod(0o600)
+        tmp.replace(users_path)
 
     return {
         "ok": True,
-        "imported": {"config": bool(cfg_bytes), "smtp_auth_users": bool(sasl_bytes is not None and len(sasl_bytes) > 0)},
+        "imported": {"config": bool(cfg_bytes), "smtp_auth_users": bool(users_bytes)},
     }
 
 

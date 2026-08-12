@@ -28,8 +28,10 @@ RUN set -eux; \
 
 # Python UI deps in a venv (avoid PEP 668 externally-managed-environment)
 RUN python3 -m venv /opt/venv \
-  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-  && /opt/venv/bin/pip install --no-cache-dir fastapi uvicorn jinja2 python-multipart pyyaml
+  && /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+
+COPY requirements-ui.txt /tmp/requirements-ui.txt
+RUN /opt/venv/bin/pip install --no-cache-dir --requirement /tmp/requirements-ui.txt
 
 ############################
 # Runtime: slim image

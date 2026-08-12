@@ -9,9 +9,9 @@
   <meta name="csrf-token" content="{{ csrf_token or '' }}" />
 
   <link rel="stylesheet" href="/static/tailwind.css" />
-  <script src="/static/lucide.min.js"></script>
+  <script nonce="{{ request.state.csp_nonce }}" src="/static/lucide.min.js"></script>
 
-  <style>
+  <style nonce="{{ request.state.csp_nonce }}">
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     #toast.toast-error { border-color: rgb(254 202 202); background: rgb(254 242 242); color: rgb(127 29 29); }
     .dark #toast.toast-error { border-color: rgb(127 29 29 / 0.35); background: rgb(69 10 10 / 0.4); color: rgb(254 226 226); }
@@ -19,7 +19,7 @@
     .dot-active { background: rgb(37 99 235) !important; }
   </style>
 
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
     // server-provided defaults
     window.SM365R = window.SM365R || {};
     window.SM365R.ms365User = {{ (ms365_user or '') | tojson }};
@@ -988,7 +988,7 @@
                       <label class="text-sm font-medium">Backup ZIP</label>
                       <input name="file" type="file" accept=".zip,application/zip" class="mt-1 block w-full cursor-pointer rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-slate-200 dark:border-slate-800 dark:bg-slate-950 dark:file:bg-slate-800 dark:file:text-slate-100" required />
                       <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        Includes <span class="mono">config/config.json</span> + <span class="mono">sasl/sasldb2</span>. Excludes admin credentials and OAuth tokens.
+                        Includes <span class="mono">config/config.json</span> + <span class="mono">sasl/users</span>. Excludes admin credentials and OAuth tokens. The user file contains SMTP AUTH passwords, so protect the ZIP as a secret.
                       </div>
                     </div>
                     <div class="sm:col-span-1">
@@ -1024,13 +1024,13 @@
         <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div class="sm:col-span-2">
             <label class="text-sm font-medium">Relayhost <span class="text-xs text-slate-500">(required)</span></label>
-            <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Example: <span class="mono">[smtp.office365.com]:587</span></div>
           </div>
 
           <div class="sm:col-span-2">
             <label class="text-sm font-medium">Microsoft 365 SMTP user <span class="text-xs text-slate-500">(required)</span></label>
-            <input name="ms365_smtp_user" value="{{ cfg.ms365_smtp_user or '' }}" placeholder="postfix@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input name="ms365_smtp_user" value="{{ cfg.ms365_smtp_user or '' }}" placeholder="postfix@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">This is the authenticated account used for OAuth token storage and identity.</div>
           </div>
 
@@ -1051,7 +1051,7 @@
 
           <div>
             <label class="text-sm font-medium">Port 25 (smtp)</label>
-            <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+            <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950">
               {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
               <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
               <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
@@ -1060,7 +1060,7 @@
           </div>
           <div>
             <label class="text-sm font-medium">Port 587 (submission)</label>
-            <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+            <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950">
               {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
               <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
               <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
@@ -1092,15 +1092,15 @@
         <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label class="text-sm font-medium">Tenant ID <span class="text-xs text-slate-500">(required)</span></label>
-            <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
           </div>
           <div>
             <label class="text-sm font-medium">Client ID <span class="text-xs text-slate-500">(required)</span></label>
-            <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
           </div>
           <div>
             <label class="text-sm font-medium">Auto refresh (minutes)</label>
-            <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
           </div>
 
@@ -1260,19 +1260,19 @@
         <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div class="sm:col-span-2">
             <label class="text-sm font-medium">To</label>
-            <input id="testTo" placeholder="you@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input id="testTo" placeholder="you@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
           </div>
           <div class="sm:col-span-2">
             <label class="text-sm font-medium">From (optional)</label>
-            <input id="testFrom" placeholder="(leave blank to use default/fallback)" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input id="testFrom" placeholder="(leave blank to use default/fallback)" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
           </div>
           <div class="sm:col-span-2">
             <label class="text-sm font-medium">Subject</label>
-            <input id="testSubject" value="Simple M365 Relay test" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input id="testSubject" value="Simple M365 Relay test" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
           </div>
           <div class="sm:col-span-2">
             <label class="text-sm font-medium">Body</label>
-            <textarea id="testBody" rows="4" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">Hello from Simple M365 Relay.</textarea>
+            <textarea id="testBody" rows="4" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950">Hello from Simple M365 Relay.</textarea>
           </div>
         </div>
 
@@ -1318,11 +1318,11 @@
         <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label class="text-sm font-medium">Login</label>
-            <input id="userLogin" placeholder="example" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input id="userLogin" placeholder="example" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
           </div>
           <div>
             <label class="text-sm font-medium">Password</label>
-            <input id="userPw" type="password" placeholder="********" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+            <input id="userPw" type="password" placeholder="********" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Min 8 characters.</div>
           </div>
         </div>

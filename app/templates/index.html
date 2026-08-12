@@ -11,11 +11,11 @@
   <link rel="stylesheet" href="/static/tailwind.css" />
 
   <!-- Lucide icons -->
-  <script src="/static/lucide.min.js"></script>
+  <script nonce="{{ request.state.csp_nonce }}" src="/static/lucide.min.js"></script>
 
   <meta name="csrf-token" content="{{ csrf_token }}" />
 
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
     // Theme (persisted)
     const themeKey = 'simple-m365-relay-theme';
     const saved = localStorage.getItem(themeKey);
@@ -540,7 +540,17 @@
         if (sel && Array.isArray(j.from_identities)) {
           const current = sel.value;
           // Rebuild options
-          sel.innerHTML = '<option value="">Custom…</option>' + j.from_identities.map(a => `<option value="${a}">${a}</option>`).join('');
+          sel.replaceChildren();
+          const customOption = document.createElement('option');
+          customOption.value = '';
+          customOption.textContent = 'Custom…';
+          sel.appendChild(customOption);
+          for (const identity of j.from_identities) {
+            const option = document.createElement('option');
+            option.value = String(identity);
+            option.textContent = String(identity);
+            sel.appendChild(option);
+          }
           // try restore
           for (const opt of sel.options) {
             if (opt.value === current) { sel.value = current; break; }
@@ -1306,7 +1316,7 @@
       file.addEventListener('change', () => {
         if (!file.files || !file.files.length) return;
         const ok = window.confirm(
-          'Import backup?\n\nThis will OVERWRITE your saved settings and SMTP AUTH users (sasldb2).\nIt will NOT import admin credentials or OAuth tokens.\n\nAfter import, you still need to click Apply Changes.'
+          'Import backup?\n\nThis will OVERWRITE your saved settings and SMTP AUTH users.\nIt will NOT import admin credentials or OAuth tokens.\n\nAfter import, you still need to click Apply Changes.'
         );
         if (!ok) {
           file.value = '';
@@ -1336,7 +1346,7 @@
     });
   </script>
 
-  <style>
+  <style nonce="{{ request.state.csp_nonce }}">
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
     /* toast */
@@ -1702,15 +1712,15 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
             <div>
               <label class="text-sm font-medium">Hostname</label>
-              <input name="hostname" value="{{ cfg.hostname }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="hostname" value="{{ cfg.hostname }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             </div>
             <div>
               <label class="text-sm font-medium">Domain</label>
-              <input name="domain" value="{{ cfg.domain }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="domain" value="{{ cfg.domain }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             </div>
             <div class="sm:col-span-2">
               <label class="text-sm font-medium">Trusted subnets (mynetworks; space/comma separated)</label>
-              <input name="mynetworks" value="{{ (cfg.mynetworks or []) | join(' ') }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="mynetworks" value="{{ (cfg.mynetworks or []) | join(' ') }}" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             </div>
 
             <div class="sm:col-span-2">
@@ -1718,13 +1728,13 @@
             </div>
             <div class="sm:col-span-2">
               <label class="text-sm font-medium">Relayhost</label>
-              <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="relayhost" value="{{ cfg.relayhost or '' }}" placeholder="[smtp.office365.com]:587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Used by Postfix for outbound delivery.</div>
             </div>
 
             <div class="sm:col-span-2">
               <label class="text-sm font-medium">Microsoft 365 SMTP user</label>
-              <input name="ms365_smtp_user" value="{{ cfg.ms365_smtp_user or '' }}" placeholder="postfix@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="ms365_smtp_user" value="{{ cfg.ms365_smtp_user or '' }}" placeholder="postfix@example.com" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
               {% if (env.ENV_MS365_SMTP_USER or '') %}
                 <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Note: <span class="mono">MS365_SMTP_USER</span> is set via environment to <span class="mono">{{ env.ENV_MS365_SMTP_USER }}</span> and will override this value until removed.
@@ -1740,7 +1750,7 @@
             </div>
             <div>
               <label class="text-sm font-medium">Port 25 (smtp)</label>
-              <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+              <select name="tls_25" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950">
                 {% set v = (cfg.tls or {}).get('smtpd_25','may') %}
                 <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
                 <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
@@ -1749,7 +1759,7 @@
             </div>
             <div>
               <label class="text-sm font-medium">Port 587 (submission)</label>
-              <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">
+              <select name="tls_587" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950">
                 {% set v = (cfg.tls or {}).get('smtpd_587','encrypt') %}
                 <option value="none" {% if v=='none' %}selected{% endif %}>none</option>
                 <option value="may" {% if v=='may' %}selected{% endif %}>may</option>
@@ -1762,15 +1772,15 @@
             </div>
             <div>
               <label class="text-sm font-medium">Tenant ID</label>
-              <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="tenant_id" value="{{ (cfg.oauth or {}).get('tenant_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             </div>
             <div>
               <label class="text-sm font-medium">Client ID</label>
-              <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="client_id" value="{{ (cfg.oauth or {}).get('client_id','') }}" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             </div>
             <div>
               <label class="text-sm font-medium">Auto refresh (minutes)</label>
-              <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="auto_refresh_minutes" value="{{ (cfg.oauth or {}).get('auto_refresh_minutes',30) }}" type="number" min="0" max="1440" step="1" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">0 = disabled.</div>
             </div>
             <div class="hidden sm:block"></div>
@@ -1802,7 +1812,7 @@
 
           <div class="mt-3">
             <div class="mb-2 flex items-center gap-2">
-              <input id="usersSearch" placeholder="Search users…" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" oninput="filterUsersTable()" />
+              <input id="usersSearch" placeholder="Search users…" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" oninput="filterUsersTable()" />
               <button type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="clearUsersFilter()">
                 <i data-lucide="eraser" class="h-4 w-4"></i>
                 Clear
@@ -1845,8 +1855,8 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Add / update user</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">These are SMTP AUTH credentials for clients connecting to this relay.</div>
-              <input name="login" placeholder="username" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-              <input name="password" placeholder="password" type="password" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <input name="login" placeholder="username" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-900" />
+              <input name="password" placeholder="password" type="password" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-900" />
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="user-plus" class="h-4 w-4"></i>
                 Save
@@ -1876,7 +1886,7 @@
 
           <div class="mt-3">
             <div class="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <input id="sendersSearch" placeholder="Search… (user or address)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" oninput="filterSendersTable()" />
+              <input id="sendersSearch" placeholder="Search… (user or address)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" oninput="filterSendersTable()" />
               <button type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="clearSendersFilter()">
                 <i data-lucide="eraser" class="h-4 w-4"></i>
                 Clear
@@ -1938,8 +1948,8 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Add allowed From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Tip: submit the same SMTP user again to add more From addresses.</div>
-              <input name="login" list="smtpUsersDatalist" placeholder="SMTP user (login)" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-              <textarea name="from_addr" rows="3" placeholder="from1@example.com&#10;from2@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900"></textarea>
+              <input name="login" list="smtpUsersDatalist" placeholder="SMTP user (login)" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-900" />
+              <textarea name="from_addr" rows="3" placeholder="from1@example.com&#10;from2@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-900"></textarea>
               <div class="text-xs text-slate-500 dark:text-slate-400">Enter one address per line (or comma/space separated).</div>
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="plus" class="h-4 w-4"></i>
@@ -1951,8 +1961,8 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}" />
               <div class="text-sm font-semibold">Set fallback From</div>
               <div class="text-xs text-slate-500 dark:text-slate-400">Stored per SMTP AUTH user (login). Used when clients don’t specify a From address.</div>
-              <input name="login" list="smtpUsersDatalist" placeholder="SMTP user (login)" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
-              <input name="from_addr" placeholder="fallback-from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" />
+              <input name="login" list="smtpUsersDatalist" placeholder="SMTP user (login)" class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-900" />
+              <input name="from_addr" placeholder="fallback-from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-900" />
               <button type="submit" class="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-500">
                 <i data-lucide="pin" class="h-4 w-4"></i>
                 Save default
@@ -2095,20 +2105,20 @@
             <div class="sm:col-span-1">
               <label class="text-sm font-medium">From</label>
               <div class="mt-1 flex gap-2">
-                <select id="fromSelect" class="w-44 shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" onchange="syncFromSelect()">
+                <select id="fromSelect" class="w-44 shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" onchange="syncFromSelect()">
                   <option value="">Custom…</option>
                   {% for a in from_identities %}
                   <option value="{{ a }}">{{ a }}</option>
                   {% endfor %}
                 </select>
-                <input id="fromInput" name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+                <input id="fromInput" name="from_addr" placeholder="from@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
               </div>
               <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">Tip: M365 must allow “Send As” for this From address.</div>
             </div>
             <div class="sm:col-span-1">
               <label class="text-sm font-medium">To</label>
               <div class="mt-1 flex gap-2">
-                <input id="toInput" name="to_addr" placeholder="to@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+                <input id="toInput" name="to_addr" placeholder="to@example.com" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
                 <button type="button" class="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="fillToMyself()" title="Send to M365 user">
                   <i data-lucide="user" class="h-4 w-4"></i>
                   Myself
@@ -2117,11 +2127,11 @@
             </div>
             <div class="sm:col-span-2">
               <label class="text-sm font-medium">Subject</label>
-              <input name="subject" value="Test message" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950" />
+              <input name="subject" value="Test message" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950" />
             </div>
             <div class="sm:col-span-2">
               <label class="text-sm font-medium">Body</label>
-              <textarea name="body" rows="5" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-950">Does it work?</textarea>
+              <textarea name="body" rows="5" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-950">Does it work?</textarea>
             </div>
             <div class="sm:col-span-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div class="text-xs text-slate-500 dark:text-slate-400">If this errors: check “Recent warnings / errors” and “Queue (mailq)”.</div>
@@ -2185,7 +2195,7 @@
                       <input id="logOnlyProblems" type="checkbox" class="h-4 w-4" onchange="applyLogFilter()" />
                       Show only warnings/errors
                     </label>
-                    <input id="logSearch" placeholder="Filter… (e.g. sasl-xoauth2, deferred, sent)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none dark:border-slate-800 dark:bg-slate-900" oninput="applyLogFilter()" />
+                    <input id="logSearch" placeholder="Filter… (e.g. sasl-xoauth2, deferred, sent)" class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:border-slate-800 dark:bg-slate-900" oninput="applyLogFilter()" />
                     <button type="button" class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800" onclick="clearLogFilter()">
                       <i data-lucide="eraser" class="h-4 w-4"></i>
                       Clear

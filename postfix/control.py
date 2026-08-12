@@ -807,6 +807,12 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._require_auth():
             return
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "invalid_content_length"})
+        if content_length > 12 * 1024 * 1024:
+            return self._json(413, {"error": "request_body_too_large"})
         if self.path == "/render-reload":
             out = render_and_reload()
             return self._json(200, {"output": out})
@@ -873,6 +879,8 @@ class H(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "invalid base64"})
             try:
                 res = import_bundle(DATA_DIR, zip_bytes)
+                if res.get("imported", {}).get("smtp_auth_users"):
+                    _ensure_dovecot_readable(_dovecot_users_path())
             except Exception as e:
                 return self._json(400, {"error": str(e)})
             return self._json(200, res)

@@ -1,3 +1,20 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    overflow-x: clip;
+  }
+
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid rgb(59 130 246);
+    outline-offset: 2px;
+  }
+
+  :where(button, [role="button"]):disabled,
+  :where(button, [role="button"])[aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}

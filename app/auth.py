@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import secrets
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +33,20 @@ def _read_json(path: Path) -> dict:
 
 def _write_json(path: Path, obj: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    payload = json.dumps(obj, indent=2, sort_keys=True) + "\n"
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+            tmp.write(payload)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, path)
+    finally:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
 
 
 def admin_exists() -> bool:
@@ -69,11 +83,14 @@ def ensure_secret() -> bytes:
     if SECRET_PATH.exists() and SECRET_PATH.stat().st_size > 0:
         return SECRET_PATH.read_bytes()
     key = secrets.token_bytes(32)
-    SECRET_PATH.write_bytes(key)
     try:
-        os.chmod(SECRET_PATH, 0o600)
-    except Exception:
-        pass
+        fd = os.open(SECRET_PATH, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return SECRET_PATH.read_bytes()
+    with os.fdopen(fd, "wb") as secret_file:
+        secret_file.write(key)
+        secret_file.flush()
+        os.fsync(secret_file.fileno())
     return key
 
 
