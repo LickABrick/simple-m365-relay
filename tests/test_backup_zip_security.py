@@ -1,4 +1,5 @@
 import io
+import sqlite3
 import zipfile
 
 import pytest
@@ -43,15 +44,18 @@ def test_postfix_backup_traversal_only_is_empty_bundle():
 def test_postfix_backup_round_trip_uses_dovecot_users(tmp_path):
     from postfix import backup as pb
 
-    (tmp_path / "config").mkdir()
+    (tmp_path / "state").mkdir()
     (tmp_path / "sasl").mkdir()
-    (tmp_path / "config" / "config.json").write_text('{"hostname":"relay.local"}\n', encoding="utf-8")
+    with sqlite3.connect(tmp_path / "state" / "relay.db") as conn:
+        conn.execute("CREATE TABLE settings (id INTEGER PRIMARY KEY, config TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+        conn.execute("INSERT INTO settings VALUES (1, ?, 0)", ('{"hostname":"relay.local"}',))
     (tmp_path / "sasl" / "users").write_text("alice:{PLAIN}secret\n", encoding="utf-8")
 
     blob, meta = pb.export_bundle(tmp_path)
     parsed = pb.validate_and_extract_bundle(blob)
 
     assert meta["includes"]["smtp_auth_users"] is True
+    assert parsed["config_obj"] == {"hostname": "relay.local"}
     assert parsed["users_bytes"] == b"alice:{PLAIN}secret\n"
     with zipfile.ZipFile(io.BytesIO(blob)) as archive:
         assert "sasl/users" in archive.namelist()
