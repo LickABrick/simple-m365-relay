@@ -134,7 +134,7 @@
 						><FormTextField form={relay} name="hostname" label="Relay hostname" />
 						<FormTextField form={relay} name="domain" label="Relay domain" />
 						<FormTextField form={relay} name="relayhost" label="Upstream relay" />
-						><Button type="submit" disabled={$relaySubmitting}
+						<Button type="submit" disabled={$relaySubmitting}
 							>{#if $relaySubmitting}<Spinner data-icon="inline-start" />{/if}{$relaySubmitting
 								? 'Saving…'
 								: 'Save and continue'}{#if !$relaySubmitting}<Arrow
@@ -218,7 +218,7 @@
 						/>
 						<FormTextField form={microsoft} name="tenant_id" label="Tenant ID" />
 						<FormTextField form={microsoft} name="client_id" label="Application client ID" />
-						><input
+						<input
 							type="hidden"
 							name="auto_refresh_minutes"
 							bind:value={$microsoftForm.auto_refresh_minutes}
@@ -318,7 +318,7 @@
 					<input type="hidden" name="csrf" bind:value={$clientForm.csrf} /><Field.FieldGroup
 						><FormTextField form={client} name="login" label="Login" />
 						<FormTextField form={client} name="password" label="Password" type="password" />
-						><Button type="submit" disabled={$clientSubmitting || !data.health}
+						<Button type="submit" disabled={$clientSubmitting || !data.health}
 							>{#if $clientSubmitting}<Spinner data-icon="inline-start" />{/if}{$clientSubmitting
 								? 'Saving…'
 								: 'Save and review'}{#if !$clientSubmitting}<Arrow

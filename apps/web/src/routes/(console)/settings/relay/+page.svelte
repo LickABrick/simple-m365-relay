@@ -105,7 +105,7 @@
 				</div>
 				{#if pendingChanges}<Badge variant="secondary">{configDiff.length} CHANGED</Badge>{/if}
 			</div>
-			></Card.Header
+			</Card.Header
 		><Card.Content>
 			{#if pendingChanges && configDiff.length > 0}
 				<div class="config-diff" aria-label="Pending configuration changes">
