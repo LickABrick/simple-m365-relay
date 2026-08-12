@@ -1,0 +1,118 @@
+<script lang="ts">
+	import { superForm } from 'sveltekit-superforms/client';
+	import { zod4Client } from 'sveltekit-superforms/adapters';
+	import { senderSchema } from '$lib/forms/schemas';
+	import { progressive } from '$lib/actions/progressive';
+	import FormTextField from '$lib/components/form-text-field.svelte';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
+	import * as Field from '$lib/components/ui/field';
+	import * as Select from '$lib/components/ui/select';
+	import * as Table from '$lib/components/ui/table';
+	import Trash from '@lucide/svelte/icons/trash-2';
+	import { toast } from 'svelte-sonner';
+	let { data } = $props();
+	// svelte-ignore state_referenced_locally
+	const sender = superForm(data.senderForm, {
+		validators: zod4Client(senderSchema),
+		onResult: ({ result }) => {
+			if (result.type === 'success') toast.success('Sender identity allowed.');
+		}
+	});
+	const { form, enhance, submitting } = sender;
+</script>
+
+<main class="console-page">
+	<header class="console-heading">
+		<div>
+			<p class="command-path">~/access/senders</p>
+			<h1>Sender policy</h1>
+			<p>Bind authenticated clients to the envelope-from identities they own.</p>
+		</div>
+	</header>
+	<div class="two-panel">
+		<Card.Root
+			><Card.Header
+				><Card.Title>Allow identity</Card.Title><Card.Description
+					>Sender rules become active after configuration is applied.</Card.Description
+				></Card.Header
+			><Card.Content
+				><form method="POST" action="?/add" use:enhance>
+					<input type="hidden" name="csrf" bind:value={$form.csrf} /><Field.FieldGroup
+						><Field.Field
+							><Field.FieldLabel for="login">SMTP client</Field.FieldLabel><Select.Root
+								name="login"
+								type="single"
+								bind:value={$form.login}
+								><Select.Trigger id="login">{$form.login || 'Select a client'}</Select.Trigger
+								><Select.Content
+									><Select.Group
+										>{#each data.users as user}<Select.Item value={user}>{user}</Select.Item
+											>{/each}</Select.Group
+									></Select.Content
+								></Select.Root
+							></Field.Field
+						><FormTextField
+							form={sender}
+							name="address"
+							label="From address"
+							type="email"
+							bind:value={$form.address}
+						/><Button type="submit" disabled={$submitting || !data.users.length}
+							>Allow sender</Button
+						></Field.FieldGroup
+					>
+				</form></Card.Content
+			></Card.Root
+		><Card.Root
+			><Card.Header
+				><Card.Title>Effective map</Card.Title><Card.Description
+					>Defaults are used when a client omits its From identity.</Card.Description
+				></Card.Header
+			><Card.Content
+				><Table.Root
+					><Table.Header
+						><Table.Row
+							><Table.Head>Client</Table.Head><Table.Head>Identity</Table.Head><Table.Head
+								>Default</Table.Head
+							><Table.Head></Table.Head></Table.Row
+						></Table.Header
+					><Table.Body
+						>{#each Object.entries(data.config.allowed_from) as [login, addresses]}{#each addresses as address}<Table.Row
+									><Table.Cell>{login}</Table.Cell><Table.Cell class="font-mono"
+										>{address}</Table.Cell
+									><Table.Cell
+										>{#if data.config.default_from[login] === address}<Badge>DEFAULT</Badge
+											>{:else}<form method="POST" action="?/default" use:progressive>
+												<input type="hidden" name="csrf" value={$form.csrf} /><input
+													type="hidden"
+													name="login"
+													value={login}
+												/><input type="hidden" name="address" value={address} /><Button
+													type="submit"
+													variant="ghost"
+													size="sm">Set default</Button
+												>
+											</form>{/if}</Table.Cell
+									><Table.Cell
+										><form method="POST" action="?/remove" use:progressive>
+											<input type="hidden" name="csrf" value={$form.csrf} /><input
+												type="hidden"
+												name="login"
+												value={login}
+											/><input type="hidden" name="address" value={address} /><Button
+												type="submit"
+												variant="ghost"
+												size="icon"
+												aria-label={`Remove ${address}`}><Trash /></Button
+											>
+										</form></Table.Cell
+									></Table.Row
+								>{/each}{/each}</Table.Body
+					></Table.Root
+				></Card.Content
+			></Card.Root
+		>
+	</div>
+</main>

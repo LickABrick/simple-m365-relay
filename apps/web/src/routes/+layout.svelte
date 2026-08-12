@@ -7,7 +7,7 @@
 
 <svelte:head>
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-	<meta name="theme-color" content="#f7f9fc" />
+	<meta name="theme-color" content="#0c111b" />
 	<title>Simple M365 Relay</title>
 </svelte:head>
 <Tooltip.Provider>
