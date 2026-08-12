@@ -2,6 +2,7 @@ import { fail, type RequestEvent } from '@sveltejs/kit';
 import { control, parseUsers } from './control';
 import { discardChanges, hasPendingChanges, loadConfig, markApplied, saveConfig } from './config';
 import { evaluateReadiness } from './readiness';
+import { summarizeOperationalProblems } from '$lib/activity';
 
 export const errorMessage = (error: unknown, fallback: string) =>
 	error instanceof Error ? error.message : fallback;
@@ -19,15 +20,17 @@ export async function getOverview() {
 			return fallback;
 		}
 	};
-	const [health, queue, token, users] = await Promise.all([
+	const [health, queue, log, token, users] = await Promise.all([
 		safe(control<{ ok: boolean }>('/health'), { ok: false }),
 		safe(control<{ mailq: string }>('/mailq'), { mailq: '' }),
+		safe(control<{ maillog: string }>('/maillog'), { maillog: '' }),
 		safe(control<Record<string, unknown>>('/token/status'), {}),
 		safe(control<{ users: string }>('/users'), { users: '' })
 	]);
 	return {
 		health: health.ok,
 		queue: queue.mailq,
+		problems: summarizeOperationalProblems(queue.mailq, log.maillog),
 		token,
 		users: parseUsers(users.users)
 	};

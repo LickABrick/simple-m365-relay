@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { connectLiveStream, type LiveState } from '$lib/client/live-stream';
 	import { parseLog, parseQueue } from '$lib/activity';
@@ -15,7 +16,7 @@
 		logs = $state(data.logs),
 		streamState = $state<LiveState>('loading'),
 		query = $state(''),
-		problemsOnly = $state(false);
+		problemsOnly = $state(page.url.searchParams.get('problems') === '1');
 	let queueEntries = $derived(parseQueue(queue));
 	let filtered = $derived(
 		parseLog(logs).filter(

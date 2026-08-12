@@ -14,6 +14,7 @@
 	let live = $state({
 		health: data.health,
 		queue: data.queue,
+		problems: data.problems,
 		token: data.token,
 		users: data.users
 	});
@@ -59,6 +60,16 @@
 			><Alert.Action
 				><Button href={data.readiness.nextHref} size="sm"
 					>Continue setup<ArrowRight data-icon="inline-end" /></Button
+				></Alert.Action
+			></Alert.Root
+		>{/if}
+	{#if live.problems.length}<Alert.Root variant="destructive"
+			><CircleAlert /><Alert.Title
+				>{live.problems.length} operational {live.problems.length === 1 ? 'problem' : 'problems'} detected</Alert.Title
+			><Alert.Description>{live.problems[0].context}: {live.problems[0].message}</Alert.Description
+			><Alert.Action
+				><Button href="/activity?problems=1" size="sm" variant="outline"
+					>Inspect activity<ArrowRight data-icon="inline-end" /></Button
 				></Alert.Action
 			></Alert.Root
 		>{/if}
