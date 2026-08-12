@@ -76,6 +76,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The root entrypoint prepares the named volume and immediately drops to
+    # UID/GID 10001. Keep only the capabilities required for that bootstrap.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     read_only: true
     tmpfs:
       - /tmp
