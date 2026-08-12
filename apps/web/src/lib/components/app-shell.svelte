@@ -2,6 +2,7 @@
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { onMount } from 'svelte';
@@ -20,15 +21,26 @@
 	import Send from '@lucide/svelte/icons/send';
 	import Settings from '@lucide/svelte/icons/settings';
 	import Users from '@lucide/svelte/icons/users';
+	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 
-	let { children, user, version, csrf, relayAvailable } = $props();
+	let { children, user, version, csrf, relayAvailable, readiness, pendingChanges } = $props();
 	// svelte-ignore state_referenced_locally
 	relayState.available = relayAvailable;
+	// svelte-ignore state_referenced_locally
+	let readinessState = $state(readiness);
+	// svelte-ignore state_referenced_locally
+	let hasPendingChanges = $state(pendingChanges);
 	onMount(() =>
-		connectLiveStream<{ ok: boolean }>({
-			url: '/api/live?scope=health',
-			ondata: ({ ok }) => {
-				relayState.available = ok;
+		connectLiveStream<{
+			relayAvailable: boolean;
+			readiness: typeof readiness;
+			pendingChanges: boolean;
+		}>({
+			url: '/api/live?scope=status',
+			ondata: (status) => {
+				relayState.available = status.relayAvailable;
+				readinessState = status.readiness;
+				hasPendingChanges = status.pendingChanges;
 				relayState.live = true;
 			},
 			onstate: (state) => (relayState.live = state === 'live')
@@ -78,6 +90,41 @@
 		<div><strong>Simple M365 Relay</strong><small>CONTROL PLANE · {version}</small></div>
 	</div>
 	<Separator />
+	{#if !readinessState.complete || hasPendingChanges}
+		<div class="nav-status" aria-label="Relay attention required">
+			{#if !readinessState.complete}
+				<Alert.Root>
+					<CircleAlert />
+					<Alert.Title>Setup incomplete</Alert.Title>
+					<Alert.Description
+						>{readinessState.incomplete.length} required {readinessState.incomplete.length === 1
+							? 'step'
+							: 'steps'} remaining.</Alert.Description
+					>
+					<Alert.Action
+						><Button href={readinessState.nextHref} size="sm" onclick={() => (mobileOpen = false)}
+							>Continue<ArrowRight data-icon="inline-end" /></Button
+						></Alert.Action
+					>
+				</Alert.Root>
+			{/if}
+			{#if hasPendingChanges}
+				<Alert.Root>
+					<CircleAlert />
+					<Alert.Title>Changes not applied</Alert.Title>
+					<Alert.Description>Saved settings differ from the running relay.</Alert.Description>
+					<Alert.Action
+						><Button
+							href="/settings/relay"
+							size="sm"
+							variant="outline"
+							onclick={() => (mobileOpen = false)}>Review changes</Button
+						></Alert.Action
+					>
+				</Alert.Root>
+			{/if}
+		</div>
+	{/if}
 	<nav aria-label="Control plane">
 		{#each groups as group}
 			<div class="nav-group">
@@ -88,7 +135,10 @@
 						aria-current={active(link.href) ? 'page' : undefined}
 						onclick={() => (mobileOpen = false)}
 					>
-						<link.icon /><span>{link.label}</span>
+						<link.icon /><span>{link.label}</span
+						>{#if hasPendingChanges && link.href === '/settings/relay'}<Badge variant="secondary"
+								>UNAPPLIED</Badge
+							>{/if}
 					</a>
 				{/each}
 			</div>

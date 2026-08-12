@@ -7,5 +7,7 @@
 	user={data.user}
 	csrf={data.csrf}
 	version={data.version}
-	relayAvailable={data.relayAvailable}>{@render children()}</AppShell
+	relayAvailable={data.relayAvailable}
+	readiness={data.readiness}
+	pendingChanges={data.pendingChanges}>{@render children()}</AppShell
 >

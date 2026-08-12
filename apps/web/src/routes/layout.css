@@ -72,6 +72,7 @@
 		padding: 1rem;
 		background: var(--sidebar);
 		border-right: 1px solid var(--sidebar-border);
+		overflow-y: auto;
 	}
 	.brand-lockup {
 		display: flex;
@@ -135,6 +136,20 @@
 	}
 	.nav-group svg {
 		width: 1rem;
+	}
+	.nav-group a [data-slot='badge'] {
+		margin-left: auto;
+	}
+	.nav-status {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+	}
+	.nav-status [data-slot='alert'] {
+		padding: 0.75rem;
+	}
+	.nav-status [data-slot='alert-description'] {
+		font-size: 0.75rem;
 	}
 	.nav-session {
 		display: flex;

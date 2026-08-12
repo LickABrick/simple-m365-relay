@@ -49,11 +49,15 @@
 						: 'Retrying'}</Badge
 		>
 	</header>
-	{#if !data.configured}<Alert.Root
+	{#if !data.readiness.complete}<Alert.Root
 			><CircleAlert /><Alert.Title>Relay setup is incomplete</Alert.Title><Alert.Description
-				>Finish Microsoft 365 and relay configuration before relying on delivery.</Alert.Description
+				>{data.readiness.incomplete.length} required {data.readiness.incomplete.length === 1
+					? 'step remains'
+					: 'steps remain'}: {data.readiness.incomplete
+					.map((check) => check.label)
+					.join(', ')}.</Alert.Description
 			><Alert.Action
-				><Button href="/onboarding" size="sm"
+				><Button href={data.readiness.nextHref} size="sm"
 					>Continue setup<ArrowRight data-icon="inline-end" /></Button
 				></Alert.Action
 			></Alert.Root
@@ -118,7 +122,9 @@
 				<strong>Relay configuration</strong><small
 					>{data.pending
 						? 'Saved changes are waiting to be applied'
-						: 'Running configuration is synchronized'}</small
+						: data.readiness.complete
+							? 'Running configuration is synchronized'
+							: 'Complete setup before relying on delivery'}</small
 				>
 			</div>
 			<ArrowRight /></a

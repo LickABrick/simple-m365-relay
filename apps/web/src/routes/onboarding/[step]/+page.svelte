@@ -84,7 +84,8 @@
 			data.config.oauth.tenant_id &&
 			data.config.ms365_smtp_user &&
 			tokenPresent &&
-			data.users.length
+			data.users.length &&
+			data.senderCount > 0
 		)
 	);
 	const labels: { [key: string]: string } = {
@@ -311,9 +312,17 @@
 							>{data.users.length} configured</Badge
 						>
 					</div>
+					<div>
+						<span>Sender identities</span><Badge
+							variant={data.senderCount ? 'secondary' : 'destructive'}
+							>{data.senderCount ? `${data.senderCount} allowed` : 'Missing'}</Badge
+						>
+					</div>
 				</div></Card.Content
 			><Card.Footer
-				><ProgressiveForm method="POST" action="?/finish">
+				>{#if !data.senderCount}<Button href="/senders" variant="outline"
+						>Configure sender policy</Button
+					>{/if}<ProgressiveForm method="POST" action="?/finish">
 					{#snippet children(pending)}<input type="hidden" name="csrf" value={data.csrf} /><Button
 							type="submit"
 							disabled={pending || !readyToFinish}

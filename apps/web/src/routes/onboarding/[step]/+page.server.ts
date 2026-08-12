@@ -31,6 +31,10 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 		users: await control<{ users: string }>('/users')
 			.then((v) => parseUsers(v.users))
 			.catch(() => []),
+		senderCount: Object.values(config.allowed_from).reduce(
+			(total, addresses) => total + addresses.length,
+			0
+		),
 		relayForm: await superValidate(
 			{
 				csrf: locals.csrf || '',
@@ -164,6 +168,8 @@ export const actions: Actions = {
 			if (token['ok'] !== true) throw new Error('Complete Microsoft authorization first.');
 			if (!parseUsers(users.users).length)
 				throw new Error('Create at least one SMTP client first.');
+			if (!Object.values(c.allowed_from).some((addresses) => addresses.length > 0))
+				throw new Error('Allow at least one sender identity first.');
 			await setOnboardingComplete();
 			const completed = await loadConfig();
 			await control('/render-validate', {});

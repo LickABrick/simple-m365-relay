@@ -1,6 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import { loadConfig } from '$lib/server/config';
 import { control, parseUsers } from '$lib/server/control';
+import { evaluateReadiness } from '$lib/server/readiness';
 import type { PageServerLoad } from './$types';
 export const load: PageServerLoad = async () => {
 	const config = await loadConfig();
@@ -9,39 +10,15 @@ export const load: PageServerLoad = async () => {
 		control<Record<string, unknown>>('/token/status').catch((): Record<string, unknown> => ({})),
 		control<{ users: string }>('/users').catch(() => ({ users: '' }))
 	]);
+	const users = parseUsers(rawUsers.users);
+	const readiness = evaluateReadiness(config, { tokenPresent: token['ok'] === true, users });
 	return {
 		config,
 		health: health.ok,
 		token,
-		users: parseUsers(rawUsers.users),
+		users,
 		steps: [
-			{
-				href: '/onboarding/relay',
-				label: 'Relay identity',
-				complete: Boolean(config.hostname && config.domain && config.relayhost)
-			},
-			{
-				href: '/onboarding/network',
-				label: 'Trust boundary',
-				complete: Boolean(config.mynetworks.length)
-			},
-			{
-				href: '/onboarding/microsoft',
-				label: 'Microsoft 365',
-				complete: Boolean(
-					config.ms365_smtp_user && config.oauth.tenant_id && config.oauth.client_id
-				)
-			},
-			{
-				href: '/onboarding/authorize',
-				label: 'Authorize OAuth',
-				complete: token['ok'] === true
-			},
-			{
-				href: '/onboarding/client',
-				label: 'First SMTP client',
-				complete: parseUsers(rawUsers.users).length > 0
-			},
+			...readiness.checks,
 			{
 				href: '/onboarding/review',
 				label: 'Readiness review',

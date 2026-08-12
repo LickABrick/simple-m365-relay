@@ -1,5 +1,6 @@
 import {
 	getActivity,
+	getConsoleStatus,
 	getMicrosoftState,
 	getOverview,
 	getRelayHealth
@@ -33,7 +34,9 @@ export const GET: RequestHandler = ({ request, url }) => {
 								? await getMicrosoftState()
 								: scope === 'health'
 									? await getRelayHealth()
-									: await getOverview();
+									: scope === 'status'
+										? await getConsoleStatus()
+										: await getOverview();
 					enqueue('update', payload);
 				} catch (error) {
 					enqueue('fault', {

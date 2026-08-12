@@ -1,6 +1,7 @@
 import { fail, type RequestEvent } from '@sveltejs/kit';
 import { control, parseUsers } from './control';
-import { discardChanges, loadConfig, markApplied, saveConfig } from './config';
+import { discardChanges, hasPendingChanges, loadConfig, markApplied, saveConfig } from './config';
+import { evaluateReadiness } from './readiness';
 
 export const errorMessage = (error: unknown, fallback: string) =>
 	error instanceof Error ? error.message : fallback;
@@ -51,6 +52,23 @@ export async function getMicrosoftState() {
 
 export async function getRelayHealth() {
 	return control<{ ok: boolean }>('/health').catch(() => ({ ok: false }));
+}
+
+export async function getConsoleStatus() {
+	const config = await loadConfig();
+	const [health, token, users] = await Promise.all([
+		control<{ ok: boolean }>('/health').catch(() => ({ ok: false })),
+		control<Record<string, unknown>>('/token/status').catch((): Record<string, unknown> => ({})),
+		control<{ users: string }>('/users').catch(() => ({ users: '' }))
+	]);
+	return {
+		relayAvailable: health.ok,
+		readiness: evaluateReadiness(config, {
+			tokenPresent: token['ok'] === true,
+			users: parseUsers(users.users)
+		}),
+		pendingChanges: await hasPendingChanges(config)
+	};
 }
 
 export const applyAction = async ({ request, locals }: RequestEvent) => {
