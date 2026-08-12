@@ -972,6 +972,11 @@ class _UnixHTTPServer(socketserver.UnixStreamServer, HTTPServer):
 
 
 def main():
+    # Bootstrap the shared credential before accepting requests. On a fresh
+    # volume the UI must be able to read this file in order to make its first
+    # authenticated control request.
+    _get_control_token()
+
     # always start loop; it self-disables when interval <= 0
     threading.Thread(target=_auto_refresh_loop, daemon=True).start()
 
