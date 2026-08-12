@@ -191,7 +191,9 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    ms365_user = os.environ.get("MS365_SMTP_USER", "").strip() or str((cfg or {}).get("ms365_smtp_user") or "").strip()
+    # Runtime configuration is authoritative after onboarding. Environment
+    # values remain a bootstrap fallback for legacy/headless deployments.
+    ms365_user = str((cfg or {}).get("ms365_smtp_user") or "").strip() or os.environ.get("MS365_SMTP_USER", "").strip()
 
     oauth = (cfg or {}).get("oauth") or {}
     tenant_id = str(oauth.get("tenant_id") or os.environ.get("MS365_TENANT_ID") or "").strip()

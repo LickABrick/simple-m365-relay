@@ -430,10 +430,10 @@ def _jwt_exp_best_effort(jwt: str):
 
 
 def _ms365_user(cfg: dict) -> str:
-    u = (os.environ.get("MS365_SMTP_USER") or "").strip()
+    u = str((cfg or {}).get("ms365_smtp_user") or "").strip()
     if u:
         return u
-    return str((cfg or {}).get("ms365_smtp_user") or "").strip()
+    return (os.environ.get("MS365_SMTP_USER") or "").strip()
 
 
 def token_status() -> dict:
