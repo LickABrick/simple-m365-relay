@@ -69,7 +69,7 @@
 							rows={7}
 							bind:value={$form.body}
 						/></Field.Field
-					><Button type="submit" disabled={$submitting || !relayState.available}
+					><Button type="submit" disabled={$submitting || !relayState.available || !$form.to_addr}
 						>{#if $submitting}<Spinner data-icon="inline-start" />{:else}<Send
 								data-icon="inline-start"
 							/>{/if}{$submitting ? 'Submitting…' : 'Send test message'}</Button

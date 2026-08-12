@@ -46,7 +46,7 @@
 						autocomplete="current-password"
 						bind:value={$form.password}
 					/>
-					<Button type="submit" disabled={$submitting}
+					<Button type="submit" disabled={$submitting || !$form.username || !$form.password}
 						>{#if $submitting}<Spinner data-icon="inline-start" />{:else}<LogIn
 								data-icon="inline-start"
 							/>{/if}{$submitting ? 'Signing in…' : 'Sign in'}</Button

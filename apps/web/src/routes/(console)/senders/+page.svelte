@@ -70,7 +70,9 @@
 							label="From address"
 							type="email"
 							bind:value={$form.address}
-						/><Button type="submit" disabled={$submitting || !data.users.length}
+						/><Button
+							type="submit"
+							disabled={$submitting || !data.users.length || !$form.login || !$form.address}
 							>{#if $submitting}<Spinner data-icon="inline-start" />{/if}{$submitting
 								? 'Saving…'
 								: 'Allow sender'}</Button

@@ -53,7 +53,9 @@
 						autocomplete="new-password"
 						bind:value={$form.confirm}
 					/>
-					<Button type="submit" disabled={$submitting}
+					<Button
+						type="submit"
+						disabled={$submitting || !$form.username || !$form.password || !$form.confirm}
 						>{#if $submitting}<Spinner data-icon="inline-start" />{:else}<ShieldCheck
 								data-icon="inline-start"
 							/>{/if}{$submitting ? 'Creating…' : 'Create administrator'}</Button

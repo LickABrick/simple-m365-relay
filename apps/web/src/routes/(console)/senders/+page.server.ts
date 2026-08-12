@@ -19,7 +19,7 @@ export const load: PageServerLoad = async ({ locals }) => ({
 export const actions: Actions = {
 	add: async ({ request, locals }) => {
 		const form = await superValidate(request, zod4(senderSchema));
-		if (!form.valid) return fail(400, { senderForm: form });
+		if (!form.valid) return fail(400, { form });
 		try {
 			const f = new FormData();
 			f.set('csrf', form.data.csrf);
@@ -29,10 +29,10 @@ export const actions: Actions = {
 				...new Set([...(c.allowed_from[form.data.login] || []), form.data.address.toLowerCase()])
 			].sort();
 			await saveConfig(c);
-			return { success: true, message: 'Sender identity allowed.', config: c };
+			return { form, success: true, message: 'Sender identity allowed.', config: c };
 		} catch (error) {
 			return fail(400, {
-				senderForm: form,
+				form,
 				error: errorMessage(error, 'Sender could not be saved.')
 			});
 		}

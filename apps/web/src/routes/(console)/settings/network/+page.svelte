@@ -22,7 +22,8 @@
 				);
 		}
 	});
-	const { form, errors, enhance, submitting } = network;
+	const { form, errors, enhance, submitting, tainted } = network;
+	const changed = $derived(network.isTainted($tainted));
 </script>
 
 <main class="console-page narrow-page">
@@ -83,7 +84,7 @@
 							></Field.Field
 						>
 					</div>
-					<Button type="submit" disabled={$submitting}
+					<Button type="submit" disabled={$submitting || !changed}
 						>{#if $submitting}<Spinner data-icon="inline-start" />{/if}{$submitting
 							? 'Saving…'
 							: 'Save network policy'}</Button

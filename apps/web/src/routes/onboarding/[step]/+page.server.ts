@@ -67,11 +67,13 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 };
 export const actions: Actions = {
 	save: async ({ request, locals, params }) => {
+		let submittedForm: unknown;
 		try {
 			const c = await loadConfig();
 			if (params.step === 'relay') {
 				const form = await superValidate(request, zod4(relaySettingsSchema));
-				if (!form.valid) return fail(400, { relayForm: form });
+				submittedForm = form;
+				if (!form.valid) return fail(400, { form });
 				const f = new FormData();
 				f.set('csrf', form.data.csrf);
 				requireCsrf(f, locals.csrf);
@@ -80,7 +82,8 @@ export const actions: Actions = {
 				c.relayhost = form.data.relayhost;
 			} else if (params.step === 'network') {
 				const form = await superValidate(request, zod4(networkSettingsSchema));
-				if (!form.valid) return fail(400, { networkForm: form });
+				submittedForm = form;
+				if (!form.valid) return fail(400, { form });
 				const f = new FormData();
 				f.set('csrf', form.data.csrf);
 				requireCsrf(f, locals.csrf);
@@ -94,7 +97,8 @@ export const actions: Actions = {
 				};
 			} else if (params.step === 'microsoft') {
 				const form = await superValidate(request, zod4(microsoftSettingsSchema));
-				if (!form.valid) return fail(400, { microsoftForm: form });
+				submittedForm = form;
+				if (!form.valid) return fail(400, { form });
 				const f = new FormData();
 				f.set('csrf', form.data.csrf);
 				requireCsrf(f, locals.csrf);
@@ -114,7 +118,10 @@ export const actions: Actions = {
 			redirect(303, `/onboarding/${next[params.step]}`);
 		} catch (e) {
 			if (e && typeof e === 'object' && 'status' in e) throw e;
-			return fail(400, { error: errorMessage(e, 'Settings could not be saved.') });
+			return fail(400, {
+				form: submittedForm,
+				error: errorMessage(e, 'Settings could not be saved.')
+			});
 		}
 	},
 	start: async ({ request, locals }) => {
@@ -129,7 +136,7 @@ export const actions: Actions = {
 	},
 	client: async ({ request, locals }) => {
 		const form = await superValidate(request, zod4(smtpClientSchema));
-		if (!form.valid) return fail(400, { clientForm: form });
+		if (!form.valid) return fail(400, { form });
 		try {
 			const f = new FormData();
 			f.set('csrf', form.data.csrf);
@@ -138,7 +145,7 @@ export const actions: Actions = {
 			redirect(303, '/onboarding/review');
 		} catch (e) {
 			if (e && typeof e === 'object' && 'status' in e) throw e;
-			return fail(400, { clientForm: form, error: errorMessage(e, 'Client could not be saved.') });
+			return fail(400, { form, error: errorMessage(e, 'Client could not be saved.') });
 		}
 	},
 	finish: async ({ request, locals }) => {

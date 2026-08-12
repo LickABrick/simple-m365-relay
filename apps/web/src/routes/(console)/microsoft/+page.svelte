@@ -34,7 +34,8 @@
 				);
 		}
 	});
-	const { form, enhance, submitting } = microsoft;
+	const { form, enhance, submitting, tainted } = microsoft;
+	const changed = $derived(microsoft.isTainted($tainted));
 	const tokenPresent = $derived(token.ok === true);
 	const microsoftConfigured = $derived(
 		Boolean($form.ms365_smtp_user && $form.tenant_id && $form.client_id)
@@ -107,7 +108,7 @@
 								max="1440"
 								bind:value={$form.auto_refresh_minutes}
 							/></Field.Field
-						><Button type="submit" disabled={$submitting}
+						><Button type="submit" disabled={$submitting || !changed}
 							>{#if $submitting}<Spinner data-icon="inline-start" />{/if}{$submitting
 								? 'Saving…'
 								: 'Save Microsoft settings'}</Button

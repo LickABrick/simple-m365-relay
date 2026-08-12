@@ -70,7 +70,10 @@
 							autocomplete="new-password"
 							description="At least 12 characters with upper, lower, number, and symbol."
 						/>
-						<Button type="submit" disabled={$submitting || !relayState.available}>
+						<Button
+							type="submit"
+							disabled={$submitting || !relayState.available || !$form.login || !$form.password}
+						>
 							{#if $submitting}<Spinner data-icon="inline-start" />{/if}
 							{$submitting ? 'Saving…' : 'Save client'}
 						</Button>

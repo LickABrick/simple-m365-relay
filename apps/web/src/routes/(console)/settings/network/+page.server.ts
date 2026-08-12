@@ -24,7 +24,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
 	default: async ({ request, locals }) => {
 		const form = await superValidate(request, zod4(networkSettingsSchema));
-		if (!form.valid) return fail(400, { networkForm: form });
+		if (!form.valid) return fail(400, { form });
 		try {
 			const csrf = new FormData();
 			csrf.set('csrf', form.data.csrf);
@@ -42,10 +42,10 @@ export const actions: Actions = {
 				mynetworks: networks,
 				tls: { smtpd_25: form.data.tls_25, smtpd_587: form.data.tls_587 }
 			});
-			return { success: true, message: 'Network and TLS policy saved.' };
+			return { form, success: true, message: 'Network and TLS policy saved.' };
 		} catch (error) {
 			return fail(400, {
-				networkForm: form,
+				form,
 				error: errorMessage(error, 'Network settings could not be saved.')
 			});
 		}

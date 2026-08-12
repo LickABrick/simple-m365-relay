@@ -10,7 +10,7 @@ export const load: PageServerLoad = async () => ({
 export const actions: Actions = {
 	default: async ({ request, cookies, url }) => {
 		const form = await superValidate(request, zod4(setupSchema));
-		if (!form.valid) return fail(400, { setupForm: form });
+		if (!form.valid) return fail(400, { form });
 		await createAdmin(form.data.username, form.data.password);
 		await issueSession(
 			cookies,

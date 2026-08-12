@@ -29,7 +29,8 @@
 				);
 		}
 	});
-	const { form, enhance, submitting } = settings;
+	const { form, enhance, submitting, tainted } = settings;
+	const changed = $derived(settings.isTainted($tainted));
 </script>
 
 <main class="console-page narrow-page">
@@ -73,7 +74,7 @@
 						bind:value={$form.relayhost}
 						description="Microsoft 365 normally uses [smtp.office365.com]:587."
 					/>
-					<Button type="submit" disabled={$submitting}
+					<Button type="submit" disabled={$submitting || !changed}
 						>{#if $submitting}<Spinner data-icon="inline-start" />{/if}{$submitting
 							? 'Saving…'
 							: 'Save relay settings'}</Button

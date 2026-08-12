@@ -24,7 +24,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
 	default: async ({ request, locals }) => {
 		const form = await superValidate(request, zod4(testMailSchema));
-		if (!form.valid) return fail(400, { testForm: form });
+		if (!form.valid) return fail(400, { form });
 		try {
 			const f = new FormData();
 			f.set('csrf', form.data.csrf);
@@ -35,9 +35,9 @@ export const actions: Actions = {
 				subject: form.data.subject,
 				body: form.data.body
 			});
-			return { success: true, message: 'Test message accepted.', delivery: result };
+			return { form, success: true, message: 'Test message accepted.', delivery: result };
 		} catch (error) {
-			return fail(400, { testForm: form, error: errorMessage(error, 'Test message failed.') });
+			return fail(400, { form, error: errorMessage(error, 'Test message failed.') });
 		}
 	}
 };

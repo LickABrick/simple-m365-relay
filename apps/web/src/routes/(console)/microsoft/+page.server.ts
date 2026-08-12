@@ -34,7 +34,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
 	save: async ({ request, locals }) => {
 		const form = await superValidate(request, zod4(microsoftSettingsSchema));
-		if (!form.valid) return fail(400, { microsoftForm: form });
+		if (!form.valid) return fail(400, { form });
 		try {
 			const f = new FormData();
 			f.set('csrf', form.data.csrf);
@@ -47,10 +47,10 @@ export const actions: Actions = {
 				auto_refresh_minutes: form.data.auto_refresh_minutes
 			};
 			await saveConfig(c);
-			return { success: true, message: 'Microsoft configuration saved.' };
+			return { form, success: true, message: 'Microsoft configuration saved.' };
 		} catch (error) {
 			return fail(400, {
-				microsoftForm: form,
+				form,
 				error: errorMessage(error, 'Microsoft settings could not be saved.')
 			});
 		}

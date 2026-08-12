@@ -30,7 +30,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
 	save: async ({ request, locals }) => {
 		const form = await superValidate(request, zod4(relaySettingsSchema));
-		if (!form.valid) return fail(400, { settingsForm: form });
+		if (!form.valid) return fail(400, { form });
 		try {
 			const csrf = new FormData();
 			csrf.set('csrf', form.data.csrf);
@@ -44,10 +44,10 @@ export const actions: Actions = {
 				domain: form.data.domain,
 				relayhost: form.data.relayhost
 			});
-			return { success: true, message: 'Relay identity saved. Validate before applying.' };
+			return { form, success: true, message: 'Relay identity saved. Validate before applying.' };
 		} catch (error) {
 			return fail(400, {
-				settingsForm: form,
+				form,
 				error: errorMessage(error, 'Relay settings could not be saved.')
 			});
 		}

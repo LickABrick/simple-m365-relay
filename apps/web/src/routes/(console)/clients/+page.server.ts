@@ -18,7 +18,7 @@ export const load: PageServerLoad = async ({ locals }) => ({
 export const actions: Actions = {
 	add: async ({ request, locals }) => {
 		const form = await superValidate(request, zod4(smtpClientSchema));
-		if (!form.valid) return fail(400, { clientForm: form });
+		if (!form.valid) return fail(400, { form });
 		try {
 			const csrf = new FormData();
 			csrf.set('csrf', form.data.csrf);
@@ -27,10 +27,10 @@ export const actions: Actions = {
 			const users = await control<{ users: string }>('/users').then((value) =>
 				parseUsers(value.users)
 			);
-			return { success: true, message: 'SMTP client saved.', users };
+			return { form, success: true, message: 'SMTP client saved.', users };
 		} catch (error) {
 			return fail(400, {
-				clientForm: form,
+				form,
 				error: errorMessage(error, 'SMTP client could not be saved.')
 			});
 		}

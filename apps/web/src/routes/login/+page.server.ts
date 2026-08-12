@@ -16,7 +16,7 @@ export const actions: Actions = {
 		const form = await superValidate(request, zod4(loginSchema));
 		if (state && state.until > now)
 			return setError(form, 'password', 'Too many attempts. Try again in a few minutes.');
-		if (!form.valid) return fail(400, { loginForm: form });
+		if (!form.valid) return fail(400, { form });
 		if (!(await authenticate(form.data.username, form.data.password))) {
 			const count = (state?.count || 0) + 1;
 			failures.set(key, { count, until: count >= 5 ? now + 300_000 : 0 });
