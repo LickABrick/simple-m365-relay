@@ -101,11 +101,11 @@
 							? 'step'
 							: 'steps'} remaining.</Alert.Description
 					>
-					<Alert.Action
-						><Button href={readinessState.nextHref} size="sm" onclick={() => (mobileOpen = false)}
+					<div class="nav-status-action">
+						<Button href={readinessState.nextHref} size="sm" onclick={() => (mobileOpen = false)}
 							>Continue<ArrowRight data-icon="inline-end" /></Button
-						></Alert.Action
-					>
+						>
+					</div>
 				</Alert.Root>
 			{/if}
 			{#if hasPendingChanges}
@@ -113,14 +113,15 @@
 					<CircleAlert />
 					<Alert.Title>Changes not applied</Alert.Title>
 					<Alert.Description>Saved settings differ from the running relay.</Alert.Description>
-					<Alert.Action
-						><Button
+					<div class="nav-status-action">
+						<Button
 							href="/settings/relay"
 							size="sm"
 							variant="outline"
-							onclick={() => (mobileOpen = false)}>Review changes</Button
-						></Alert.Action
-					>
+							onclick={() => (mobileOpen = false)}
+							>Review changes<ArrowRight data-icon="inline-end" /></Button
+						>
+					</div>
 				</Alert.Root>
 			{/if}
 		</div>

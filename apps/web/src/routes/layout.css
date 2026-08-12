@@ -146,10 +146,19 @@
 		gap: 0.75rem;
 	}
 	.nav-status [data-slot='alert'] {
+		grid-template-columns: auto minmax(0, 1fr);
 		padding: 0.75rem;
 	}
 	.nav-status [data-slot='alert-description'] {
 		font-size: 0.75rem;
+	}
+	.nav-status-action {
+		grid-column: 1 / -1;
+		margin-top: 0.25rem;
+	}
+	.nav-status-action [data-slot='button'] {
+		width: 100%;
+		justify-content: space-between;
 	}
 	.nav-session {
 		display: flex;
@@ -280,6 +289,73 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.75rem;
+	}
+	.deployment-heading,
+	.config-diff-header,
+	.deployment-footer {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+	}
+	.deployment-footer {
+		flex-direction: column;
+		align-items: stretch;
+	}
+	.deployment-footer > p {
+		margin: 0;
+		color: var(--muted-foreground);
+		font-size: 0.8125rem;
+	}
+	.config-diff {
+		overflow: hidden;
+		border: 1px solid var(--border);
+		background: var(--sidebar);
+		color: var(--sidebar-foreground);
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.75rem;
+	}
+	.config-diff-header {
+		justify-content: flex-start;
+		border-bottom: 1px solid var(--sidebar-border);
+		padding: 0.75rem 1rem;
+	}
+	.config-diff-header svg {
+		width: 1rem;
+		flex: none;
+	}
+	.config-diff-header div {
+		display: flex;
+		flex-direction: column;
+		gap: 0.125rem;
+	}
+	.config-diff-header span {
+		color: var(--muted-foreground);
+	}
+	.config-diff-hunk + .config-diff-hunk {
+		border-top: 1px solid var(--sidebar-border);
+	}
+	.config-diff-path,
+	.config-diff-line {
+		padding: 0.25rem 1rem;
+	}
+	.config-diff-path {
+		background: color-mix(in oklch, var(--primary) 9%, transparent);
+		color: var(--muted-foreground);
+	}
+	.config-diff-line {
+		display: grid;
+		grid-template-columns: 1rem minmax(0, 1fr);
+		gap: 0.5rem;
+	}
+	.config-diff-line code {
+		overflow-wrap: anywhere;
+	}
+	.config-diff-line.removed {
+		background: color-mix(in oklch, var(--destructive) 13%, transparent);
+	}
+	.config-diff-line.added {
+		background: color-mix(in oklch, var(--primary) 13%, transparent);
 	}
 	pre {
 		max-height: 30rem;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { defaults, parseConfig } from './config';
+import { defaults, diffConfig, parseConfig } from './config';
 
 function validForm(): FormData {
 	const form = new FormData();
@@ -29,5 +29,36 @@ describe('parseConfig', () => {
 		const form = validForm();
 		form.set('auto_refresh_minutes', '1441');
 		expect(() => parseConfig(form, defaults)).toThrow(/0 to 1440/);
+	});
+});
+
+describe('diffConfig', () => {
+	it('shows saved values that differ from the applied snapshot', () => {
+		const saved = { ...defaults, relayhost: '[smtp.example.test]:587' };
+		expect(diffConfig(defaults, saved)).toEqual([
+			{
+				path: 'relayhost',
+				before: '"[smtp.office365.com]:587"',
+				after: '"[smtp.example.test]:587"'
+			}
+		]);
+	});
+
+	it('shows nested sender policy additions', () => {
+		const saved = {
+			...defaults,
+			allowed_from: { printer: ['scanner@example.test'] }
+		};
+		expect(diffConfig(defaults, saved)).toEqual([
+			{
+				path: 'allowed_from.printer',
+				before: '(not set)',
+				after: '["scanner@example.test"]'
+			}
+		]);
+	});
+
+	it('ignores onboarding metadata because it is not deployed to Postfix', () => {
+		expect(diffConfig(defaults, { ...defaults, onboarding_complete: true })).toEqual([]);
 	});
 });

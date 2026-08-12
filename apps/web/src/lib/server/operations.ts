@@ -82,7 +82,12 @@ export const applyAction = async ({ request, locals }: RequestEvent) => {
 		await control('/render-validate', {});
 		await control('/render-reload', {});
 		await markApplied(config);
-		return { success: true, message: 'Configuration validated and applied.' };
+		return {
+			success: true,
+			message: 'Configuration validated and applied.',
+			pending: false,
+			diff: []
+		};
 	} catch (error) {
 		return fail(400, { error: errorMessage(error, 'Configuration could not be applied.') });
 	}
@@ -104,7 +109,7 @@ export const discardAction = async ({ request, locals }: RequestEvent) => {
 	try {
 		requireCsrf(form, locals.csrf);
 		await discardChanges();
-		return { success: true, message: 'Saved changes were discarded.' };
+		return { success: true, message: 'Saved changes were discarded.', pending: false, diff: [] };
 	} catch (error) {
 		return fail(400, { error: errorMessage(error, 'Changes could not be discarded.') });
 	}

@@ -27,6 +27,71 @@ export const defaults: RelayConfig = {
 	default_from: {}
 };
 
+export type ConfigDiffEntry = {
+	path: string;
+	before: string;
+	after: string;
+};
+
+const deploymentConfig = (config: RelayConfig): Omit<RelayConfig, 'onboarding_complete'> => {
+	const { onboarding_complete: _onboardingComplete, ...deployable } = config;
+	return deployable;
+};
+
+const pathFor = (parent: string, key: string) =>
+	parent
+		? /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)
+			? `${parent}.${key}`
+			: `${parent}[${JSON.stringify(key)}]`
+		: key;
+
+const flattenConfig = (value: unknown, parent = '', output = new Map<string, unknown>()) => {
+	if (Array.isArray(value)) {
+		output.set(parent, value);
+		return output;
+	}
+	if (value !== null && typeof value === 'object') {
+		for (const [key, child] of Object.entries(value).sort(([left], [right]) =>
+			left.localeCompare(right)
+		))
+			flattenConfig(child, pathFor(parent, key), output);
+		return output;
+	}
+	output.set(parent, value);
+	return output;
+};
+
+const displayConfigValue = (path: string, value: unknown) => {
+	if (/(?:^|\.)(?:password|secret|token)(?:$|\.)/i.test(path)) return '"[redacted]"';
+	if (value === undefined) return '(not set)';
+	return JSON.stringify(value);
+};
+
+export function diffConfig(applied: RelayConfig | null, saved: RelayConfig): ConfigDiffEntry[] {
+	const before = flattenConfig(applied ? deploymentConfig(applied) : {});
+	const after = flattenConfig(deploymentConfig(saved));
+	const paths = [...new Set([...before.keys(), ...after.keys()])].sort();
+	return paths.flatMap((path) => {
+		const previous = before.get(path);
+		const next = after.get(path);
+		if (JSON.stringify(previous) === JSON.stringify(next)) return [];
+		return [
+			{
+				path,
+				before: displayConfigValue(path, previous),
+				after: displayConfigValue(path, next)
+			}
+		];
+	});
+}
+
+export async function loadAppliedConfig(): Promise<RelayConfig | null> {
+	return (
+		(db.select({ config: settings.appliedConfig }).from(settings).get()
+			?.config as RelayConfig | null) || null
+	);
+}
+
 export async function loadConfig(): Promise<RelayConfig> {
 	const stored = (db.select().from(settings).get()?.config || {}) as Partial<RelayConfig>;
 	return {
@@ -48,14 +113,14 @@ export async function saveConfig(config: RelayConfig): Promise<void> {
 }
 
 export async function hasPendingChanges(config: RelayConfig): Promise<boolean> {
-	const hash = db.select({ hash: settings.appliedHash }).from(settings).get()?.hash;
-	return !hash || hash !== stableHash(config);
+	const applied = await loadAppliedConfig();
+	return !applied || diffConfig(applied, config).length > 0;
 }
 
 export async function markApplied(config: RelayConfig): Promise<void> {
 	db.update(settings)
 		.set({
-			appliedHash: stableHash(config),
+			appliedHash: stableHash(deploymentConfig(config)),
 			appliedConfig: config,
 			updatedAt: Math.floor(Date.now() / 1000)
 		})
@@ -63,8 +128,7 @@ export async function markApplied(config: RelayConfig): Promise<void> {
 }
 
 export async function discardChanges(): Promise<RelayConfig> {
-	const applied = db.select({ config: settings.appliedConfig }).from(settings).get()
-		?.config as RelayConfig | null;
+	const applied = await loadAppliedConfig();
 	if (!applied) throw new Error('No applied configuration snapshot is available.');
 	await saveConfig(applied);
 	return applied;
