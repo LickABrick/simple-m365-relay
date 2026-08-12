@@ -410,23 +410,128 @@ def _append_log(path: Path, text: str, max_bytes: int = 200_000) -> None:
         pass
 
 
-def _jwt_exp_best_effort(jwt: str):
+def _jwt_claims_best_effort(jwt: str) -> dict:
     try:
         parts = (jwt or "").split(".")
         if len(parts) < 2:
-            return None
+            return {}
         import base64
 
         payload = parts[1]
         payload += "=" * (-len(payload) % 4)
         raw = base64.urlsafe_b64decode(payload.encode("utf-8"))
         obj = json.loads(raw.decode("utf-8", errors="ignore"))
-        exp = obj.get("exp")
-        if exp is None:
-            return None
-        return int(exp)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _jwt_exp_best_effort(jwt: str):
+    try:
+        exp = _jwt_claims_best_effort(jwt).get("exp")
+        return int(exp) if exp is not None else None
     except Exception:
         return None
+
+
+def _token_capabilities(data: dict, exp) -> dict:
+    """Return safe, best-effort diagnostics without exposing token material.
+
+    Access-token claims are diagnostic hints here, not cryptographic validation. Exchange
+    remains the authority when the token is used for SMTP AUTH.
+    """
+    import time as _time
+
+    claims = _jwt_claims_best_effort(str((data or {}).get("access_token") or ""))
+    raw_scope = str((data or {}).get("scope") or claims.get("scp") or "").strip()
+    scopes = sorted(set(part for part in raw_scope.split() if part))
+    roles_value = claims.get("roles") or []
+    roles = sorted(set(str(role) for role in roles_value)) if isinstance(roles_value, list) else []
+    token_type = "delegated" if scopes else ("application" if roles else "unknown")
+    smtp_scope_granted = (
+        any(scope.lower().rstrip("/").endswith("smtp.send") for scope in scopes)
+        if scopes
+        else None
+    )
+    audience = str(claims.get("aud") or "").strip()
+    valid_audiences = {
+        "https://outlook.office.com",
+        "https://outlook.office365.com",
+        "00000002-0000-0ff1-ce00-000000000000",
+    }
+    audience_ok = audience.lower().rstrip("/") in valid_audiences if audience else None
+    identity = str(
+        claims.get("preferred_username") or claims.get("upn") or claims.get("unique_name") or ""
+    ).strip()
+    tenant_id = str(claims.get("tid") or "").strip()
+    client_id = str(claims.get("azp") or claims.get("appid") or "").strip()
+    expired = bool(exp and int(exp) <= int(_time.time()))
+    has_refresh_token = bool(str((data or {}).get("refresh_token") or "").strip())
+    issues = []
+    if token_type == "application":
+        issues.append(
+            {
+                "code": "unsupported_token_type",
+                "severity": "error",
+                "message": "Application token detected; this relay uses delegated device authorization.",
+            }
+        )
+    elif token_type == "unknown":
+        issues.append(
+            {
+                "code": "scope_unverifiable",
+                "severity": "warning",
+                "message": "Token scopes could not be inspected. Reauthorize to obtain verifiable SMTP.Send consent.",
+            }
+        )
+    elif smtp_scope_granted is False:
+        issues.append(
+            {
+                "code": "missing_smtp_send",
+                "severity": "error",
+                "message": "Delegated SMTP.Send permission is missing.",
+            }
+        )
+    if audience_ok is False:
+        issues.append(
+            {
+                "code": "wrong_audience",
+                "severity": "error",
+                "message": "Token was issued for a resource other than Exchange Online.",
+            }
+        )
+    if expired:
+        issues.append({"code": "expired", "severity": "error", "message": "Access token is expired."})
+    if not has_refresh_token:
+        issues.append(
+            {
+                "code": "missing_refresh_token",
+                "severity": "error",
+                "message": "offline_access was not granted; no refresh token is available.",
+            }
+        )
+    smtp_ready = bool(
+        token_type == "delegated"
+        and smtp_scope_granted is True
+        and audience_ok is not False
+        and not expired
+        and has_refresh_token
+    )
+    return {
+        "token_type": token_type,
+        "scopes": scopes,
+        "roles": roles,
+        "smtp_scope_granted": smtp_scope_granted,
+        "audience": audience,
+        "audience_ok": audience_ok,
+        "identity": identity,
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "has_refresh_token": has_refresh_token,
+        "expired": expired,
+        "smtp_ready": smtp_ready,
+        "issues": issues,
+    }
 
 
 def _ms365_user(cfg: dict) -> str:
@@ -491,7 +596,7 @@ def token_status() -> dict:
             except Exception:
                 pass
 
-    return {"ok": True, "token_exp_ts": exp}
+    return {"ok": True, "token_exp_ts": exp, **_token_capabilities(data, exp)}
 
 
 def _fix_token_perms(path: str) -> None:
@@ -643,6 +748,8 @@ def refresh_token() -> str:
         new = dict(data) if isinstance(data, dict) else {}
         new["access_token"] = at
         new["expiry"] = int(expiry)
+        if resp.get("scope"):
+            new["scope"] = resp.get("scope")
         if resp.get("refresh_token"):
             new["refresh_token"] = resp.get("refresh_token")
 
