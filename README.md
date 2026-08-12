@@ -64,6 +64,8 @@ docker compose up -d --build
 Web UI:
 - http://localhost:8000/
 
+The source Compose file binds the UI to `127.0.0.1` by default. For remote access, put it behind an authenticated TLS reverse proxy. Set `UI_HOST_BIND=0.0.0.0` only when the host firewall or proxy prevents direct public access.
+
 ### Option B: Run from GHCR images (no local build)
 
 Create a minimal `docker-compose.yml` (adjust ports/volume as you like):
@@ -89,7 +91,7 @@ services:
     container_name: simple-m365-relay-ui
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       # Recommended: use TCP within the Docker network
 
@@ -251,8 +253,24 @@ A single named volume is used:
 - `/data/certs/` (TLS cert/key; self-signed by default)
 - `/data/state/` (UI/app state + logs)
 
+### Backups
+
+UI backup ZIPs contain saved configuration and `/data/sasl/users`. The latter is Dovecot's password file and contains SMTP AUTH credentials, so store backup ZIPs as secrets. Backups deliberately exclude the admin account and OAuth tokens. Legacy `sasl/sasldb2` bundles are detected but cannot restore SMTP users after the Dovecot migration; recreate those users in the UI.
+
 The compose file preserves the underlying Docker volume name:
 - `ms365-relay_ms365-relay-data`
+
+## Development checks
+
+Install the UI dependencies plus `pytest`, then run:
+
+```bash
+python -m pytest
+docker compose config --quiet
+docker compose build ui postfix
+```
+
+The Docker-based end-to-end suite is documented in `tests/e2e/README.md`.
 
 ---
 
