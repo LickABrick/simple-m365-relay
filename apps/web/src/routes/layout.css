@@ -146,15 +146,31 @@
 		gap: 0.75rem;
 	}
 	.nav-status [data-slot='alert'] {
-		grid-template-columns: auto minmax(0, 1fr);
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
 		padding: 0.75rem;
 	}
+	.nav-status-heading {
+		display: flex;
+		min-width: 0;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.nav-status-heading > svg {
+		width: 1rem;
+		flex: none;
+	}
+	.nav-status-heading [data-slot='alert-title'] {
+		min-width: 0;
+		line-height: 1.25;
+	}
 	.nav-status [data-slot='alert-description'] {
+		padding-left: 1.5rem;
 		font-size: 0.75rem;
 	}
 	.nav-status-action {
-		grid-column: 1 / -1;
-		margin-top: 0.25rem;
+		padding-left: 1.5rem;
 	}
 	.nav-status-action [data-slot='button'] {
 		width: 100%;

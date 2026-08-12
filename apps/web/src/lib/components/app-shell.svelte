@@ -94,8 +94,10 @@
 		<div class="nav-status" aria-label="Relay attention required">
 			{#if !readinessState.complete}
 				<Alert.Root>
-					<CircleAlert />
-					<Alert.Title>Setup incomplete</Alert.Title>
+					<div class="nav-status-heading">
+						<CircleAlert />
+						<Alert.Title>Setup incomplete</Alert.Title>
+					</div>
 					<Alert.Description
 						>{readinessState.incomplete.length} required {readinessState.incomplete.length === 1
 							? 'step'
@@ -110,12 +112,14 @@
 			{/if}
 			{#if hasPendingChanges}
 				<Alert.Root>
-					<CircleAlert />
-					<Alert.Title>Changes not applied</Alert.Title>
+					<div class="nav-status-heading">
+						<CircleAlert />
+						<Alert.Title>Changes not applied</Alert.Title>
+					</div>
 					<Alert.Description>Saved settings differ from the running relay.</Alert.Description>
 					<div class="nav-status-action">
 						<Button
-							href="/settings/relay"
+							href="/settings/relay#deployment-review"
 							size="sm"
 							variant="outline"
 							onclick={() => (mobileOpen = false)}

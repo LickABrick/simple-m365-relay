@@ -95,7 +95,7 @@
 			</form>
 		</Card.Content></Card.Root
 	>
-	<Card.Root
+	<Card.Root id="deployment-review"
 		><Card.Header
 			><div class="deployment-heading">
 				<div>
@@ -139,18 +139,6 @@
 				reloads Postfix.
 			</p>
 			<div class="action-row">
-				<ProgressiveForm method="POST" action="?/validate">
-					{#snippet children(pending)}
-						<input type="hidden" name="csrf" value={$form.csrf} /><Button
-							type="submit"
-							disabled={pending || !relayState.available}
-							variant="outline"
-							>{#if pending}<Spinner data-icon="inline-start" />{:else}<ShieldCheck
-									data-icon="inline-start"
-								/>{/if}{pending ? 'Validating…' : 'Validate only'}</Button
-						>
-					{/snippet}
-				</ProgressiveForm>
 				<ProgressiveForm
 					method="POST"
 					action="?/apply"
@@ -166,6 +154,18 @@
 							>{#if pending}<Spinner data-icon="inline-start" />{/if}{pending
 								? 'Validating & applying…'
 								: 'Validate & apply'}</Button
+						>
+					{/snippet}
+				</ProgressiveForm>
+				<ProgressiveForm method="POST" action="?/validate">
+					{#snippet children(pending)}
+						<input type="hidden" name="csrf" value={$form.csrf} /><Button
+							type="submit"
+							disabled={pending || !relayState.available}
+							variant="outline"
+							>{#if pending}<Spinner data-icon="inline-start" />{:else}<ShieldCheck
+									data-icon="inline-start"
+								/>{/if}{pending ? 'Validating…' : 'Validate only'}</Button
 						>
 					{/snippet}
 				</ProgressiveForm>
