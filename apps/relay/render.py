@@ -163,17 +163,19 @@ def main():
         with open(args.config, "r", encoding="utf-8") as f:
             cfg = json.load(f)
 
-    hostname = os.environ.get("RELAY_HOSTNAME", cfg.get("hostname", "relay.local"))
-    domain = os.environ.get("RELAY_DOMAIN", cfg.get("domain", "local"))
+    hostname = cfg.get("hostname") or os.environ.get("RELAY_HOSTNAME", "relay.local")
+    domain = cfg.get("domain") or os.environ.get("RELAY_DOMAIN", "local")
     mynet_env = os.environ.get("RELAY_MYNETWORKS")
-    if mynet_env:
+    if cfg.get("mynetworks"):
+        mynetworks = ", ".join(cfg["mynetworks"])
+    elif mynet_env:
         # allow comma or space separated
         parts = [p.strip() for p in mynet_env.replace(",", " ").split() if p.strip()]
         mynetworks = ", ".join(parts)
     else:
-        mynetworks = ", ".join(cfg.get("mynetworks", ["127.0.0.0/8"]))
+        mynetworks = "127.0.0.0/8"
 
-    relayhost = os.environ.get("RELAYHOST") or cfg.get("relayhost") or "[smtp.office365.com]:587"
+    relayhost = cfg.get("relayhost") or os.environ.get("RELAYHOST") or "[smtp.office365.com]:587"
 
     def _tls_level(v: str, default: str) -> str:
         vv = str(v or "").strip().lower()
@@ -182,9 +184,9 @@ def main():
         return default
 
     tls_cfg = cfg.get("tls") or {}
-    tls_25 = _tls_level(os.environ.get("RELAY_SMTPD_TLS_LEVEL_25") or tls_cfg.get("smtpd_25"), "may")
-    tls_587 = _tls_level(os.environ.get("RELAY_SMTPD_TLS_LEVEL_587") or tls_cfg.get("smtpd_587"), "encrypt")
-    tls_out = _tls_level(os.environ.get("RELAY_SMTP_TLS_SECURITY_LEVEL") or tls_cfg.get("smtp_out"), "encrypt")
+    tls_25 = _tls_level(tls_cfg.get("smtpd_25") or os.environ.get("RELAY_SMTPD_TLS_LEVEL_25"), "may")
+    tls_587 = _tls_level(tls_cfg.get("smtpd_587") or os.environ.get("RELAY_SMTPD_TLS_LEVEL_587"), "encrypt")
+    tls_out = _tls_level(tls_cfg.get("smtp_out") or os.environ.get("RELAY_SMTP_TLS_SECURITY_LEVEL"), "encrypt")
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)

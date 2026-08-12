@@ -30,7 +30,8 @@ COPY --from=build --chown=app:app /opt/ms365-relay/node_modules ./node_modules
 COPY --from=build --chown=app:app /opt/ms365-relay/apps/web/node_modules ./node_modules
 COPY --from=build --chown=app:app /opt/ms365-relay/apps/web/drizzle ./drizzle
 COPY --from=build --chown=app:app /opt/ms365-relay/apps/web/package.json ./package.json
-COPY --chown=app:app ui/entrypoint.sh /entrypoint.sh
+COPY --chown=app:app apps/web/docker-entrypoint.sh /entrypoint.sh
+COPY --chown=app:app apps/web/scripts/admin-cli.mjs /opt/ms365-relay/admin-cli.mjs
 RUN chmod 0555 /entrypoint.sh
 
 EXPOSE 8000

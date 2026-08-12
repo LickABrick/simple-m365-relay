@@ -28,10 +28,10 @@ jobs:
         include:
           - name: ui
             image_name: simple-m365-relay-ui
-            dockerfile: ui/Dockerfile
+            dockerfile: apps/web/Dockerfile
           - name: postfix
             image_name: simple-m365-relay-postfix
-            dockerfile: postfix/Dockerfile
+            dockerfile: apps/relay/Dockerfile
 
     steps:
       - name: Checkout

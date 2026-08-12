@@ -57,10 +57,10 @@ COPY --from=builder /usr/lib/x86_64-linux-gnu/sasl-xoauth2/ /usr/lib/x86_64-linu
 COPY --from=builder /etc/sasl-xoauth2.conf /etc/sasl-xoauth2.conf
 
 WORKDIR /opt/ms365-relay
-COPY postfix/render.py /opt/ms365-relay/postfix/render.py
-COPY postfix/backup.py /opt/ms365-relay/postfix/backup.py
-COPY postfix/control.py /opt/ms365-relay/postfix/control.py
-COPY postfix/entrypoint.sh /entrypoint.sh
+COPY apps/relay/render.py /opt/ms365-relay/relay/render.py
+COPY apps/relay/backup.py /opt/ms365-relay/relay/backup.py
+COPY apps/relay/control.py /opt/ms365-relay/relay/control.py
+COPY apps/relay/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
 

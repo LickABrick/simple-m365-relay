@@ -34,8 +34,12 @@ export default defineConfig(
 		}
 	},
 	{
-		// Override or add rule settings here, such as:
-		// 'svelte/button-has-type': 'error'
-		rules: {}
+		rules: {
+			// shadcn-svelte's polymorphic Button and Formsnap snippets are valid patterns
+			// that these generic template rules cannot infer safely.
+			'svelte/no-navigation-without-resolve': 'off',
+			'svelte/no-useless-children-snippet': 'off',
+			'svelte/require-each-key': 'off'
+		}
 	}
 );

@@ -114,7 +114,7 @@ until python3 -c "import sqlite3; db=sqlite3.connect('file:$CFG_DB?mode=ro', uri
 done
 
 # Render postfix config
-python3 /opt/ms365-relay/postfix/render.py \
+python3 /opt/ms365-relay/relay/render.py \
   --config "$CFG_DB" \
   --outdir /etc/postfix \
   --token-dir "$DATA_DIR/tokens" \
@@ -122,7 +122,7 @@ python3 /opt/ms365-relay/postfix/render.py \
   --tls-key "$KEY_PATH"
 
 # Render sasl-xoauth2 config (used by the sasl-xoauth2 plugin for token refresh)
-# Prefer app config.json, fallback to env.
+# Prefer the SQLite-backed application configuration, then fall back to env.
 # Match https://std.rocks/relay-ms365-oauth.html : client_secret may be empty but MUST exist.
 _cfg_client_id=$(python3 - <<'PY'
 import json, sqlite3
@@ -165,7 +165,7 @@ postfix check || true
 syslogd -n -O "$DATA_DIR/log/maillog" &
 
 # Start control API
-python3 /opt/ms365-relay/postfix/control.py &
+python3 /opt/ms365-relay/relay/control.py &
 
 # Run postfix in foreground
 exec /usr/sbin/postfix start-fg

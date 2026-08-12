@@ -2,7 +2,7 @@ services:
   postfix:
     build:
       context: .
-      dockerfile: postfix/Dockerfile
+      dockerfile: apps/relay/Dockerfile
     container_name: simple-m365-relay-postfix
     restart: unless-stopped
     ports:
@@ -59,7 +59,7 @@ services:
   ui:
     build:
       context: .
-      dockerfile: ui/Dockerfile
+      dockerfile: apps/web/Dockerfile
     container_name: simple-m365-relay-ui
     restart: unless-stopped
     ports:

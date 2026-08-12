@@ -2,7 +2,7 @@ services:
   postfix:
     build:
       context: ../..
-      dockerfile: postfix/Dockerfile
+      dockerfile: apps/relay/Dockerfile
     restart: unless-stopped
     environment:
       RELAY_HOSTNAME: relay.e2e.local
@@ -29,7 +29,7 @@ services:
   ui:
     build:
       context: ../..
-      dockerfile: ui/Dockerfile
+      dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

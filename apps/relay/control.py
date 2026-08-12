@@ -9,7 +9,7 @@ import socketserver
 from pathlib import Path
 
 # NOTE: control.py is executed as a script (not a package). Use a local import.
-# control.py is executed as a script (python /opt/ms365-relay/postfix/control.py)
+# control.py is executed as a script (python /opt/ms365-relay/relay/control.py)
 # but also imported in tests via sys.path insertion.
 # Use a relative import first; fall back to bare name for the script context.
 try:
@@ -297,7 +297,7 @@ def _render_args(outdir: str) -> list[str]:
     key = os.environ.get("RELAY_TLS_KEY_PATH", "/data/certs/tls.key")
     return [
         "python3",
-        "/opt/ms365-relay/postfix/render.py",
+        "/opt/ms365-relay/relay/render.py",
         "--config",
         str(CFG_DB),
         "--outdir",
@@ -366,6 +366,33 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
     # NOTE: returncode=0 only means the message was accepted/queued locally,
     # not that it has been delivered to Microsoft 365.
     return out or "queued"
+
+
+def delivery_evidence(sendmail_output: str, max_wait_seconds: int = 6) -> dict:
+    """Best-effort queue-id correlation against Postfix queue and log state."""
+    match = re.search(r"queued as\s+([A-Z0-9]{5,})", sendmail_output or "", re.I)
+    if not match:
+        match = re.search(r"\b([A-F0-9]{5,}):", sendmail_output or "", re.I)
+    if not match:
+        return {"queue_id": None, "state": "accepted", "in_queue": None, "line": ""}
+    queue_id = match.group(1).upper()
+    state, line, in_queue = "unknown", "", None
+    for attempt in range(max_wait_seconds):
+        queue = sh(["mailq"], check=False)
+        in_queue = queue_id in queue.upper()
+        matches = [item for item in tail(DATA_DIR / "log" / "maillog", 300).splitlines() if queue_id in item.upper()]
+        if matches:
+            line = _redact_sensitive(matches[-1])
+            lowered = line.lower()
+            if "status=sent" in lowered: state = "sent"
+            elif "status=deferred" in lowered: state = "deferred"
+            elif "status=bounced" in lowered: state = "bounced"
+            elif "reject:" in lowered or "status=reject" in lowered: state = "rejected"
+            else: state = "seen"
+        if state in ("sent", "bounced", "rejected"): break
+        if in_queue and state in ("unknown", "seen"): state = "queued"
+        if attempt < max_wait_seconds - 1: _time.sleep(1)
+    return {"queue_id": queue_id, "state": state, "in_queue": in_queue, "line": line}
 
 
 def _append_log(path: Path, text: str, max_bytes: int = 200_000) -> None:
@@ -871,7 +898,7 @@ class H(BaseHTTPRequestHandler):
                 out = send_test_mail(to_addr, from_addr, subject, mail_body)
             except Exception as e:
                 return self._json(400, {"error": str(e)})
-            return self._json(200, {"output": out})
+            return self._json(200, {"output": out, "delivery": delivery_evidence(out)})
         if self.path == "/backup/import":
             body = self._read_json()
             zip_b64 = (body.get("zip_b64") or "").strip()
