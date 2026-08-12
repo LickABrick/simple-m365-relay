@@ -12,6 +12,7 @@ export type RelayConfig = {
 	oauth: { tenant_id: string; client_id: string; auto_refresh_minutes: number };
 	allowed_from: Record<string, string[]>;
 	default_from: Record<string, string>;
+	onboarding_complete?: boolean;
 };
 
 export const defaults: RelayConfig = {
@@ -72,7 +73,12 @@ export async function discardChanges(): Promise<RelayConfig> {
 export function parseConfig(form: FormData, current: RelayConfig): RelayConfig {
 	const text = (name: string, fallback = '') => String(form.get(name) ?? fallback).trim();
 	const rejectControl = (value: string) => {
-		if (/[\x00-\x1f\x7f]/.test(value)) throw new Error('Control characters are not allowed.');
+		if (
+			[...value].some(
+				(character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127
+			)
+		)
+			throw new Error('Control characters are not allowed.');
 		return value;
 	};
 	const hostname = rejectControl(text('hostname', current.hostname));
