@@ -37,7 +37,7 @@ export const actions: Actions = {
 			});
 		}
 	},
-	default: async ({ request, locals }) => {
+	setDefault: async ({ request, locals }) => {
 		const f = await request.formData();
 		try {
 			requireCsrf(f, locals.csrf);

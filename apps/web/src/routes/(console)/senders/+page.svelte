@@ -100,7 +100,7 @@
 										>{#if config.default_from[login] === address}<Badge>DEFAULT</Badge
 											>{:else}<ProgressiveForm
 												method="POST"
-												action="?/default"
+									action="?/setDefault"
 												onsucceeded={(payload) => (config = payload.config as typeof data.config)}
 											>
 												{#snippet children(pending)}
