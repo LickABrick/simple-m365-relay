@@ -1,0 +1,11 @@
+[
+  {
+    "date": "2026-08-12",
+    "scope": "app",
+    "genre": "modern-minimal",
+    "theme": "Cobalt",
+    "macrostructure": "Workbench",
+    "designSystem": "design.md",
+    "enrichment": "none"
+  }
+]
