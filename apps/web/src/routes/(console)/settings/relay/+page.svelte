@@ -12,23 +12,31 @@
 	import ProgressiveForm from '$lib/components/progressive-form.svelte';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { relayState } from '$lib/client/relay-state.svelte';
+	import { untrack } from 'svelte';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	let pendingChanges = $state(data.pending);
 	// svelte-ignore state_referenced_locally
-	const settings = superForm(data.settingsForm, {
-		validators: zod4Client(relaySettingsSchema),
-		invalidateAll: false,
-		onResult: ({ result }) => {
-			if (result.type === 'success') {
-				pendingChanges = true;
-				toast.success((result.data as { message?: string })?.message || 'Saved');
-			} else if (result.type === 'failure')
-				toast.error(
-					(result.data as { error?: string })?.error || 'Relay settings could not be saved.'
-				);
+	const settings = superForm(
+		untrack(() => data.settingsForm),
+		{
+			validators: zod4Client(relaySettingsSchema),
+			applyAction: false,
+			invalidateAll: false,
+			onResult: ({ result }) => {
+				if (result.type === 'success') {
+					const saved = (result.data as { form?: { data?: (typeof data.settingsForm)['data'] } })
+						?.form?.data;
+					if (saved) queueMicrotask(() => settings.reset({ data: saved, newState: saved }));
+					pendingChanges = true;
+					toast.success((result.data as { message?: string })?.message || 'Saved');
+				} else if (result.type === 'failure')
+					toast.error(
+						(result.data as { error?: string })?.error || 'Relay settings could not be saved.'
+					);
+			}
 		}
-	});
+	);
 	const { form, enhance, submitting, tainted } = settings;
 	const changed = $derived(settings.isTainted($tainted));
 </script>
@@ -58,20 +66,13 @@
 						form={settings}
 						name="hostname"
 						label="Relay hostname"
-						bind:value={$form.hostname}
 						description="Fully-qualified name advertised to SMTP clients."
 					/>
-					<FormTextField
-						form={settings}
-						name="domain"
-						label="Local relay domain"
-						bind:value={$form.domain}
-					/>
+					<FormTextField form={settings} name="domain" label="Local relay domain" />
 					<FormTextField
 						form={settings}
 						name="relayhost"
 						label="Upstream relay"
-						bind:value={$form.relayhost}
 						description="Microsoft 365 normally uses [smtp.office365.com]:587."
 					/>
 					<Button type="submit" disabled={$submitting || !changed}

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { connectLiveStream, type LiveState } from '$lib/client/live-stream';
 	import { superForm } from 'sveltekit-superforms/client';
 	import { zod4Client } from 'sveltekit-superforms/adapters';
@@ -23,17 +23,25 @@
 		refreshLog = $state(data.refreshLog),
 		streamState = $state<LiveState>('loading');
 	// svelte-ignore state_referenced_locally
-	const microsoft = superForm(data.microsoftForm, {
-		validators: zod4Client(microsoftSettingsSchema),
-		invalidateAll: false,
-		onResult: ({ result }) => {
-			if (result.type === 'success') toast.success('Microsoft configuration saved.');
-			else if (result.type === 'failure')
-				toast.error(
-					(result.data as { error?: string })?.error || 'Microsoft settings could not be saved.'
-				);
+	const microsoft = superForm(
+		untrack(() => data.microsoftForm),
+		{
+			validators: zod4Client(microsoftSettingsSchema),
+			applyAction: false,
+			invalidateAll: false,
+			onResult: ({ result }) => {
+				if (result.type === 'success') {
+					const saved = (result.data as { form?: { data?: (typeof data.microsoftForm)['data'] } })
+						?.form?.data;
+					if (saved) queueMicrotask(() => microsoft.reset({ data: saved, newState: saved }));
+					toast.success('Microsoft configuration saved.');
+				} else if (result.type === 'failure')
+					toast.error(
+						(result.data as { error?: string })?.error || 'Microsoft settings could not be saved.'
+					);
+			}
 		}
-	});
+	);
 	const { form, enhance, submitting, tainted } = microsoft;
 	const changed = $derived(microsoft.isTainted($tainted));
 	const tokenPresent = $derived(token.ok === true);
@@ -88,17 +96,10 @@
 							name="ms365_smtp_user"
 							label="Licensed sending mailbox"
 							type="email"
-							bind:value={$form.ms365_smtp_user}
-						/><FormTextField
-							form={microsoft}
-							name="tenant_id"
-							label="Tenant ID"
-							bind:value={$form.tenant_id}
-						/><FormTextField
+						/><FormTextField form={microsoft} name="tenant_id" label="Tenant ID" /><FormTextField
 							form={microsoft}
 							name="client_id"
 							label="Application client ID"
-							bind:value={$form.client_id}
 						/><Field.Field
 							><Field.FieldLabel for="refresh">Refresh interval (minutes)</Field.FieldLabel><Input
 								id="refresh"

@@ -15,24 +15,29 @@
 	import Users from '@lucide/svelte/icons/users';
 	import { toast } from 'svelte-sonner';
 	import { relayState } from '$lib/client/relay-state.svelte';
+	import { untrack } from 'svelte';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	let users = $state(data.users);
 	// svelte-ignore state_referenced_locally
-	const client = superForm(data.clientForm, {
-		validators: zod4Client(smtpClientSchema),
-		invalidateAll: false,
-		resetForm: true,
-		onResult: ({ result }) => {
-			if (result.type === 'success') {
-				users = (result.data as { users?: string[] })?.users || users;
-				toast.success('SMTP client saved.');
-			} else if (result.type === 'failure')
-				toast.error(
-					(result.data as { error?: string })?.error || 'SMTP client could not be saved.'
-				);
+	const client = superForm(
+		untrack(() => data.clientForm),
+		{
+			validators: zod4Client(smtpClientSchema),
+			applyAction: false,
+			invalidateAll: false,
+			resetForm: true,
+			onResult: ({ result }) => {
+				if (result.type === 'success') {
+					users = (result.data as { users?: string[] })?.users || users;
+					toast.success('SMTP client saved.');
+				} else if (result.type === 'failure')
+					toast.error(
+						(result.data as { error?: string })?.error || 'SMTP client could not be saved.'
+					);
+			}
 		}
-	});
+	);
 	const { form, enhance, submitting } = client;
 </script>
 
@@ -54,19 +59,12 @@
 				<form method="POST" action="?/add" use:enhance>
 					<input type="hidden" name="csrf" bind:value={$form.csrf} />
 					<Field.FieldGroup>
-						<FormTextField
-							form={client}
-							name="login"
-							label="Login"
-							bind:value={$form.login}
-							autocomplete="username"
-						/>
+						<FormTextField form={client} name="login" label="Login" autocomplete="username" />
 						<FormTextField
 							form={client}
 							name="password"
 							label="Password"
 							type="password"
-							bind:value={$form.password}
 							autocomplete="new-password"
 							description="At least 12 characters with upper, lower, number, and symbol."
 						/>

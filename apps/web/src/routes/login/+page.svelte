@@ -8,9 +8,13 @@
 	import FormTextField from '$lib/components/form-text-field.svelte';
 	import LogIn from '@lucide/svelte/icons/log-in';
 	import { Spinner } from '$lib/components/ui/spinner';
+	import { untrack } from 'svelte';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
-	const login = superForm(data.loginForm, { validators: zod4Client(loginSchema) });
+	const login = superForm(
+		untrack(() => data.loginForm),
+		{ validators: zod4Client(loginSchema) }
+	);
 	const { form, enhance, submitting } = login;
 </script>
 
@@ -37,14 +41,12 @@
 						label="Username"
 						autocomplete="username"
 						autofocus
-						bind:value={$form.username}
 					/><FormTextField
 						form={login}
 						name="password"
 						label="Password"
 						type="password"
 						autocomplete="current-password"
-						bind:value={$form.password}
 					/>
 					<Button type="submit" disabled={$submitting || !$form.username || !$form.password}
 						>{#if $submitting}<Spinner data-icon="inline-start" />{:else}<LogIn

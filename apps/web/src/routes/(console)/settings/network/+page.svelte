@@ -9,19 +9,28 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { toast } from 'svelte-sonner';
+	import { untrack } from 'svelte';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
-	const network = superForm(data.networkForm, {
-		validators: zod4Client(networkSettingsSchema),
-		invalidateAll: false,
-		onResult: ({ result }) => {
-			if (result.type === 'success') toast.success('Network policy saved.');
-			else if (result.type === 'failure')
-				toast.error(
-					(result.data as { error?: string })?.error || 'Network policy could not be saved.'
-				);
+	const network = superForm(
+		untrack(() => data.networkForm),
+		{
+			validators: zod4Client(networkSettingsSchema),
+			applyAction: false,
+			invalidateAll: false,
+			onResult: ({ result }) => {
+				if (result.type === 'success') {
+					const saved = (result.data as { form?: { data?: (typeof data.networkForm)['data'] } })
+						?.form?.data;
+					if (saved) queueMicrotask(() => network.reset({ data: saved, newState: saved }));
+					toast.success('Network policy saved.');
+				} else if (result.type === 'failure')
+					toast.error(
+						(result.data as { error?: string })?.error || 'Network policy could not be saved.'
+					);
+			}
 		}
-	});
+	);
 	const { form, errors, enhance, submitting, tainted } = network;
 	const changed = $derived(network.isTainted($tainted));
 </script>

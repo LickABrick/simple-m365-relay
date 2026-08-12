@@ -1,6 +1,6 @@
 <script lang="ts">
 	import ProgressiveForm from '$lib/components/progressive-form.svelte';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import { connectLiveStream, type LiveState } from '$lib/client/live-stream';
 	import { superForm } from 'sveltekit-superforms/client';
 	import { zod4Client } from 'sveltekit-superforms/adapters';
@@ -22,15 +22,33 @@
 	import Check from '@lucide/svelte/icons/check';
 	let { data, form } = $props();
 	// svelte-ignore state_referenced_locally
-	const relay = superForm(data.relayForm, { validators: zod4Client(relaySettingsSchema) });
+	const relay = superForm(
+		untrack(() => data.relayForm),
+		{
+			validators: zod4Client(relaySettingsSchema)
+		}
+	);
 	// svelte-ignore state_referenced_locally
-	const network = superForm(data.networkForm, { validators: zod4Client(networkSettingsSchema) });
+	const network = superForm(
+		untrack(() => data.networkForm),
+		{
+			validators: zod4Client(networkSettingsSchema)
+		}
+	);
 	// svelte-ignore state_referenced_locally
-	const microsoft = superForm(data.microsoftForm, {
-		validators: zod4Client(microsoftSettingsSchema)
-	});
+	const microsoft = superForm(
+		untrack(() => data.microsoftForm),
+		{
+			validators: zod4Client(microsoftSettingsSchema)
+		}
+	);
 	// svelte-ignore state_referenced_locally
-	const client = superForm(data.clientForm, { validators: zod4Client(smtpClientSchema) });
+	const client = superForm(
+		untrack(() => data.clientForm),
+		{
+			validators: zod4Client(smtpClientSchema)
+		}
+	);
 	const { form: relayForm, enhance: relayEnhance, submitting: relaySubmitting } = relay;
 	const { form: networkForm, enhance: networkEnhance, submitting: networkSubmitting } = network;
 	const {
@@ -107,24 +125,9 @@
 			><Card.Content
 				><form method="POST" action="?/save" use:relayEnhance>
 					<input type="hidden" name="csrf" bind:value={$relayForm.csrf} /><Field.FieldGroup
-						><FormTextField
-							form={relay}
-							name="hostname"
-							label="Relay hostname"
-							bind:value={$relayForm.hostname}
-						/>
-						<FormTextField
-							form={relay}
-							name="domain"
-							label="Relay domain"
-							bind:value={$relayForm.domain}
-						/>
-						<FormTextField
-							form={relay}
-							name="relayhost"
-							label="Upstream relay"
-							bind:value={$relayForm.relayhost}
-						/>
+						><FormTextField form={relay} name="hostname" label="Relay hostname" />
+						<FormTextField form={relay} name="domain" label="Relay domain" />
+						<FormTextField form={relay} name="relayhost" label="Upstream relay" />
 						><Button type="submit" disabled={$relaySubmitting}
 							>{#if $relaySubmitting}<Spinner data-icon="inline-start" />{/if}{$relaySubmitting
 								? 'Saving…'
@@ -206,20 +209,9 @@
 							name="ms365_smtp_user"
 							label="Sending mailbox"
 							type="email"
-							bind:value={$microsoftForm.ms365_smtp_user}
 						/>
-						<FormTextField
-							form={microsoft}
-							name="tenant_id"
-							label="Tenant ID"
-							bind:value={$microsoftForm.tenant_id}
-						/>
-						<FormTextField
-							form={microsoft}
-							name="client_id"
-							label="Application client ID"
-							bind:value={$microsoftForm.client_id}
-						/>
+						<FormTextField form={microsoft} name="tenant_id" label="Tenant ID" />
+						<FormTextField form={microsoft} name="client_id" label="Application client ID" />
 						><input
 							type="hidden"
 							name="auto_refresh_minutes"
@@ -277,19 +269,8 @@
 			><Card.Content
 				><form method="POST" action="?/client" use:clientEnhance>
 					<input type="hidden" name="csrf" bind:value={$clientForm.csrf} /><Field.FieldGroup
-						><FormTextField
-							form={client}
-							name="login"
-							label="Login"
-							bind:value={$clientForm.login}
-						/>
-						<FormTextField
-							form={client}
-							name="password"
-							label="Password"
-							type="password"
-							bind:value={$clientForm.password}
-						/>
+						><FormTextField form={client} name="login" label="Login" />
+						<FormTextField form={client} name="password" label="Password" type="password" />
 						><Button type="submit" disabled={$clientSubmitting || !data.health}
 							>{#if $clientSubmitting}<Spinner data-icon="inline-start" />{/if}{$clientSubmitting
 								? 'Saving…'

@@ -8,9 +8,15 @@
 	import FormTextField from '$lib/components/form-text-field.svelte';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 	import { Spinner } from '$lib/components/ui/spinner';
+	import { untrack } from 'svelte';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
-	const setup = superForm(data.setupForm, { validators: zod4Client(setupSchema) });
+	const setup = superForm(
+		untrack(() => data.setupForm),
+		{
+			validators: zod4Client(setupSchema)
+		}
+	);
 	const { form, enhance, submitting } = setup;
 </script>
 
@@ -36,7 +42,6 @@
 						name="username"
 						label="Username"
 						autocomplete="username"
-						bind:value={$form.username}
 					/><FormTextField
 						form={setup}
 						name="password"
@@ -44,14 +49,12 @@
 						type="password"
 						autocomplete="new-password"
 						description="At least 12 characters with upper, lower, number, and symbol."
-						bind:value={$form.password}
 					/><FormTextField
 						form={setup}
 						name="confirm"
 						label="Confirm password"
 						type="password"
 						autocomplete="new-password"
-						bind:value={$form.confirm}
 					/>
 					<Button
 						type="submit"

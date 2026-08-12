@@ -13,24 +13,29 @@
 	import { Spinner } from '$lib/components/ui/spinner';
 	import Trash from '@lucide/svelte/icons/trash-2';
 	import { toast } from 'svelte-sonner';
+	import { untrack } from 'svelte';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	let config = $state(data.config);
 	// svelte-ignore state_referenced_locally
-	const sender = superForm(data.senderForm, {
-		validators: zod4Client(senderSchema),
-		invalidateAll: false,
-		resetForm: true,
-		onResult: ({ result }) => {
-			if (result.type === 'success') {
-				config = (result.data as { config?: typeof data.config })?.config || config;
-				toast.success('Sender identity allowed.');
-			} else if (result.type === 'failure')
-				toast.error(
-					(result.data as { error?: string })?.error || 'Sender identity could not be saved.'
-				);
+	const sender = superForm(
+		untrack(() => data.senderForm),
+		{
+			validators: zod4Client(senderSchema),
+			applyAction: false,
+			invalidateAll: false,
+			resetForm: true,
+			onResult: ({ result }) => {
+				if (result.type === 'success') {
+					config = (result.data as { config?: typeof data.config })?.config || config;
+					toast.success('Sender identity allowed.');
+				} else if (result.type === 'failure')
+					toast.error(
+						(result.data as { error?: string })?.error || 'Sender identity could not be saved.'
+					);
+			}
 		}
-	});
+	);
 	const { form, enhance, submitting } = sender;
 </script>
 
@@ -64,13 +69,7 @@
 									></Select.Content
 								></Select.Root
 							></Field.Field
-						><FormTextField
-							form={sender}
-							name="address"
-							label="From address"
-							type="email"
-							bind:value={$form.address}
-						/><Button
+						><FormTextField form={sender} name="address" label="From address" type="email" /><Button
 							type="submit"
 							disabled={$submitting || !data.users.length || !$form.login || !$form.address}
 							>{#if $submitting}<Spinner data-icon="inline-start" />{/if}{$submitting

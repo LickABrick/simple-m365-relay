@@ -11,17 +11,22 @@
 	import Send from '@lucide/svelte/icons/send';
 	import { toast } from 'svelte-sonner';
 	import { relayState } from '$lib/client/relay-state.svelte';
+	import { untrack } from 'svelte';
 	let { data, form: result } = $props();
 	// svelte-ignore state_referenced_locally
-	const test = superForm(data.testForm, {
-		validators: zod4Client(testMailSchema),
-		invalidateAll: false,
-		onResult: ({ result }) => {
-			if (result.type === 'success') toast.success('Test message accepted.');
-			else if (result.type === 'failure')
-				toast.error((result.data as { error?: string })?.error || 'Test message failed.');
+	const test = superForm(
+		untrack(() => data.testForm),
+		{
+			validators: zod4Client(testMailSchema),
+			applyAction: false,
+			invalidateAll: false,
+			onResult: ({ result }) => {
+				if (result.type === 'success') toast.success('Test message accepted.');
+				else if (result.type === 'failure')
+					toast.error((result.data as { error?: string })?.error || 'Test message failed.');
+			}
 		}
-	});
+	);
 	const { form, enhance, submitting } = test;
 </script>
 
@@ -48,21 +53,9 @@
 							label="From"
 							type="email"
 							required={false}
-							bind:value={$form.from_addr}
-						/><FormTextField
-							form={test}
-							name="to_addr"
-							label="To"
-							type="email"
-							bind:value={$form.to_addr}
-						/>
+						/><FormTextField form={test} name="to_addr" label="To" type="email" />
 					</div>
-					<FormTextField
-						form={test}
-						name="subject"
-						label="Subject"
-						bind:value={$form.subject}
-					/><Field.Field
+					<FormTextField form={test} name="subject" label="Subject" /><Field.Field
 						><Field.FieldLabel for="body">Message</Field.FieldLabel><Textarea
 							id="body"
 							name="body"

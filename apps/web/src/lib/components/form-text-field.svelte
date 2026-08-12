@@ -1,9 +1,9 @@
 <script
 	lang="ts"
-	generics="T extends Record<string, unknown>, U extends import('sveltekit-superforms').FormPath<T>"
+	generics="T extends Record<string, unknown>, U extends import('sveltekit-superforms').FormPathLeaves<T, string>"
 >
 	import { Control, Field as FormField, FieldErrors, Label } from 'formsnap';
-	import type { SuperForm } from 'sveltekit-superforms';
+	import { formFieldProxy, type SuperForm } from 'sveltekit-superforms';
 	import type { HTMLInputAttributes } from 'svelte/elements';
 	import * as Field from '$lib/components/ui/field';
 	import { Input } from '$lib/components/ui/input';
@@ -16,8 +16,7 @@
 		autocomplete,
 		autofocus = false,
 		required = true,
-		description,
-		value = $bindable()
+		description
 	}: {
 		form: SuperForm<T>;
 		name: U;
@@ -27,8 +26,10 @@
 		autofocus?: boolean;
 		required?: boolean;
 		description?: string;
-		value?: string;
 	} = $props();
+
+	// svelte-ignore state_referenced_locally
+	const { value: fieldValue } = formFieldProxy<T, U, string>(form, name);
 </script>
 
 <FormField {form} {name}>
@@ -44,7 +45,7 @@
 						{autofocus}
 						{required}
 						aria-invalid={Boolean(errors?.length)}
-						bind:value
+						bind:value={$fieldValue}
 					/>
 				{/snippet}
 			</Control>
