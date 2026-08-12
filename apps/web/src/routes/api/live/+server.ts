@@ -1,4 +1,9 @@
-import { getActivity, getMicrosoftState, getOverview } from '$lib/server/operations';
+import {
+	getActivity,
+	getMicrosoftState,
+	getOverview,
+	getRelayHealth
+} from '$lib/server/operations';
 import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = ({ request, url }) => {
@@ -7,6 +12,16 @@ export const GET: RequestHandler = ({ request, url }) => {
 	let closed = false;
 	const stream = new ReadableStream({
 		async start(controller) {
+			const enqueue = (event: string, payload: unknown) => {
+				if (closed) return;
+				try {
+					controller.enqueue(
+						encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`)
+					);
+				} catch {
+					closed = true;
+				}
+			};
 			const send = async () => {
 				if (closed) return;
 				try {
@@ -16,16 +31,16 @@ export const GET: RequestHandler = ({ request, url }) => {
 							? await getActivity()
 							: scope === 'microsoft'
 								? await getMicrosoftState()
-								: await getOverview();
-					controller.enqueue(encoder.encode(`event: update\ndata: ${JSON.stringify(payload)}\n\n`));
+								: scope === 'health'
+									? await getRelayHealth()
+									: await getOverview();
+					enqueue('update', payload);
 				} catch (error) {
-					controller.enqueue(
-						encoder.encode(
-							`event: fault\ndata: ${JSON.stringify({ message: error instanceof Error ? error.message : 'Live update failed' })}\n\n`
-						)
-					);
+					enqueue('fault', {
+						message: error instanceof Error ? error.message : 'Live update failed'
+					});
 				}
-				timer = setTimeout(send, 3000);
+				if (!closed) timer = setTimeout(send, 3000);
 			};
 			request.signal.addEventListener('abort', () => {
 				closed = true;

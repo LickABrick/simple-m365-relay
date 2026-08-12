@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { connectLiveStream, type LiveState } from '$lib/client/live-stream';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -16,18 +17,14 @@
 		token: data.token,
 		users: data.users
 	});
-	let connected = $state(false);
-	onMount(() => {
-		const events = new EventSource('/api/live');
-		events.addEventListener('update', (event) => {
-			live = JSON.parse((event as MessageEvent).data);
-			connected = true;
-		});
-		events.onerror = () => {
-			connected = false;
-		};
-		return () => events.close();
-	});
+	let streamState = $state<LiveState>('loading');
+	onMount(() =>
+		connectLiveStream<typeof live>({
+			url: '/api/live',
+			ondata: (next) => (live = next),
+			onstate: (state) => (streamState = state)
+		})
+	);
 	const queueCount = $derived(
 		live.queue.includes('Mail queue is empty')
 			? 0
@@ -42,8 +39,14 @@
 			<h1>System overview</h1>
 			<p>Live readiness and mail-flow state for this relay.</p>
 		</div>
-		<Badge variant={connected ? 'secondary' : 'outline'}
-			><Activity />{connected ? 'Live' : 'Connecting'}</Badge
+		<Badge variant={streamState === 'live' ? 'secondary' : 'outline'}
+			><Activity />{streamState === 'live'
+				? 'Live'
+				: streamState === 'paused'
+					? 'Paused'
+					: streamState === 'loading'
+						? 'Connecting'
+						: 'Retrying'}</Badge
 		>
 	</header>
 	{#if !data.configured}<Alert.Root
@@ -87,7 +90,7 @@
 		<Card.Root
 			><Card.Header
 				><Card.Description>OAUTH CREDENTIAL</Card.Description><Card.Title
-					>{Object.keys(live.token).length ? 'DETECTED' : 'MISSING'}</Card.Title
+					>{live.token['ok'] === true ? 'DETECTED' : 'MISSING'}</Card.Title
 				></Card.Header
 			><Card.Content
 				><Button href="/microsoft" variant="outline" size="sm">Inspect token</Button></Card.Content

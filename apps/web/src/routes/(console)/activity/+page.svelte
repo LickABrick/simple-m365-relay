@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { connectLiveStream, type LiveState } from '$lib/client/live-stream';
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
@@ -10,7 +11,7 @@
 	// svelte-ignore state_referenced_locally
 	let queue = $state(data.queue),
 		logs = $state(data.logs),
-		connected = $state(false),
+		streamState = $state<LiveState>('loading'),
 		query = $state(''),
 		problemsOnly = $state(false);
 	let filtered = $derived(
@@ -23,17 +24,25 @@
 			)
 			.join('\n')
 	);
-	onMount(() => {
-		const events = new EventSource('/api/live?scope=activity');
-		events.addEventListener('update', (event) => {
-			const next = JSON.parse((event as MessageEvent).data);
-			queue = next.queue;
-			logs = next.logs;
-			connected = true;
-		});
-		events.onerror = () => (connected = false);
-		return () => events.close();
-	});
+	onMount(() =>
+		connectLiveStream<{ queue: string; logs: string }>({
+			url: '/api/live?scope=activity',
+			ondata: (next) => {
+				queue = next.queue;
+				logs = next.logs;
+			},
+			onstate: (state) => (streamState = state)
+		})
+	);
+	const streamLabel = $derived(
+		streamState === 'live'
+			? 'STREAMING'
+			: streamState === 'paused'
+				? 'PAUSED'
+				: streamState === 'loading'
+					? 'CONNECTING'
+					: 'RETRYING'
+	);
 </script>
 
 <main class="console-page">
@@ -43,9 +52,7 @@
 			<h1>Live activity</h1>
 			<p>Queue and redacted mail-log output refresh automatically every three seconds.</p>
 		</div>
-		<Badge variant={connected ? 'secondary' : 'outline'}
-			><Radio />{connected ? 'STREAMING' : 'RECONNECTING'}</Badge
-		>
+		<Badge variant={streamState === 'live' ? 'secondary' : 'outline'}><Radio />{streamLabel}</Badge>
 	</header>
 	<Card.Root
 		><Card.Header
@@ -67,9 +74,11 @@
 						bind:value={query}
 					/></Field.Field
 				><Field.Field orientation="horizontal"
-					><Switch id="problems" bind:checked={problemsOnly} /><Field.FieldLabel for="problems"
-						>Problems only</Field.FieldLabel
-					></Field.Field
+					><Switch
+						id="problems"
+						bind:checked={problemsOnly}
+						aria-label="Show problems only"
+					/><Field.FieldLabel for="problems">Problems only</Field.FieldLabel></Field.Field
 				>
 			</div>
 			<pre class="live-log" aria-live="polite">{filtered ||

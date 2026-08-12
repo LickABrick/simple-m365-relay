@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { progressive } from '$lib/actions/progressive';
+	import ProgressiveForm from '$lib/components/progressive-form.svelte';
+	import { onMount } from 'svelte';
+	import { connectLiveStream, type LiveState } from '$lib/client/live-stream';
 	import { superForm } from 'sveltekit-superforms/client';
 	import { zod4Client } from 'sveltekit-superforms/adapters';
 	import {
@@ -15,6 +17,7 @@
 	import * as Field from '$lib/components/ui/field';
 	import * as Select from '$lib/components/ui/select';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { Spinner } from '$lib/components/ui/spinner';
 	import Arrow from '@lucide/svelte/icons/arrow-right';
 	import Check from '@lucide/svelte/icons/check';
 	let { data, form } = $props();
@@ -28,10 +31,44 @@
 	});
 	// svelte-ignore state_referenced_locally
 	const client = superForm(data.clientForm, { validators: zod4Client(smtpClientSchema) });
-	const { form: relayForm, enhance: relayEnhance } = relay;
-	const { form: networkForm, enhance: networkEnhance } = network;
-	const { form: microsoftForm, enhance: microsoftEnhance } = microsoft;
-	const { form: clientForm, enhance: clientEnhance } = client;
+	const { form: relayForm, enhance: relayEnhance, submitting: relaySubmitting } = relay;
+	const { form: networkForm, enhance: networkEnhance, submitting: networkSubmitting } = network;
+	const {
+		form: microsoftForm,
+		enhance: microsoftEnhance,
+		submitting: microsoftSubmitting
+	} = microsoft;
+	const { form: clientForm, enhance: clientEnhance, submitting: clientSubmitting } = client;
+	// svelte-ignore state_referenced_locally
+	let token = $state(data.token),
+		deviceLog = $state(data.deviceLog),
+		streamState = $state<LiveState>('loading');
+	onMount(() => {
+		if (data.step !== 'authorize') return;
+		return connectLiveStream<{
+			token: Record<string, unknown>;
+			deviceLog: string;
+			refreshLog: string;
+		}>({
+			url: '/api/live?scope=microsoft',
+			ondata: (next) => {
+				token = next.token;
+				deviceLog = next.deviceLog;
+			},
+			onstate: (state) => (streamState = state)
+		});
+	});
+	const tokenPresent = $derived(token['ok'] === true);
+	const readyToFinish = $derived(
+		Boolean(
+			data.health &&
+			data.config.oauth.client_id &&
+			data.config.oauth.tenant_id &&
+			data.config.ms365_smtp_user &&
+			tokenPresent &&
+			data.users.length
+		)
+	);
 	const labels: { [key: string]: string } = {
 		relay: 'Relay identity',
 		network: 'Trust boundary',
@@ -88,7 +125,12 @@
 							label="Upstream relay"
 							bind:value={$relayForm.relayhost}
 						/>
-						><Button type="submit">Save and continue<Arrow data-icon="inline-end" /></Button
+						><Button type="submit" disabled={$relaySubmitting}
+							>{#if $relaySubmitting}<Spinner data-icon="inline-start" />{/if}{$relaySubmitting
+								? 'Saving…'
+								: 'Save and continue'}{#if !$relaySubmitting}<Arrow
+									data-icon="inline-end"
+								/>{/if}</Button
 						></Field.FieldGroup
 					>
 				</form></Card.Content
@@ -113,11 +155,12 @@
 						>
 						<div class="form-grid">
 							<Field.Field
-								><Field.FieldLabel>Port 25 TLS</Field.FieldLabel><Select.Root
+								><Field.FieldLabel for="onboarding-tls25">Port 25 TLS</Field.FieldLabel><Select.Root
 									name="tls_25"
 									type="single"
 									bind:value={$networkForm.tls_25}
-									><Select.Trigger>{data.config.tls.smtpd_25}</Select.Trigger><Select.Content
+									><Select.Trigger id="onboarding-tls25">{$networkForm.tls_25}</Select.Trigger
+									><Select.Content
 										><Select.Group
 											>{#each ['none', 'may', 'encrypt'] as value}<Select.Item {value}
 													>{value}</Select.Item
@@ -126,11 +169,10 @@
 									></Select.Root
 								></Field.Field
 							><Field.Field
-								><Field.FieldLabel>Port 587 TLS</Field.FieldLabel><Select.Root
-									name="tls_587"
-									type="single"
-									bind:value={$networkForm.tls_587}
-									><Select.Trigger>{data.config.tls.smtpd_587}</Select.Trigger><Select.Content
+								><Field.FieldLabel for="onboarding-tls587">Port 587 TLS</Field.FieldLabel
+								><Select.Root name="tls_587" type="single" bind:value={$networkForm.tls_587}
+									><Select.Trigger id="onboarding-tls587">{$networkForm.tls_587}</Select.Trigger
+									><Select.Content
 										><Select.Group
 											>{#each ['none', 'may', 'encrypt'] as value}<Select.Item {value}
 													>{value}</Select.Item
@@ -140,7 +182,12 @@
 								></Field.Field
 							>
 						</div>
-						<Button type="submit">Save and continue<Arrow data-icon="inline-end" /></Button
+						<Button type="submit" disabled={$networkSubmitting}
+							>{#if $networkSubmitting}<Spinner data-icon="inline-start" />{/if}{$networkSubmitting
+								? 'Saving…'
+								: 'Save and continue'}{#if !$networkSubmitting}<Arrow
+									data-icon="inline-end"
+								/>{/if}</Button
 						></Field.FieldGroup
 					>
 				</form></Card.Content
@@ -177,7 +224,14 @@
 							type="hidden"
 							name="auto_refresh_minutes"
 							bind:value={$microsoftForm.auto_refresh_minutes}
-						/><Button type="submit">Save and continue<Arrow data-icon="inline-end" /></Button
+						/><Button type="submit" disabled={$microsoftSubmitting}
+							>{#if $microsoftSubmitting}<Spinner
+									data-icon="inline-start"
+								/>{/if}{$microsoftSubmitting
+								? 'Saving…'
+								: 'Save and continue'}{#if !$microsoftSubmitting}<Arrow
+									data-icon="inline-end"
+								/>{/if}</Button
 						></Field.FieldGroup
 					>
 				</form></Card.Content
@@ -190,14 +244,27 @@
 					token status is present.</Card.Description
 				></Card.Header
 			><Card.Content class="stack"
-				><form method="POST" action="?/start" use:progressive>
-					<input type="hidden" name="csrf" value={data.csrf} /><Button type="submit"
-						>Start authorization</Button
-					>
-				</form>
-				<pre>{data.deviceLog || 'Waiting to start device authorization.'}</pre>
-				<pre>{JSON.stringify(data.token, null, 2)}</pre>
-				<Button href="/onboarding/client" disabled={!Object.keys(data.token).length}
+				><ProgressiveForm method="POST" action="?/start">
+					{#snippet children(pending)}<input type="hidden" name="csrf" value={data.csrf} /><Button
+							type="submit"
+							disabled={pending || !data.health}
+							>{#if pending}<Spinner data-icon="inline-start" />{/if}{pending
+								? 'Starting…'
+								: 'Start authorization'}</Button
+						>{/snippet}
+				</ProgressiveForm>
+				<Badge variant={streamState === 'live' ? 'secondary' : 'outline'}
+					>{streamState === 'live'
+						? 'LIVE'
+						: streamState === 'paused'
+							? 'PAUSED'
+							: streamState === 'loading'
+								? 'CONNECTING'
+								: 'RETRYING'}</Badge
+				>
+				<pre aria-live="polite">{deviceLog || 'Waiting to start device authorization.'}</pre>
+				<pre aria-live="polite">{JSON.stringify(token, null, 2)}</pre>
+				<Button href="/onboarding/client" disabled={!tokenPresent}
 					>Continue<Arrow data-icon="inline-end" /></Button
 				></Card.Content
 			></Card.Root
@@ -223,7 +290,12 @@
 							type="password"
 							bind:value={$clientForm.password}
 						/>
-						><Button type="submit">Save and review<Arrow data-icon="inline-end" /></Button
+						><Button type="submit" disabled={$clientSubmitting || !data.health}
+							>{#if $clientSubmitting}<Spinner data-icon="inline-start" />{/if}{$clientSubmitting
+								? 'Saving…'
+								: 'Save and review'}{#if !$clientSubmitting}<Arrow
+									data-icon="inline-end"
+								/>{/if}</Button
 						></Field.FieldGroup
 					>
 				</form></Card.Content
@@ -249,9 +321,8 @@
 						>
 					</div>
 					<div>
-						<span>OAuth token</span><Badge
-							variant={Object.keys(data.token).length ? 'secondary' : 'destructive'}
-							>{Object.keys(data.token).length ? 'Detected' : 'Missing'}</Badge
+						<span>OAuth token</span><Badge variant={tokenPresent ? 'secondary' : 'destructive'}
+							>{tokenPresent ? 'Detected' : 'Missing'}</Badge
 						>
 					</div>
 					<div>
@@ -261,11 +332,15 @@
 					</div>
 				</div></Card.Content
 			><Card.Footer
-				><form method="POST" action="?/finish" use:progressive>
-					<input type="hidden" name="csrf" value={data.csrf} /><Button type="submit"
-						>Validate, apply, and finish</Button
-					>
-				</form></Card.Footer
+				><ProgressiveForm method="POST" action="?/finish">
+					{#snippet children(pending)}<input type="hidden" name="csrf" value={data.csrf} /><Button
+							type="submit"
+							disabled={pending || !readyToFinish}
+							>{#if pending}<Spinner data-icon="inline-start" />{/if}{pending
+								? 'Applying…'
+								: 'Validate, apply, and finish'}</Button
+						>{/snippet}
+				</ProgressiveForm></Card.Footer
 			></Card.Root
 		>{/if}
 	<footer class="onboarding-footer">

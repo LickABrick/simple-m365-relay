@@ -161,6 +161,11 @@
 		flex-direction: column;
 		gap: 1.5rem;
 	}
+	.service-banner {
+		width: min(100%, 90rem);
+		margin: 1rem auto 0;
+		padding-inline: clamp(1.25rem, 3vw, 3rem);
+	}
 	.narrow-page,
 	.onboarding-shell {
 		max-width: 64rem;

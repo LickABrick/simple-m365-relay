@@ -7,10 +7,11 @@
 	import * as Field from '$lib/components/ui/field';
 	import FormTextField from '$lib/components/form-text-field.svelte';
 	import LogIn from '@lucide/svelte/icons/log-in';
+	import { Spinner } from '$lib/components/ui/spinner';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	const login = superForm(data.loginForm, { validators: zod4Client(loginSchema) });
-	const { form, enhance } = login;
+	const { form, enhance, submitting } = login;
 </script>
 
 <main class="auth-shell">
@@ -45,7 +46,11 @@
 						autocomplete="current-password"
 						bind:value={$form.password}
 					/>
-					<Button type="submit"><LogIn data-icon="inline-start" />Sign in</Button></Field.FieldGroup
+					<Button type="submit" disabled={$submitting}
+						>{#if $submitting}<Spinner data-icon="inline-start" />{:else}<LogIn
+								data-icon="inline-start"
+							/>{/if}{$submitting ? 'Signing in…' : 'Sign in'}</Button
+					></Field.FieldGroup
 				>
 			</form></Card.Content
 		></Card.Root

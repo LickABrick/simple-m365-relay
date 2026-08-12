@@ -7,14 +7,19 @@
 	import * as Card from '$lib/components/ui/card';
 	import * as Field from '$lib/components/ui/field';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { Spinner } from '$lib/components/ui/spinner';
 	import Send from '@lucide/svelte/icons/send';
 	import { toast } from 'svelte-sonner';
+	import { relayState } from '$lib/client/relay-state.svelte';
 	let { data, form: result } = $props();
 	// svelte-ignore state_referenced_locally
 	const test = superForm(data.testForm, {
 		validators: zod4Client(testMailSchema),
+		invalidateAll: false,
 		onResult: ({ result }) => {
 			if (result.type === 'success') toast.success('Test message accepted.');
+			else if (result.type === 'failure')
+				toast.error((result.data as { error?: string })?.error || 'Test message failed.');
 		}
 	});
 	const { form, enhance, submitting } = test;
@@ -42,6 +47,7 @@
 							name="from_addr"
 							label="From"
 							type="email"
+							required={false}
 							bind:value={$form.from_addr}
 						/><FormTextField
 							form={test}
@@ -63,13 +69,16 @@
 							rows={7}
 							bind:value={$form.body}
 						/></Field.Field
-					><Button type="submit" disabled={$submitting}
-						><Send data-icon="inline-start" />{$submitting
-							? 'Submitting…'
-							: 'Send test message'}</Button
+					><Button type="submit" disabled={$submitting || !relayState.available}
+						>{#if $submitting}<Spinner data-icon="inline-start" />{:else}<Send
+								data-icon="inline-start"
+							/>{/if}{$submitting ? 'Submitting…' : 'Send test message'}</Button
 					></Field.FieldGroup
 				>
-			</form></Card.Content
+			</form>
+			{#if !relayState.available}<p class="telemetry-note">
+					Delivery tests are unavailable while the relay is offline.
+				</p>{/if}</Card.Content
 		></Card.Root
 	>{#if result?.delivery}<Card.Root
 			><Card.Header><Card.Title>Delivery evidence</Card.Title></Card.Header><Card.Content

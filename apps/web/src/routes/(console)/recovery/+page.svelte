@@ -1,11 +1,13 @@
 <script lang="ts">
-	import { progressive } from '$lib/actions/progressive';
+	import ProgressiveForm from '$lib/components/progressive-form.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import * as Field from '$lib/components/ui/field';
 	import { Input } from '$lib/components/ui/input';
+	import { Spinner } from '$lib/components/ui/spinner';
 	import Download from '@lucide/svelte/icons/download';
 	import Rotate from '@lucide/svelte/icons/rotate-cw';
+	import { relayState } from '$lib/client/relay-state.svelte';
 	let { data } = $props();
 </script>
 
@@ -28,7 +30,8 @@
 					excluded.</Card.Description
 				></Card.Header
 			><Card.Footer
-				><Button href="/backup/export.zip"><Download data-icon="inline-start" />Download ZIP</Button
+				><Button href="/backup/export.zip" data-sveltekit-reload disabled={!relayState.available}
+					><Download data-icon="inline-start" />Download ZIP</Button
 				></Card.Footer
 			></Card.Root
 		><Card.Root
@@ -37,7 +40,8 @@
 					>Configuration, health, token status, queue, and recent mail-log evidence.</Card.Description
 				></Card.Header
 			><Card.Footer
-				><Button href="/diagnostics.txt" variant="outline">Download diagnostics</Button
+				><Button href="/diagnostics.txt" variant="outline" data-sveltekit-reload
+					>Download diagnostics</Button
 				></Card.Footer
 			></Card.Root
 		>
@@ -49,19 +53,25 @@
 					>Compatible v1/v2 backup ZIP, maximum 10 MB.</Card.Description
 				></Card.Header
 			><Card.Content
-				><form method="POST" action="?/import" enctype="multipart/form-data" use:progressive>
-					<input type="hidden" name="csrf" value={data.csrf} /><Field.FieldGroup
-						><Field.Field
-							><Field.FieldLabel for="backup">Backup ZIP</Field.FieldLabel><Input
-								id="backup"
-								name="backup"
-								type="file"
-								accept=".zip,application/zip"
-								required
-							/></Field.Field
-						><Button type="submit">Import backup</Button></Field.FieldGroup
-					>
-				</form></Card.Content
+				><ProgressiveForm method="POST" action="?/import" enctype="multipart/form-data">
+					{#snippet children(pending)}
+						<input type="hidden" name="csrf" value={data.csrf} /><Field.FieldGroup
+							><Field.Field
+								><Field.FieldLabel for="backup">Backup ZIP</Field.FieldLabel><Input
+									id="backup"
+									name="backup"
+									type="file"
+									accept=".zip,application/zip"
+									required
+								/></Field.Field
+							><Button type="submit" disabled={pending || !relayState.available}
+								>{#if pending}<Spinner data-icon="inline-start" />{/if}{pending
+									? 'Importing…'
+									: 'Import backup'}</Button
+							></Field.FieldGroup
+						>
+					{/snippet}
+				</ProgressiveForm></Card.Content
 			></Card.Root
 		><Card.Root
 			><Card.Header
@@ -69,12 +79,18 @@
 					>Reload the currently rendered Postfix configuration. This does not save pending changes.</Card.Description
 				></Card.Header
 			><Card.Footer
-				><form method="POST" action="?/reload" use:progressive>
-					<input type="hidden" name="csrf" value={data.csrf} /><Button
-						type="submit"
-						variant="outline"><Rotate data-icon="inline-start" />Reload Postfix</Button
-					>
-				</form></Card.Footer
+				><ProgressiveForm method="POST" action="?/reload">
+					{#snippet children(pending)}
+						<input type="hidden" name="csrf" value={data.csrf} /><Button
+							type="submit"
+							disabled={pending || !relayState.available}
+							variant="outline"
+							>{#if pending}<Spinner data-icon="inline-start" />{:else}<Rotate
+									data-icon="inline-start"
+								/>{/if}{pending ? 'Reloading…' : 'Reload Postfix'}</Button
+						>
+					{/snippet}
+				</ProgressiveForm></Card.Footer
 			></Card.Root
 		>
 	</div>

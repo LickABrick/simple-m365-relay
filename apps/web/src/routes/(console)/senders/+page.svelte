@@ -2,7 +2,7 @@
 	import { superForm } from 'sveltekit-superforms/client';
 	import { zod4Client } from 'sveltekit-superforms/adapters';
 	import { senderSchema } from '$lib/forms/schemas';
-	import { progressive } from '$lib/actions/progressive';
+	import ProgressiveForm from '$lib/components/progressive-form.svelte';
 	import FormTextField from '$lib/components/form-text-field.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -10,14 +10,25 @@
 	import * as Field from '$lib/components/ui/field';
 	import * as Select from '$lib/components/ui/select';
 	import * as Table from '$lib/components/ui/table';
+	import { Spinner } from '$lib/components/ui/spinner';
 	import Trash from '@lucide/svelte/icons/trash-2';
 	import { toast } from 'svelte-sonner';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
+	let config = $state(data.config);
+	// svelte-ignore state_referenced_locally
 	const sender = superForm(data.senderForm, {
 		validators: zod4Client(senderSchema),
+		invalidateAll: false,
+		resetForm: true,
 		onResult: ({ result }) => {
-			if (result.type === 'success') toast.success('Sender identity allowed.');
+			if (result.type === 'success') {
+				config = (result.data as { config?: typeof data.config })?.config || config;
+				toast.success('Sender identity allowed.');
+			} else if (result.type === 'failure')
+				toast.error(
+					(result.data as { error?: string })?.error || 'Sender identity could not be saved.'
+				);
 		}
 	});
 	const { form, enhance, submitting } = sender;
@@ -60,7 +71,9 @@
 							type="email"
 							bind:value={$form.address}
 						/><Button type="submit" disabled={$submitting || !data.users.length}
-							>Allow sender</Button
+							>{#if $submitting}<Spinner data-icon="inline-start" />{/if}{$submitting
+								? 'Saving…'
+								: 'Allow sender'}</Button
 						></Field.FieldGroup
 					>
 				</form></Card.Content
@@ -79,35 +92,53 @@
 							><Table.Head></Table.Head></Table.Row
 						></Table.Header
 					><Table.Body
-						>{#each Object.entries(data.config.allowed_from) as [login, addresses]}{#each addresses as address}<Table.Row
+						>{#each Object.entries(config.allowed_from) as [login, addresses]}{#each addresses as address}<Table.Row
 									><Table.Cell>{login}</Table.Cell><Table.Cell class="font-mono"
 										>{address}</Table.Cell
 									><Table.Cell
-										>{#if data.config.default_from[login] === address}<Badge>DEFAULT</Badge
-											>{:else}<form method="POST" action="?/default" use:progressive>
+										>{#if config.default_from[login] === address}<Badge>DEFAULT</Badge
+											>{:else}<ProgressiveForm
+												method="POST"
+												action="?/default"
+												onsucceeded={(payload) => (config = payload.config as typeof data.config)}
+											>
+												{#snippet children(pending)}
+													<input type="hidden" name="csrf" value={$form.csrf} /><input
+														type="hidden"
+														name="login"
+														value={login}
+													/><input type="hidden" name="address" value={address} /><Button
+														type="submit"
+														disabled={pending}
+														variant="ghost"
+														size="sm"
+														>{#if pending}<Spinner data-icon="inline-start" />{/if}{pending
+															? 'Updating…'
+															: 'Set default'}</Button
+													>
+												{/snippet}
+											</ProgressiveForm>{/if}</Table.Cell
+									><Table.Cell
+										><ProgressiveForm
+											method="POST"
+											action="?/remove"
+											onsucceeded={(payload) => (config = payload.config as typeof data.config)}
+										>
+											{#snippet children(pending)}
 												<input type="hidden" name="csrf" value={$form.csrf} /><input
 													type="hidden"
 													name="login"
 													value={login}
 												/><input type="hidden" name="address" value={address} /><Button
 													type="submit"
+													disabled={pending}
 													variant="ghost"
-													size="sm">Set default</Button
+													size="icon"
+													aria-label={`Remove ${address}`}
+													>{#if pending}<Spinner />{:else}<Trash />{/if}</Button
 												>
-											</form>{/if}</Table.Cell
-									><Table.Cell
-										><form method="POST" action="?/remove" use:progressive>
-											<input type="hidden" name="csrf" value={$form.csrf} /><input
-												type="hidden"
-												name="login"
-												value={login}
-											/><input type="hidden" name="address" value={address} /><Button
-												type="submit"
-												variant="ghost"
-												size="icon"
-												aria-label={`Remove ${address}`}><Trash /></Button
-											>
-										</form></Table.Cell
+											{/snippet}
+										</ProgressiveForm></Table.Cell
 									></Table.Row
 								>{/each}{/each}</Table.Body
 					></Table.Root

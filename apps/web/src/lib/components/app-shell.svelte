@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { Button } from '$lib/components/ui/button';
+	import { enhance } from '$app/forms';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
+	import { Spinner } from '$lib/components/ui/spinner';
+	import { onMount } from 'svelte';
+	import { connectLiveStream } from '$lib/client/live-stream';
+	import { relayState } from '$lib/client/relay-state.svelte';
+	import * as Alert from '$lib/components/ui/alert';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import Activity from '@lucide/svelte/icons/activity';
 	import ArchiveRestore from '@lucide/svelte/icons/archive-restore';
@@ -14,7 +21,19 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import Users from '@lucide/svelte/icons/users';
 
-	let { children, user, version, csrf } = $props();
+	let { children, user, version, csrf, relayAvailable } = $props();
+	// svelte-ignore state_referenced_locally
+	relayState.available = relayAvailable;
+	onMount(() =>
+		connectLiveStream<{ ok: boolean }>({
+			url: '/api/live?scope=health',
+			ondata: ({ ok }) => {
+				relayState.available = ok;
+				relayState.live = true;
+			},
+			onstate: (state) => (relayState.live = state === 'live')
+		})
+	);
 	const groups = [
 		{
 			label: 'Operate',
@@ -41,6 +60,16 @@
 	];
 	const active = (href: string) =>
 		page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
+	let mobileOpen = $state(false);
+	let signingOut = $state(false);
+	const enhanceLogout = (node: HTMLFormElement) =>
+		enhance(node, () => {
+			signingOut = true;
+			return async ({ update }) => {
+				await update({ invalidateAll: false });
+				signingOut = false;
+			};
+		});
 </script>
 
 {#snippet navigation()}
@@ -54,7 +83,11 @@
 			<div class="nav-group">
 				<p>{group.label}</p>
 				{#each group.links as link}
-					<a href={link.href} aria-current={active(link.href) ? 'page' : undefined}>
+					<a
+						href={link.href}
+						aria-current={active(link.href) ? 'page' : undefined}
+						onclick={() => (mobileOpen = false)}
+					>
 						<link.icon /><span>{link.label}</span>
 					</a>
 				{/each}
@@ -63,21 +96,25 @@
 	</nav>
 	<div class="nav-session">
 		<div><span>SESSION</span><strong>{user}</strong></div>
-		<form method="POST" action="/logout">
+		<form method="POST" action="/logout" use:enhanceLogout>
 			<input type="hidden" name="csrf" value={csrf} />
-			<Button type="submit" variant="outline" size="sm">Sign out</Button>
+			<Button type="submit" variant="outline" size="sm" disabled={signingOut}
+				>{#if signingOut}<Spinner data-icon="inline-start" />{/if}{signingOut
+					? 'Signing out…'
+					: 'Sign out'}</Button
+			>
 		</form>
 	</div>
 {/snippet}
 
-<div class="console-shell">
+<div class="console-shell" data-sveltekit-preload-data="hover">
 	<aside class="console-rail">{@render navigation()}</aside>
 	<div class="console-main">
 		<header class="mobile-console-header">
-			<Sheet.Root>
+			<Sheet.Root bind:open={mobileOpen}>
 				<Sheet.Trigger
-					><Button variant="outline" size="icon" aria-label="Open navigation"><Menu /></Button
-					></Sheet.Trigger
+					class={buttonVariants({ variant: 'outline', size: 'icon' })}
+					aria-label="Open navigation"><Menu /></Sheet.Trigger
 				>
 				<Sheet.Content side="left">
 					<Sheet.Header
@@ -90,6 +127,16 @@
 			</Sheet.Root>
 			<strong>SM365 / CONTROL</strong>
 		</header>
+		{#if !relayState.available}
+			<div class="service-banner" aria-live="polite">
+				<Alert.Root variant="destructive"
+					><CircleAlert /><Alert.Title>Relay service unavailable</Alert.Title><Alert.Description
+						>Configuration can still be edited, but mail, credential, OAuth, validation, apply,
+						reload, backup, and diagnostics operations are unavailable until connectivity returns.</Alert.Description
+					></Alert.Root
+				>
+			</div>
+		{/if}
 		{@render children()}
 	</div>
 </div>

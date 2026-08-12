@@ -49,6 +49,10 @@ export async function getMicrosoftState() {
 	return { token, deviceLog: deviceLog.log, refreshLog: refreshLog.log };
 }
 
+export async function getRelayHealth() {
+	return control<{ ok: boolean }>('/health').catch(() => ({ ok: false }));
+}
+
 export const applyAction = async ({ request, locals }: RequestEvent) => {
 	const form = await request.formData();
 	try {

@@ -24,7 +24,10 @@ export const actions: Actions = {
 			csrf.set('csrf', form.data.csrf);
 			requireCsrf(csrf, locals.csrf);
 			await control('/users/add', { login: form.data.login, password: form.data.password });
-			return { success: true, message: 'SMTP client saved.' };
+			const users = await control<{ users: string }>('/users').then((value) =>
+				parseUsers(value.users)
+			);
+			return { success: true, message: 'SMTP client saved.', users };
 		} catch (error) {
 			return fail(400, {
 				clientForm: form,
@@ -37,7 +40,10 @@ export const actions: Actions = {
 		try {
 			requireCsrf(form, locals.csrf);
 			await control('/users/delete', { login: String(form.get('login') || '') });
-			return { success: true, message: 'SMTP client removed.' };
+			const users = await control<{ users: string }>('/users').then((value) =>
+				parseUsers(value.users)
+			);
+			return { success: true, message: 'SMTP client removed.', users };
 		} catch (error) {
 			return fail(400, { error: errorMessage(error, 'SMTP client could not be removed.') });
 		}

@@ -15,6 +15,7 @@
 		type = 'text',
 		autocomplete,
 		autofocus = false,
+		required = true,
 		description,
 		value = $bindable()
 	}: {
@@ -24,6 +25,7 @@
 		type?: string;
 		autocomplete?: HTMLInputAttributes['autocomplete'];
 		autofocus?: boolean;
+		required?: boolean;
 		description?: string;
 		value?: string;
 	} = $props();
@@ -31,11 +33,19 @@
 
 <FormField {form} {name}>
 	{#snippet children({ errors })}
-		<Field.Field>
+		<Field.Field data-invalid={Boolean(errors?.length)}>
 			<Control>
 				{#snippet children({ props })}
 					<Label><Field.FieldLabel>{label}</Field.FieldLabel></Label>
-					<Input {...props} {type} {autocomplete} {autofocus} required bind:value />
+					<Input
+						{...props}
+						{type}
+						{autocomplete}
+						{autofocus}
+						{required}
+						aria-invalid={Boolean(errors?.length)}
+						bind:value
+					/>
 				{/snippet}
 			</Control>
 			{#if description}<Field.FieldDescription>{description}</Field.FieldDescription>{/if}

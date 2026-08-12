@@ -6,7 +6,7 @@ export const load: PageServerLoad = async () => {
 	const config = await loadConfig();
 	const [health, token, rawUsers] = await Promise.all([
 		control<{ ok: boolean }>('/health').catch(() => ({ ok: false })),
-		control<Record<string, unknown>>('/token/status').catch(() => ({})),
+		control<Record<string, unknown>>('/token/status').catch((): Record<string, unknown> => ({})),
 		control<{ users: string }>('/users').catch(() => ({ users: '' }))
 	]);
 	return {
@@ -35,7 +35,7 @@ export const load: PageServerLoad = async () => {
 			{
 				href: '/onboarding/authorize',
 				label: 'Authorize OAuth',
-				complete: Boolean(Object.keys(token).length)
+				complete: token['ok'] === true
 			},
 			{
 				href: '/onboarding/client',

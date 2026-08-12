@@ -7,13 +7,19 @@
 	import * as Field from '$lib/components/ui/field';
 	import * as Select from '$lib/components/ui/select';
 	import { Textarea } from '$lib/components/ui/textarea';
+	import { Spinner } from '$lib/components/ui/spinner';
 	import { toast } from 'svelte-sonner';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	const network = superForm(data.networkForm, {
 		validators: zod4Client(networkSettingsSchema),
+		invalidateAll: false,
 		onResult: ({ result }) => {
 			if (result.type === 'success') toast.success('Network policy saved.');
+			else if (result.type === 'failure')
+				toast.error(
+					(result.data as { error?: string })?.error || 'Network policy could not be saved.'
+				);
 		}
 	});
 	const { form, errors, enhance, submitting } = network;
@@ -78,7 +84,9 @@
 						>
 					</div>
 					<Button type="submit" disabled={$submitting}
-						>{$submitting ? 'Saving…' : 'Save network policy'}</Button
+						>{#if $submitting}<Spinner data-icon="inline-start" />{/if}{$submitting
+							? 'Saving…'
+							: 'Save network policy'}</Button
 					>
 				</Field.FieldGroup>
 			</form></Card.Content

@@ -7,10 +7,11 @@
 	import * as Field from '$lib/components/ui/field';
 	import FormTextField from '$lib/components/form-text-field.svelte';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
+	import { Spinner } from '$lib/components/ui/spinner';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	const setup = superForm(data.setupForm, { validators: zod4Client(setupSchema) });
-	const { form, enhance } = setup;
+	const { form, enhance, submitting } = setup;
 </script>
 
 <main class="auth-shell">
@@ -52,7 +53,10 @@
 						autocomplete="new-password"
 						bind:value={$form.confirm}
 					/>
-					<Button type="submit"><ShieldCheck data-icon="inline-start" />Create administrator</Button
+					<Button type="submit" disabled={$submitting}
+						>{#if $submitting}<Spinner data-icon="inline-start" />{:else}<ShieldCheck
+								data-icon="inline-start"
+							/>{/if}{$submitting ? 'Creating…' : 'Create administrator'}</Button
 					></Field.FieldGroup
 				>
 			</form>

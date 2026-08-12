@@ -19,7 +19,12 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 		step: params.step,
 		csrf: locals.csrf,
 		config,
-		token: await control<Record<string, unknown>>('/token/status').catch(() => ({})),
+		health: await control<{ ok: boolean }>('/health')
+			.then((value) => value.ok)
+			.catch(() => false),
+		token: await control<Record<string, unknown>>('/token/status').catch(
+			(): Record<string, unknown> => ({})
+		),
 		deviceLog: await control<{ log: string }>('/device-flow-log')
 			.then((v) => v.log)
 			.catch(() => ''),
@@ -143,6 +148,15 @@ export const actions: Actions = {
 			const c = await loadConfig();
 			if (!c.ms365_smtp_user || !c.oauth.tenant_id || !c.oauth.client_id)
 				throw new Error('Microsoft 365 configuration is incomplete.');
+			const [health, token, users] = await Promise.all([
+				control<{ ok: boolean }>('/health'),
+				control<Record<string, unknown>>('/token/status'),
+				control<{ users: string }>('/users')
+			]);
+			if (!health.ok) throw new Error('The relay control service is unavailable.');
+			if (token['ok'] !== true) throw new Error('Complete Microsoft authorization first.');
+			if (!parseUsers(users.users).length)
+				throw new Error('Create at least one SMTP client first.');
 			await setOnboardingComplete();
 			const completed = await loadConfig();
 			await control('/render-validate', {});

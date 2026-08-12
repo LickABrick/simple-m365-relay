@@ -9,14 +9,24 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import { toast } from 'svelte-sonner';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
-	import { progressive } from '$lib/actions/progressive';
+	import ProgressiveForm from '$lib/components/progressive-form.svelte';
+	import { Spinner } from '$lib/components/ui/spinner';
+	import { relayState } from '$lib/client/relay-state.svelte';
 	let { data } = $props();
+	// svelte-ignore state_referenced_locally
+	let pendingChanges = $state(data.pending);
 	// svelte-ignore state_referenced_locally
 	const settings = superForm(data.settingsForm, {
 		validators: zod4Client(relaySettingsSchema),
+		invalidateAll: false,
 		onResult: ({ result }) => {
-			if (result.type === 'success')
+			if (result.type === 'success') {
+				pendingChanges = true;
 				toast.success((result.data as { message?: string })?.message || 'Saved');
+			} else if (result.type === 'failure')
+				toast.error(
+					(result.data as { error?: string })?.error || 'Relay settings could not be saved.'
+				);
 		}
 	});
 	const { form, enhance, submitting } = settings;
@@ -32,7 +42,7 @@
 				applying.
 			</p>
 		</div>
-		{#if data.pending}<Badge variant="secondary">UNAPPLIED</Badge>{/if}
+		{#if pendingChanges}<Badge variant="secondary">UNAPPLIED</Badge>{/if}
 	</header>
 	<Card.Root
 		><Card.Header
@@ -64,7 +74,9 @@
 						description="Microsoft 365 normally uses [smtp.office365.com]:587."
 					/>
 					<Button type="submit" disabled={$submitting}
-						>{$submitting ? 'Saving…' : 'Save relay settings'}</Button
+						>{#if $submitting}<Spinner data-icon="inline-start" />{/if}{$submitting
+							? 'Saving…'
+							: 'Save relay settings'}</Button
 					>
 				</Field.FieldGroup>
 			</form>
@@ -77,25 +89,45 @@
 				reloads.</Card.Description
 			></Card.Header
 		><Card.Footer class="action-row">
-			<form method="POST" action="?/validate" use:progressive>
-				<input type="hidden" name="csrf" value={$form.csrf} /><Button
-					type="submit"
-					variant="outline"><ShieldCheck data-icon="inline-start" />Validate</Button
-				>
-			</form>
-			<form method="POST" action="?/apply" use:progressive>
-				<input type="hidden" name="csrf" value={$form.csrf} /><Button
-					type="submit"
-					disabled={!data.pending}>Apply changes</Button
-				>
-			</form>
-			<form method="POST" action="?/discard" use:progressive>
-				<input type="hidden" name="csrf" value={$form.csrf} /><Button
-					type="submit"
-					variant="ghost"
-					disabled={!data.pending}>Discard</Button
-				>
-			</form>
+			<ProgressiveForm method="POST" action="?/validate">
+				{#snippet children(pending)}
+					<input type="hidden" name="csrf" value={$form.csrf} /><Button
+						type="submit"
+						disabled={pending || !relayState.available}
+						variant="outline"
+						>{#if pending}<Spinner data-icon="inline-start" />{:else}<ShieldCheck
+								data-icon="inline-start"
+							/>{/if}{pending ? 'Validating…' : 'Validate'}</Button
+					>
+				{/snippet}
+			</ProgressiveForm>
+			<ProgressiveForm method="POST" action="?/apply" onsucceeded={() => (pendingChanges = false)}>
+				{#snippet children(pending)}
+					<input type="hidden" name="csrf" value={$form.csrf} /><Button
+						type="submit"
+						disabled={!pendingChanges || pending || !relayState.available}
+						>{#if pending}<Spinner data-icon="inline-start" />{/if}{pending
+							? 'Applying…'
+							: 'Apply changes'}</Button
+					>
+				{/snippet}
+			</ProgressiveForm>
+			<ProgressiveForm
+				method="POST"
+				action="?/discard"
+				onsucceeded={() => (pendingChanges = false)}
+			>
+				{#snippet children(pending)}
+					<input type="hidden" name="csrf" value={$form.csrf} /><Button
+						type="submit"
+						variant="ghost"
+						disabled={!pendingChanges || pending}
+						>{#if pending}<Spinner data-icon="inline-start" />{/if}{pending
+							? 'Discarding…'
+							: 'Discard'}</Button
+					>
+				{/snippet}
+			</ProgressiveForm>
 		</Card.Footer></Card.Root
 	>
 </main>

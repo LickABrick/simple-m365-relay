@@ -3,4 +3,9 @@
 	let { data, children } = $props();
 </script>
 
-<AppShell user={data.user} csrf={data.csrf} version={data.version}>{@render children()}</AppShell>
+<AppShell
+	user={data.user}
+	csrf={data.csrf}
+	version={data.version}
+	relayAvailable={data.relayAvailable}>{@render children()}</AppShell
+>

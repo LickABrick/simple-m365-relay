@@ -29,7 +29,7 @@ export const actions: Actions = {
 				...new Set([...(c.allowed_from[form.data.login] || []), form.data.address.toLowerCase()])
 			].sort();
 			await saveConfig(c);
-			return { success: true, message: 'Sender identity allowed.' };
+			return { success: true, message: 'Sender identity allowed.', config: c };
 		} catch (error) {
 			return fail(400, {
 				senderForm: form,
@@ -48,7 +48,7 @@ export const actions: Actions = {
 				throw new Error('Allow the sender before making it default.');
 			c.default_from[login] = address;
 			await saveConfig(c);
-			return { success: true, message: 'Default sender updated.' };
+			return { success: true, message: 'Default sender updated.', config: c };
 		} catch (error) {
 			return fail(400, { error: errorMessage(error, 'Default could not be updated.') });
 		}
@@ -64,7 +64,7 @@ export const actions: Actions = {
 			if (!c.allowed_from[login].length) delete c.allowed_from[login];
 			if (c.default_from[login] === address) delete c.default_from[login];
 			await saveConfig(c);
-			return { success: true, message: 'Sender identity removed.' };
+			return { success: true, message: 'Sender identity removed.', config: c };
 		} catch (error) {
 			return fail(400, { error: errorMessage(error, 'Sender could not be removed.') });
 		}
