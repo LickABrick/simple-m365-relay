@@ -127,6 +127,8 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CFG_DB = DATA_DIR / "state" / "relay.db"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 TOKEN_REFRESH_LOG = DATA_DIR / "state" / "token_refresh.log"
+MAIL_LOG_PATH = Path(os.environ.get("MAIL_LOG_PATH", str(DATA_DIR / "log" / "maillog")))
+LEGACY_MAIL_LOG_PATH = Path("/var/log/mail.log")
 
 TEST_CONFIG = os.environ.get("SASL_XOAUTH2_TEST_CONFIG", "/usr/lib/x86_64-linux-gnu/sasl-xoauth2/test-config")
 SASL_XOAUTH2_CONFIG = os.environ.get("SASL_XOAUTH2_CONFIG", "/etc/sasl-xoauth2.conf")
@@ -292,6 +294,14 @@ def tail(path: Path, n: int = 200) -> str:
         return path.read_text(encoding="utf-8", errors="ignore")[-8000:]
 
 
+def mail_log(n: int = 200) -> str:
+    """Read the persistent mail log, with a compatibility fallback for older images."""
+    output = tail(MAIL_LOG_PATH, n)
+    if output or DATA_DIR != Path("/data") or MAIL_LOG_PATH != DATA_DIR / "log" / "maillog":
+        return output
+    return tail(LEGACY_MAIL_LOG_PATH, n)
+
+
 def _render_args(outdir: str) -> list[str]:
     cert = os.environ.get("RELAY_TLS_CERT_PATH", "/data/certs/tls.crt")
     key = os.environ.get("RELAY_TLS_KEY_PATH", "/data/certs/tls.key")
@@ -380,7 +390,7 @@ def delivery_evidence(sendmail_output: str, max_wait_seconds: int = 6) -> dict:
     for attempt in range(max_wait_seconds):
         queue = sh(["mailq"], check=False)
         in_queue = queue_id in queue.upper()
-        matches = [item for item in tail(DATA_DIR / "log" / "maillog", 300).splitlines() if queue_id in item.upper()]
+        matches = [item for item in mail_log(300).splitlines() if queue_id in item.upper()]
         if matches:
             line = _redact_sensitive(matches[-1])
             lowered = line.lower()
@@ -915,7 +925,7 @@ class H(BaseHTTPRequestHandler):
             out = sh(["mailq"], check=False)
             return self._json(200, {"mailq": out})
         if self.path == "/maillog":
-            out = tail(DATA_DIR / "log" / "maillog", 200)
+            out = mail_log(200)
             return self._json(200, {"maillog": _redact_sensitive(out)})
         if self.path == "/device-flow-log":
             return self._json(200, {"log": _redact_sensitive(tail(DEVICE_FLOW_LOG, 200))})

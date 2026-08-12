@@ -161,8 +161,10 @@ fi
 postfix check || true
 
 # Start syslog to file
-# busybox syslogd writes to a file with -O
-syslogd -n -O "$DATA_DIR/log/maillog" &
+# Debian ships a default /etc/syslog.conf whose facility routes override BusyBox's
+# -O destination. Ignore that host-oriented config so container mail logs remain
+# in the persistent data volume consumed by the control API.
+/bin/busybox syslogd -n -f /dev/null -O "$DATA_DIR/log/maillog" &
 
 # Start control API
 python3 /opt/ms365-relay/relay/control.py &
