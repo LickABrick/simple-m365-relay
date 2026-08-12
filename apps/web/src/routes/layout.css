@@ -296,6 +296,60 @@
 	.live-log {
 		min-height: 32rem;
 	}
+	.queue-route,
+	.queue-status {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+	.queue-route span,
+	.queue-status span,
+	.queue-meta,
+	.log-time {
+		color: var(--muted-foreground);
+		font-size: 0.75rem;
+	}
+	.queue-status span {
+		max-width: 55ch;
+	}
+	.log-feed {
+		display: flex;
+		max-height: 36rem;
+		overflow-y: auto;
+		flex-direction: column;
+		border: 1px solid var(--border);
+	}
+	.log-entry {
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+		padding: 0.75rem 1rem;
+		border-bottom: 1px solid var(--border);
+	}
+	.log-entry:last-child {
+		border-bottom: 0;
+	}
+	.log-entry[data-severity='error'] {
+		background: color-mix(in oklch, var(--destructive) 9%, transparent);
+	}
+	.log-entry > div {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+	}
+	.log-entry p {
+		margin: 0;
+		font-family: ui-monospace, monospace;
+		font-size: 0.78rem;
+		overflow-wrap: anywhere;
+	}
+	.empty-log {
+		margin: 0;
+		padding: 2rem;
+		color: var(--muted-foreground);
+		text-align: center;
+	}
 	.onboarding-heading {
 		padding-top: clamp(2rem, 8vw, 7rem);
 	}
