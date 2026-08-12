@@ -1,98 +1,316 @@
-# Simple M365 Relay
+# Simple M365 Relay (Postfix → Microsoft 365 via OAuth2 / XOAUTH2) ✉️
 
-A self-hosted Postfix relay that sends through Microsoft 365 using OAuth2/XOAUTH2. The v2 control plane is a server-rendered SvelteKit application: browsers talk only to SvelteKit, and SvelteKit talks to the private Postfix control service over the Compose network.
+Reusable Docker Compose stack that:
 
-## What it provides
+- Listens on **25** and **587** (submission)
+- Accepts client mail with **SMTP AUTH** (Dovecot SASL `passwd-file`) and/or **trusted subnets** (`mynetworks`)
+- Relays outbound mail via **smtp.office365.com:587** using **XOAUTH2** (`sasl-xoauth2`)
+- Includes a web UI (FastAPI) for status + settings + OAuth device flow + user management
+- Persists configuration, SMTP AUTH DB, and OAuth tokens in a Docker volume 💾
 
-- SMTP on ports 25 and 587 with Dovecot-backed SMTP AUTH
-- Microsoft 365 OAuth device authorization and token refresh
-- Trusted-network, SMTP-client, allowed-sender, and default-sender management
-- Save, validate, and apply workflow for Postfix configuration
-- Queue, mail-log, token, backup, restore, and redacted diagnostics tools
-- SQLite persistence with ordered Drizzle migrations
-- Server-enhanced forms with client-side Zod validation
+This is based on the approach described here:
+- https://std.rocks/relay-ms365-oauth.html
 
-## Screenshots
+---
 
-![First-run administrator setup](docs/screenshots/01-setup-create-admin.jpg)
+## Disclaimer ⚠️
 
-![Relay overview](docs/screenshots/02-dashboard-overview.jpg)
+This project was largely written with the help of an AI assistant.
+Use it at your own risk.
 
-![Relay configuration](docs/screenshots/03-relay-configuration.jpg)
+- No warranties are provided.
+- Review the code and security posture before using in production.
+- Do not expose the relay/UI to the public internet unless you know what you are doing.
 
-![SMTP client management](docs/screenshots/04-smtp-clients.jpg)
+---
 
-![Backup and diagnostics](docs/screenshots/05-backup-diagnostics.jpg)
+## Screenshots 📸
 
-## Quick start
+**First-run setup:** create the single admin user.
+
+![Create admin account](docs/screenshots/01-setup-create-admin.jpg)
+
+**Onboarding wizard:** guided setup flow.
+
+![Onboarding welcome](docs/screenshots/02-onboarding-welcome.jpg)
+
+**Relay settings:** configure relayhost + (currently) the M365 SMTP user.
+
+![Onboarding relay settings](docs/screenshots/03-onboarding-relay-settings.jpg)
+
+**OAuth device flow:** acquire a token via device login.
+
+![Onboarding OAuth device flow](docs/screenshots/04-onboarding-oauth-device-flow.jpg)
+
+**Dashboard:** status overview + settings.
+
+![Dashboard status and settings](docs/screenshots/05-dashboard-status-settings.jpg)
+
+---
+
+## Quick start 🚀
+
+### Option A: Run from source (build locally)
 
 ```bash
 git clone https://github.com/LickABrick/simple-m365-relay.git
 cd simple-m365-relay
 cp env.example .env
+# edit .env
+
 docker compose up -d --build
 ```
 
-Open `http://localhost:8000/setup`, create the local administrator, then configure the relay from the dashboard. The source Compose configuration binds the UI to `127.0.0.1` by default.
+Web UI:
+- http://localhost:8000/
 
-For an HTTPS reverse proxy, set `ORIGIN=https://relay.example.com` on the UI service. Do not expose the Postfix control port; it is intended only for the private Compose network.
+The source Compose file binds the UI to `127.0.0.1` by default. For remote access, put it behind an authenticated TLS reverse proxy. Set `UI_HOST_BIND=0.0.0.0` only when the host firewall or proxy prevents direct public access.
 
-### Local UI development
+### Option B: Run from GHCR images (no local build)
 
-```bash
-npm install
-npm run dev
+Create a minimal `docker-compose.yml` (adjust ports/volume as you like):
+
+```yaml
+services:
+  postfix:
+    image: ghcr.io/lickabrick/simple-m365-relay-postfix:latest
+    container_name: simple-m365-relay-postfix
+    restart: unless-stopped
+    ports:
+      - "25:25"
+      - "587:587"
+    environment:
+      # Currently required for token storage/identity:
+
+      MS365_SMTP_USER: "postfix@example.com"
+    volumes:
+      - simple-m365-relay-data:/data
+
+  ui:
+    image: ghcr.io/lickabrick/simple-m365-relay-ui:latest
+    container_name: simple-m365-relay-ui
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      # Recommended: use TCP within the Docker network
+
+      POSTFIX_CONTROL_URL: http://postfix:18080
+      DATA_DIR: /data
+    volumes:
+      - simple-m365-relay-data:/data
+    depends_on:
+      - postfix
+
+volumes:
+  simple-m365-relay-data: {}
 ```
 
-Development state is written to `apps/web/.data`, not `/data`, so an ordinary user can run Vite without elevated permissions. Override this with `DATA_DIR` when required.
+Then run:
 
-## Persistent data and v1 upgrade
+```bash
+docker compose up -d
+```
 
-The canonical application database is `/data/state/relay.db`. Drizzle migrations run automatically before requests are served. SQLite uses WAL mode, foreign keys, a busy timeout, and owner-only file permissions.
+Open the UI and complete `/setup` + `/onboarding`.
 
-On the first v2 start:
+#### Healthcheck (UI)
+The UI exposes a public health endpoint:
+- `GET/HEAD/OPTIONS /healthz` → `200 OK`
 
-1. Existing `/data/state/auth.json` administrator credentials are imported when the administrators table is empty.
-2. Existing `/data/config/config.json` settings are imported when the settings table is empty.
-3. The source files are not deleted automatically, so rollback remains possible.
-4. Every later start logs a warning while legacy `config.json` remains. After verifying v2, it can be deleted because Postfix and the UI both read SQLite.
+Example Docker healthcheck (inside the UI container):
 
-Back up the volume before upgrading. Backup ZIPs remain a portable interchange format and support v1 and v2 configuration archives; they intentionally exclude the UI administrator and OAuth tokens. SMTP client credentials in an exported archive are sensitive.
+```yaml
+    healthcheck:
+      test: |
+        curl -ILkfs --max-time 3 http://localhost:8000/healthz > /dev/null \
+          || exit 1
+      start_period: 10s
+      interval: 30s
+      timeout: 20s
+      retries: 3
+```
 
-## Microsoft 365 prerequisites
+> Note: The images are published by GitHub Actions on **GitHub Releases** (not on every push). Use `:<version>` tags for releases (and `:sha-<shortsha>` for traceability).
 
-1. Create a licensed sending mailbox and enable Authenticated SMTP for it.
-2. Register an Entra application without a client secret.
-3. Enable public client/device-code flows.
-4. Enter the mailbox, tenant ID, and client ID in the UI.
-5. Start device authorization, complete the Microsoft prompt, and check token status.
+### First login 🔐
 
-Microsoft tenant policy can prevent SMTP AUTH or device flow even when the relay is configured correctly. The OAuth progress and mail log sections provide the relevant operational evidence.
+The UI includes built-in authentication:
+
+1. Open the UI → you will be redirected to **/setup**.
+2. Create the single **admin** user.
+3. You may then be redirected into **/onboarding** (wizard).
+
+---
+
+## Microsoft 365 / Entra prerequisites (high-level)
+
+1. Create a **licensed** M365 user that will send mail (e.g. `postfix@…`).
+2. Enable **Authenticated SMTP** for that mailbox/user.
+3. Register an Entra application (no client secret required).
+4. Enable **Public client flows** (device code flow).
+5. Put values into `.env` (or via UI config):
+   - `MS365_SMTP_USER`
+   - `MS365_TENANT_ID`
+   - `MS365_CLIENT_ID`
+
+> Exact permission/scopes setup depends on your org policy and Microsoft changes. The UI’s OAuth section + logs are the ground truth for whether token acquisition/refresh works.
+
+---
+
+## OAuth device flow (mint / replace token) 🔑
+
+You can do this from:
+- **Onboarding → OAuth device flow step**, or
+- Dashboard → **OAuth** section (step-based re-auth wizard)
+
+Flow:
+
+1. Click **Re-auth wizard** / **Restart device flow**.
+2. Open the URL (usually `https://microsoft.com/devicelogin`) and enter the code.
+3. Complete login as the configured `MS365_SMTP_USER`.
+4. Verify token status/expiry in the UI.
+
+Token files are persisted in the Docker volume:
+- `/data/tokens/<safe-filename-derived-from-MS365_SMTP_USER>`
+
+### Token expiry source
+
+For least privilege, the UI container does **not** read the token file directly (token files are `600 postfix:postfix`).
+Instead, the UI asks the internal Postfix control API for token expiry.
+
+---
 
 ## Client configuration
 
-- Port 587 is recommended and requires STARTTLS plus SMTP AUTH.
-- Port 25 defaults to opportunistic TLS and permits relaying only for narrowly configured trusted networks or authenticated clients.
-- Use sender policies to restrict each login's permitted envelope-from identities.
+### Port 587 (recommended)
+- Use STARTTLS
+- SMTP AUTH required
 
-## Security notes
+### Port 25
+- Opportunistic TLS (default)
+- Relaying allowed for:
+  - `mynetworks` (trusted subnets), or
+  - SMTP AUTH users
 
-- Keep the UI behind an authenticated TLS reverse proxy for remote access.
-- Keep `mynetworks` narrow; broad CIDRs can create an open relay.
-- Protect `/data`, exported backups, SMTP credentials, and OAuth tokens as secrets.
-- The UI session is HTTP-only, SameSite Strict, signed, and can be forced secure with `FORCE_SECURE_COOKIES=1`.
-- The UI image prepares its state directory as root and then runs Node as UID/GID 10001.
+---
 
-See [the v2 audit](docs/AUDIT-V2.md) for findings, mitigations, residual risks, and verification evidence.
+## UI capabilities ✨
 
-## Health and operations
+- **Manage SMTP AUTH users** (adds/removes entries in Dovecot `passwd-file`)
+- Configure:
+  - `hostname`, `domain`
+  - `mynetworks` (trusted subnets)
+  - allowed envelope-from addresses per authenticated login (sender login maps)
+  - per-user “fallback From” (used when clients don’t specify a From)
+- Start OAuth device flow, view logs, verify token expiry
+- Show:
+  - queue size
+  - tail of Postfix mail log (redacted)
+  - token expiry
+  - token refresh “Last refresh” timestamp
+- Apply workflow:
+  - **Save** settings without touching Postfix
+  - **Apply Changes** to render config + reload Postfix
 
-`GET`, `HEAD`, or `OPTIONS` on `/healthz` returns `200` when the UI and database initialization are available. Use the dashboard for apply, token, backup, restore, diagnostics, test-mail, queue, and log operations.
+---
 
-## Release policy
+## CLI (run inside the UI container) 🧰
 
-The SvelteKit/SQLite rewrite is versioned `2.0.0` because it changes the UI runtime, persistence format, container behavior, and upgrade path. Release candidates use `2.0.0-rc.N` from an `rc/v2.0.0-rc.N` branch.
+Break-glass / scripting helpers that you run via `docker exec`.
 
-## Disclaimer
+Examples:
 
-This project was built with assistance from AI tooling. It is provided without warranty. Review the configuration and security posture for your environment before production use.
+```bash
+# Show relay/token/admin status
+docker exec -it simple-m365-relay-ui /opt/venv/bin/python -m app.cli status
+
+# Apply saved config (render + reload postfix)
+docker exec -it simple-m365-relay-ui /opt/venv/bin/python -m app.cli apply
+
+# Reset the admin account (forces /setup on next visit)
+docker exec -it simple-m365-relay-ui /opt/venv/bin/python -m app.cli admin reset
+
+# Non-interactive
+docker exec -it simple-m365-relay-ui /opt/venv/bin/python -m app.cli admin reset --yes
+```
+
+Admin reset details:
+- deletes `/data/state/auth.json`
+- deletes `/data/state/secret.key` (invalidates all sessions)
+- deletes `/data/state/lockout.json`
+- optional: `--wipe-config` and/or `--wipe-state`
+
+---
+
+## Volumes / persistence 💾
+
+A single named volume is used:
+
+- `/data/config/config.json` (UI settings)
+- `/data/sasl/users` (SMTP AUTH user DB; Dovecot passwd-file)
+- `/data/tokens/` (OAuth token files)
+- `/data/certs/` (TLS cert/key; self-signed by default)
+- `/data/state/` (UI/app state + logs)
+
+### Backups
+
+UI backup ZIPs contain saved configuration and `/data/sasl/users`. The latter is Dovecot's password file and contains SMTP AUTH credentials, so store backup ZIPs as secrets. Backups deliberately exclude the admin account and OAuth tokens. Legacy `sasl/sasldb2` bundles are detected but cannot restore SMTP users after the Dovecot migration; recreate those users in the UI.
+
+The compose file preserves the underlying Docker volume name:
+- `ms365-relay_ms365-relay-data`
+
+## Development checks
+
+Install the UI dependencies plus `pytest`, then run:
+
+```bash
+python -m pytest
+docker compose config --quiet
+docker compose build ui postfix
+```
+
+The Docker-based end-to-end suite is documented in `tests/e2e/README.md`.
+
+---
+
+## TLS certificates 🔒
+
+By default the container generates a **self-signed** cert at first start.
+
+To use your own cert, mount/replace the files in the volume and set:
+
+- `RELAY_TLS_CERT_PATH=/data/certs/tls.crt`
+- `RELAY_TLS_KEY_PATH=/data/certs/tls.key`
+
+(Those are the defaults.)
+
+---
+
+## Security notes (important) 🛡️
+
+- **Protect the web UI**: it can manage SMTP AUTH users, From rules, and OAuth (device flow).
+- The relay is intended for **internal / trusted** networks.
+  - Do not expose port 25/587 publicly unless you know what you are doing.
+- The Postfix control API is designed to be **internal-only**:
+  - preferred transport is a **unix socket** on the shared volume (`/data/state/control.sock`)
+  - requests are authenticated with a shared token (`X-Control-Token`)
+- Supply-chain hardening:
+  - Tailwind is built at image build time and served from `/static/tailwind.css`
+  - Lucide is vendored and served from `/static/lucide.min.js`
+- OAuth tokens are bearer credentials.
+  - Restrict access to the Docker host and the Docker volume.
+
+---
+
+## Troubleshooting 🧯
+
+- Check UI “Mail log (tail)” for errors.
+- Queue inspection:
+  ```bash
+  docker exec -it simple-m365-relay-postfix mailq
+  ```
+- Reload Postfix (keeps current config):
+  ```bash
+  docker exec -it simple-m365-relay-postfix postfix reload
+  ```

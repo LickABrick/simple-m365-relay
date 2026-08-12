@@ -1,21 +1,5 @@
 # Changelog
 
-## 2.0.0-rc.1
-
-### Changed
-
-- Rebuilt the web control plane with SvelteKit SSR, Svelte 5, Tailwind CSS, and shadcn-svelte.
-- Replaced JSON application state with SQLite and automatic Drizzle migrations.
-- Added Superforms, Formsnap, progressive enhancement, and client-side Zod validation.
-- Kept the Postfix control service private; browser operations now pass through authenticated SvelteKit server actions.
-- Added sender-default management, portable v1/v2 backup restore, redacted diagnostics, and new release screenshots.
-
-### Migration
-
-- Imports legacy `auth.json` and `config.json` into empty SQLite tables on first start.
-- Logs a warning while obsolete `config.json` remains so operators can delete it after verifying v2.
-- Uses a non-root Node runtime after safely preparing fresh named-volume permissions.
-
 All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
