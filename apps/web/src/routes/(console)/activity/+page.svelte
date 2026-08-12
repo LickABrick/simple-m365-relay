@@ -9,6 +9,7 @@
 	import * as Field from '$lib/components/ui/field';
 	import * as Table from '$lib/components/ui/table';
 	import { Switch } from '$lib/components/ui/switch';
+	import DeliveryDiagnostic from '$lib/components/delivery-diagnostic.svelte';
 	import Radio from '@lucide/svelte/icons/radio';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
@@ -85,8 +86,10 @@
 								<Table.Cell
 									><div class="queue-status">
 										<Badge variant={entry.reason ? 'destructive' : 'secondary'}
-											>{entry.reason ? 'DEFERRED' : 'QUEUED'}</Badge
-										>{#if entry.reason}<span>{entry.reason}</span>{/if}
+										>{entry.reason ? 'DEFERRED' : 'QUEUED'}</Badge
+										>{#if entry.diagnostic}
+											<DeliveryDiagnostic diagnostic={entry.diagnostic} raw={entry.reason} />
+										{:else if entry.reason}<span>{entry.reason}</span>{/if}
 									</div></Table.Cell
 								>
 								<Table.Cell
@@ -133,7 +136,11 @@
 										: 'outline'}>{entry.severity.toUpperCase()}</Badge
 							><span class="log-time">{entry.time || '—'}</span><strong>{entry.service}</strong>
 						</div>
-						<p>{entry.message}</p>
+						{#if entry.diagnostic}
+							<DeliveryDiagnostic diagnostic={entry.diagnostic} raw={entry.message} />
+						{:else}
+							<p>{entry.message}</p>
+						{/if}
 					</article>
 				{:else}
 					<p class="empty-log">No matching log entries.</p>

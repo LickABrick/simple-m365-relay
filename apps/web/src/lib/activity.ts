@@ -5,7 +5,50 @@ export type QueueEntry = {
 	sender: string;
 	recipients: string[];
 	reason: string;
+	diagnostic?: DeliveryDiagnostic;
 };
+
+export type DeliveryDiagnostic = {
+	code?: string;
+	title: string;
+	description: string;
+	referenceUrl?: string;
+};
+
+export function parseDeliveryDiagnostic(message: string): DeliveryDiagnostic | undefined {
+	if (!message) return undefined;
+	const code = message.match(/\b([245]\d\d\s+\d\.\d\.\d+)\b/)?.[1];
+	if (/SmtpClientAuthentication is disabled for the Tenant/i.test(message)) {
+		return {
+			code,
+			title: 'SMTP AUTH is disabled for this tenant',
+			description:
+				'The relay is using OAuth, but Exchange Online is blocking the SMTP AUTH protocol. Enable Authenticated SMTP for the configured sending mailbox, then retry.',
+			referenceUrl:
+				'https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/authenticated-client-smtp-submission'
+		};
+	}
+	if (/SmtpClientAuthentication is disabled for the (?:Mailbox|user)/i.test(message)) {
+		return {
+			code,
+			title: 'SMTP AUTH is disabled for the sending mailbox',
+			description:
+				'Enable Authenticated SMTP for the configured sending mailbox in Microsoft 365, then retry.',
+			referenceUrl:
+				'https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/authenticated-client-smtp-submission'
+		};
+	}
+	if (/SASL authentication failed/i.test(message)) {
+		return {
+			code,
+			title: 'Exchange Online rejected OAuth authentication',
+			description:
+				'Check the token readiness, authenticated mailbox, SMTP AUTH policy, and Exchange permissions.',
+			referenceUrl:
+				'https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth'
+		};
+	}
+}
 
 export function parseQueue(raw: string): QueueEntry[] {
 	const entries: QueueEntry[] = [];
@@ -26,7 +69,10 @@ export function parseQueue(raw: string): QueueEntry[] {
 		}
 		if (!current) continue;
 		const value = line.trim();
-		if (value.startsWith('(') && value.endsWith(')')) current.reason = value.slice(1, -1);
+		if (value.startsWith('(') && value.endsWith(')')) {
+			current.reason = value.slice(1, -1);
+			current.diagnostic = parseDeliveryDiagnostic(current.reason);
+		}
 		else if (value && !value.startsWith('--')) current.recipients.push(value);
 	}
 	return entries;
@@ -37,6 +83,7 @@ export type LogEntry = {
 	service: string;
 	message: string;
 	severity: 'error' | 'warning' | 'info';
+	diagnostic?: DeliveryDiagnostic;
 };
 
 export function parseLog(raw: string): LogEntry[] {
@@ -52,7 +99,13 @@ export function parseLog(raw: string): LogEntry[] {
 				: /warn/i.test(message)
 					? 'warning'
 					: 'info';
-			return { time: match?.[1] || '', service: match?.[2] || 'postfix', message, severity };
+			return {
+				time: match?.[1] || '',
+				service: match?.[2] || 'postfix',
+				message,
+				severity,
+				diagnostic: parseDeliveryDiagnostic(message)
+			};
 		});
 }
 
@@ -69,7 +122,7 @@ export function summarizeOperationalProblems(queue: string, log: string): Operat
 		.map((entry) => ({
 			source: 'queue' as const,
 			severity: 'error' as const,
-			message: entry.reason,
+			message: entry.diagnostic?.title || entry.reason,
 			context: `Queue ${entry.id}`
 		}));
 	const logged = parseLog(log)
@@ -81,7 +134,7 @@ export function summarizeOperationalProblems(queue: string, log: string): Operat
 		.map((entry) => ({
 			source: 'log' as const,
 			severity: entry.severity,
-			message: entry.message,
+			message: entry.diagnostic?.title || entry.message,
 			context: [entry.time, entry.service].filter(Boolean).join(' · ')
 		}));
 	return [...queued, ...logged].slice(0, 6);
