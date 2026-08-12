@@ -9,6 +9,7 @@
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
+	import { analyzeOAuthCapabilities } from '$lib/oauth-capabilities';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	let live = $state({
@@ -31,6 +32,7 @@
 			? 0
 			: (live.queue.match(/^[A-F0-9]{5,}/gm) || []).length
 	);
+	const capabilities = $derived(analyzeOAuthCapabilities(data.config, live.token));
 </script>
 
 <main class="console-page">
@@ -60,6 +62,29 @@
 			><Alert.Action
 				><Button href={data.readiness.nextHref} size="sm"
 					>Continue setup<ArrowRight data-icon="inline-end" /></Button
+				></Alert.Action
+			></Alert.Root
+		>{/if}
+	{#if capabilities.tokenPresent && !capabilities.tokenReady}<Alert.Root variant="destructive"
+			><CircleAlert /><Alert.Title>OAuth credential cannot safely submit mail</Alert.Title
+			><Alert.Description
+				>{capabilities.configurationIssue ||
+					capabilities.tokenIssues[0]?.message ||
+					'The token is missing a required SMTP capability.'}</Alert.Description
+			><Alert.Action
+				><Button href="/microsoft" size="sm" variant="outline"
+					>Review authorization<ArrowRight data-icon="inline-end" /></Button
+				></Alert.Action
+			></Alert.Root
+		>{/if}
+	{#if capabilities.tokenReady && capabilities.identityMismatch}<Alert.Root
+			><CircleAlert /><Alert.Title>Delegated mailbox rights need a delivery check</Alert.Title
+			><Alert.Description
+				>The token belongs to {live.token.identity}, while SMTP authenticates as {data.config
+					.ms365_smtp_user}. Token inspection cannot verify Exchange mailbox or Send As assignments.</Alert.Description
+			><Alert.Action
+				><Button href="/delivery" size="sm" variant="outline"
+					>Run delivery test<ArrowRight data-icon="inline-end" /></Button
 				></Alert.Action
 			></Alert.Root
 		>{/if}
@@ -105,7 +130,11 @@
 		<Card.Root
 			><Card.Header
 				><Card.Description>OAUTH CREDENTIAL</Card.Description><Card.Title
-					>{live.token['ok'] === true ? 'DETECTED' : 'MISSING'}</Card.Title
+					>{capabilities.tokenReady
+						? 'READY'
+						: capabilities.tokenPresent
+							? 'ATTENTION'
+							: 'MISSING'}</Card.Title
 				></Card.Header
 			><Card.Content
 				><Button href="/microsoft" variant="outline" size="sm">Inspect token</Button></Card.Content

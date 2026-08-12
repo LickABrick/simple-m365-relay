@@ -11,10 +11,12 @@ import { loadConfig, markApplied, saveConfig } from '$lib/server/config';
 import { control, parseUsers } from '$lib/server/control';
 import { requireCsrf, setOnboardingComplete, errorMessage } from '$lib/server/operations';
 import type { Actions, PageServerLoad } from './$types';
+import { analyzeOAuthCapabilities, type TokenStatus } from '$lib/oauth-capabilities';
 const valid = new Set(['relay', 'network', 'microsoft', 'authorize', 'client', 'review']);
 export const load: PageServerLoad = async ({ params, locals }) => {
 	if (!valid.has(params.step)) error(404);
 	const config = await loadConfig();
+	const token = await control<TokenStatus>('/token/status').catch((): TokenStatus => ({}));
 	return {
 		step: params.step,
 		csrf: locals.csrf,
@@ -22,9 +24,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 		health: await control<{ ok: boolean }>('/health')
 			.then((value) => value.ok)
 			.catch(() => false),
-		token: await control<Record<string, unknown>>('/token/status').catch(
-			(): Record<string, unknown> => ({})
-		),
+		token,
+		capabilities: analyzeOAuthCapabilities(config, token),
 		deviceLog: await control<{ log: string }>('/device-flow-log')
 			.then((v) => v.log)
 			.catch(() => ''),
@@ -161,11 +162,17 @@ export const actions: Actions = {
 				throw new Error('Microsoft 365 configuration is incomplete.');
 			const [health, token, users] = await Promise.all([
 				control<{ ok: boolean }>('/health'),
-				control<Record<string, unknown>>('/token/status'),
+				control<TokenStatus>('/token/status'),
 				control<{ users: string }>('/users')
 			]);
 			if (!health.ok) throw new Error('The relay control service is unavailable.');
-			if (token['ok'] !== true) throw new Error('Complete Microsoft authorization first.');
+			const capabilities = analyzeOAuthCapabilities(c, token);
+			if (!capabilities.tokenReady)
+				throw new Error(
+					capabilities.configurationIssue ||
+						token.issues?.[0]?.message ||
+						'Complete Microsoft authorization with SMTP.Send first.'
+				);
 			if (!parseUsers(users.users).length)
 				throw new Error('Create at least one SMTP client first.');
 			if (!Object.values(c.allowed_from).some((addresses) => addresses.length > 0))

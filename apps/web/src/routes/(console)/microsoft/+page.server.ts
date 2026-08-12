@@ -6,6 +6,7 @@ import { loadConfig, saveConfig } from '$lib/server/config';
 import { control } from '$lib/server/control';
 import { errorMessage, requireCsrf } from '$lib/server/operations';
 import type { Actions, PageServerLoad } from './$types';
+import type { TokenStatus } from '$lib/oauth-capabilities';
 const safe = async <T>(p: Promise<T>, fallback: T) => {
 	try {
 		return await p;
@@ -16,7 +17,8 @@ const safe = async <T>(p: Promise<T>, fallback: T) => {
 export const load: PageServerLoad = async ({ locals }) => {
 	const c = await loadConfig();
 	return {
-		token: await safe(control<Record<string, unknown>>('/token/status'), {}),
+		config: c,
+		token: await safe(control<TokenStatus>('/token/status'), {}),
 		deviceLog: (await safe(control<{ log: string }>('/device-flow-log'), { log: '' })).log,
 		refreshLog: (await safe(control<{ log: string }>('/token/refresh-log'), { log: '' })).log,
 		microsoftForm: await superValidate(

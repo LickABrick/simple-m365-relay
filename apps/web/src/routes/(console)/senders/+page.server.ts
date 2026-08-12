@@ -6,8 +6,10 @@ import { loadConfig, saveConfig } from '$lib/server/config';
 import { control, parseUsers } from '$lib/server/control';
 import { errorMessage, requireCsrf } from '$lib/server/operations';
 import type { Actions, PageServerLoad } from './$types';
+import type { TokenStatus } from '$lib/oauth-capabilities';
 export const load: PageServerLoad = async ({ locals }) => ({
 	config: await loadConfig(),
+	token: await control<TokenStatus>('/token/status').catch((): TokenStatus => ({})),
 	users: await control<{ users: string }>('/users')
 		.then((v) => parseUsers(v.users))
 		.catch(() => []),

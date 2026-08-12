@@ -3,6 +3,7 @@ import { control, parseUsers } from './control';
 import { discardChanges, hasPendingChanges, loadConfig, markApplied, saveConfig } from './config';
 import { evaluateReadiness } from './readiness';
 import { summarizeOperationalProblems } from '$lib/activity';
+import { analyzeOAuthCapabilities, type TokenStatus } from '$lib/oauth-capabilities';
 
 export const errorMessage = (error: unknown, fallback: string) =>
 	error instanceof Error ? error.message : fallback;
@@ -24,7 +25,7 @@ export async function getOverview() {
 		safe(control<{ ok: boolean }>('/health'), { ok: false }),
 		safe(control<{ mailq: string }>('/mailq'), { mailq: '' }),
 		safe(control<{ maillog: string }>('/maillog'), { maillog: '' }),
-		safe(control<Record<string, unknown>>('/token/status'), {}),
+		safe(control<TokenStatus>('/token/status'), {}),
 		safe(control<{ users: string }>('/users'), { users: '' })
 	]);
 	return {
@@ -46,7 +47,7 @@ export async function getActivity() {
 
 export async function getMicrosoftState() {
 	const [token, deviceLog, refreshLog] = await Promise.all([
-		control<Record<string, unknown>>('/token/status').catch(() => ({})),
+		control<TokenStatus>('/token/status').catch(() => ({})),
 		control<{ log: string }>('/device-flow-log').catch(() => ({ log: '' })),
 		control<{ log: string }>('/token/refresh-log').catch(() => ({ log: '' }))
 	]);
@@ -61,13 +62,15 @@ export async function getConsoleStatus() {
 	const config = await loadConfig();
 	const [health, token, users] = await Promise.all([
 		control<{ ok: boolean }>('/health').catch(() => ({ ok: false })),
-		control<Record<string, unknown>>('/token/status').catch((): Record<string, unknown> => ({})),
+		control<TokenStatus>('/token/status').catch((): TokenStatus => ({})),
 		control<{ users: string }>('/users').catch(() => ({ users: '' }))
 	]);
+	const capabilities = analyzeOAuthCapabilities(config, token);
 	return {
 		relayAvailable: health.ok,
 		readiness: evaluateReadiness(config, {
 			tokenPresent: token['ok'] === true,
+			tokenReady: capabilities.tokenReady,
 			users: parseUsers(users.users)
 		}),
 		pendingChanges: await hasPendingChanges(config)

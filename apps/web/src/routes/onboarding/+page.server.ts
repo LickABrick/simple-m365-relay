@@ -3,15 +3,21 @@ import { loadConfig } from '$lib/server/config';
 import { control, parseUsers } from '$lib/server/control';
 import { evaluateReadiness } from '$lib/server/readiness';
 import type { PageServerLoad } from './$types';
+import { analyzeOAuthCapabilities, type TokenStatus } from '$lib/oauth-capabilities';
 export const load: PageServerLoad = async () => {
 	const config = await loadConfig();
 	const [health, token, rawUsers] = await Promise.all([
 		control<{ ok: boolean }>('/health').catch(() => ({ ok: false })),
-		control<Record<string, unknown>>('/token/status').catch((): Record<string, unknown> => ({})),
+		control<TokenStatus>('/token/status').catch((): TokenStatus => ({})),
 		control<{ users: string }>('/users').catch(() => ({ users: '' }))
 	]);
 	const users = parseUsers(rawUsers.users);
-	const readiness = evaluateReadiness(config, { tokenPresent: token['ok'] === true, users });
+	const capabilities = analyzeOAuthCapabilities(config, token);
+	const readiness = evaluateReadiness(config, {
+		tokenPresent: token['ok'] === true,
+		tokenReady: capabilities.tokenReady,
+		users
+	});
 	return {
 		config,
 		health: health.ok,

@@ -20,6 +20,9 @@
 	import { Spinner } from '$lib/components/ui/spinner';
 	import Arrow from '@lucide/svelte/icons/arrow-right';
 	import Check from '@lucide/svelte/icons/check';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import * as Alert from '$lib/components/ui/alert';
+	import { analyzeOAuthCapabilities } from '$lib/oauth-capabilities';
 	let { data, form } = $props();
 	// svelte-ignore state_referenced_locally
 	const relay = superForm(
@@ -76,14 +79,16 @@
 			onstate: (state) => (streamState = state)
 		});
 	});
-	const tokenPresent = $derived(token['ok'] === true);
+	const capabilities = $derived(analyzeOAuthCapabilities(data.config, token));
+	const tokenPresent = $derived(capabilities.tokenPresent);
+	const tokenReady = $derived(capabilities.tokenReady);
 	const readyToFinish = $derived(
 		Boolean(
 			data.health &&
 			data.config.oauth.client_id &&
 			data.config.oauth.tenant_id &&
 			data.config.ms365_smtp_user &&
-			tokenPresent &&
+			tokenReady &&
 			data.users.length &&
 			data.senderCount > 0
 		)
@@ -237,7 +242,24 @@
 					token status is present.</Card.Description
 				></Card.Header
 			><Card.Content class="stack"
-				><ProgressiveForm method="POST" action="?/start">
+				>{#if capabilities.configurationIssue}<Alert.Root variant="destructive"
+						><CircleAlert /><Alert.Title>Token configuration mismatch</Alert.Title
+						><Alert.Description>{capabilities.configurationIssue}</Alert.Description></Alert.Root
+					>{/if}
+				{#if capabilities.identityMismatch}<Alert.Root
+						><CircleAlert /><Alert.Title>Delegated mailbox access</Alert.Title><Alert.Description
+							>The token belongs to {token.identity}, while SMTP authenticates as {data.config
+								.ms365_smtp_user}. This can be valid, but the token user needs the required Exchange
+							mailbox and Send As rights. Confirm with a delivery test.</Alert.Description
+						></Alert.Root
+					>{/if}
+				{#each token.issues || [] as issue}<Alert.Root
+						variant={issue.severity === 'error' ? 'destructive' : 'default'}
+						><CircleAlert /><Alert.Title
+							>Authorization {issue.severity === 'error' ? 'incomplete' : 'warning'}</Alert.Title
+						><Alert.Description>{issue.message}</Alert.Description></Alert.Root
+					>{/each}
+				<ProgressiveForm method="POST" action="?/start">
 					{#snippet children(pending)}<input type="hidden" name="csrf" value={data.csrf} /><Button
 							type="submit"
 							disabled={pending || !data.health}
@@ -256,8 +278,32 @@
 								: 'RETRYING'}</Badge
 				>
 				<pre aria-live="polite">{deviceLog || 'Waiting to start device authorization.'}</pre>
-				<pre aria-live="polite">{JSON.stringify(token, null, 2)}</pre>
-				<Button href="/onboarding/client" disabled={!tokenPresent}
+				<div class="readiness-list">
+					<div>
+						<span>Delegated flow</span><Badge
+							variant={token.token_type === 'delegated' ? 'secondary' : 'destructive'}
+							>{token.token_type || 'Not detected'}</Badge
+						>
+					</div>
+					<div>
+						<span>SMTP.Send permission</span><Badge
+							variant={token.smtp_scope_granted === true ? 'secondary' : 'destructive'}
+							>{token.smtp_scope_granted === true ? 'Granted' : 'Missing or unverifiable'}</Badge
+						>
+					</div>
+					<div>
+						<span>Offline refresh</span><Badge
+							variant={token.has_refresh_token ? 'secondary' : 'destructive'}
+							>{token.has_refresh_token ? 'Available' : 'Missing'}</Badge
+						>
+					</div>
+					<div>
+						<span>Token identity</span><Badge variant={token.identity ? 'secondary' : 'outline'}
+							>{token.identity || 'Not reported'}</Badge
+						>
+					</div>
+				</div>
+				<Button href="/onboarding/client" disabled={!tokenReady}
 					>Continue<Arrow data-icon="inline-end" /></Button
 				></Card.Content
 			></Card.Root
@@ -303,8 +349,9 @@
 						>
 					</div>
 					<div>
-						<span>OAuth token</span><Badge variant={tokenPresent ? 'secondary' : 'destructive'}
-							>{tokenPresent ? 'Detected' : 'Missing'}</Badge
+						<span>OAuth SMTP capability</span><Badge
+							variant={tokenReady ? 'secondary' : 'destructive'}
+							>{tokenReady ? 'Ready' : tokenPresent ? 'Needs attention' : 'Missing'}</Badge
 						>
 					</div>
 					<div>
@@ -318,6 +365,12 @@
 							>{data.senderCount ? `${data.senderCount} allowed` : 'Missing'}</Badge
 						>
 					</div>
+					{#if capabilities.requiresSendAs.length}<div>
+							<span>Exchange Send As verification</span><Badge variant="outline"
+								>{capabilities.requiresSendAs.length}
+								{capabilities.requiresSendAs.length === 1 ? 'identity' : 'identities'} to test</Badge
+							>
+						</div>{/if}
 				</div></Card.Content
 			><Card.Footer
 				>{#if !data.senderCount}<Button href="/senders" variant="outline"

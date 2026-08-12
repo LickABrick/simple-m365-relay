@@ -10,10 +10,13 @@
 	import * as Field from '$lib/components/ui/field';
 	import * as Select from '$lib/components/ui/select';
 	import * as Table from '$lib/components/ui/table';
+	import * as Alert from '$lib/components/ui/alert';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import Trash from '@lucide/svelte/icons/trash-2';
 	import { toast } from 'svelte-sonner';
 	import { untrack } from 'svelte';
+	import { analyzeOAuthCapabilities } from '$lib/oauth-capabilities';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	let config = $state(data.config);
@@ -37,6 +40,9 @@
 		}
 	);
 	const { form, enhance, submitting } = sender;
+	const capabilities = $derived(analyzeOAuthCapabilities(config, data.token));
+	const senderCapability = (login: string, address: string) =>
+		capabilities.senders.find((sender) => sender.login === login && sender.address === address);
 </script>
 
 <main class="console-page">
@@ -47,11 +53,28 @@
 			<p>Bind authenticated clients to the envelope-from identities they own.</p>
 		</div>
 	</header>
+	{#if capabilities.identityMismatch}<Alert.Root
+			><CircleAlert /><Alert.Title>Delegated mailbox access</Alert.Title><Alert.Description
+				>The OAuth token belongs to {data.token.identity}, while outbound SMTP authenticates as {config.ms365_smtp_user}.
+				Ensure the token user has the required Exchange mailbox and Send As rights, then confirm
+				with a delivery test.</Alert.Description
+			></Alert.Root
+		>{:else if capabilities.requiresSendAs.length}<Alert.Root
+			><CircleAlert /><Alert.Title
+				>{capabilities.requiresSendAs.length} sender {capabilities.requiresSendAs.length === 1
+					? 'identity requires'
+					: 'identities require'} Exchange permission</Alert.Title
+			><Alert.Description
+				>Any address other than {config.ms365_smtp_user} needs Send As permission for that mailbox. Token
+				scopes cannot prove mailbox-level Send As assignments; confirm them with a delivery test.</Alert.Description
+			></Alert.Root
+		>{/if}
 	<div class="two-panel">
 		<Card.Root
 			><Card.Header
 				><Card.Title>Allow identity</Card.Title><Card.Description
-					>Sender rules become active after configuration is applied.</Card.Description
+					>Local policy controls which client may submit an address. Exchange separately decides
+					whether the Microsoft mailbox may send as it.</Card.Description
 				></Card.Header
 			><Card.Content
 				><form method="POST" action="?/add" use:enhance>
@@ -89,18 +112,27 @@
 					><Table.Header
 						><Table.Row
 							><Table.Head>Client</Table.Head><Table.Head>Identity</Table.Head><Table.Head
-								>Default</Table.Head
-							><Table.Head></Table.Head></Table.Row
+								>Microsoft 365</Table.Head
+							><Table.Head>Default</Table.Head><Table.Head></Table.Head></Table.Row
 						></Table.Header
 					><Table.Body
 						>{#each Object.entries(config.allowed_from) as [login, addresses]}{#each addresses as address}<Table.Row
 									><Table.Cell>{login}</Table.Cell><Table.Cell class="font-mono"
 										>{address}</Table.Cell
 									><Table.Cell
+										><Badge
+											variant={senderCapability(login, address)?.status === 'mailbox'
+												? 'secondary'
+												: 'outline'}
+											>{senderCapability(login, address)?.status === 'mailbox'
+												? 'MAILBOX'
+												: 'VERIFY SEND AS'}</Badge
+										></Table.Cell
+									><Table.Cell
 										>{#if config.default_from[login] === address}<Badge>DEFAULT</Badge
 											>{:else}<ProgressiveForm
 												method="POST"
-									action="?/setDefault"
+												action="?/setDefault"
 												onsucceeded={(payload) => (config = payload.config as typeof data.config)}
 											>
 												{#snippet children(pending)}

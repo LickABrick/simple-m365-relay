@@ -9,7 +9,7 @@ export type ReadinessCheck = {
 
 export function evaluateReadiness(
 	config: RelayConfig,
-	options: { tokenPresent: boolean; users: string[] }
+	options: { tokenPresent: boolean; tokenReady?: boolean; users: string[] }
 ) {
 	const senderCount = Object.values(config.allowed_from).reduce(
 		(total, addresses) => total + addresses.length,
@@ -38,7 +38,7 @@ export function evaluateReadiness(
 			id: 'oauth',
 			label: 'OAuth authorization',
 			href: '/onboarding/authorize',
-			complete: options.tokenPresent
+			complete: options.tokenReady ?? options.tokenPresent
 		},
 		{
 			id: 'client',

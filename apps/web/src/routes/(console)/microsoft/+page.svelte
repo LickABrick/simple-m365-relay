@@ -12,10 +12,15 @@
 	import * as Field from '$lib/components/ui/field';
 	import { Input } from '$lib/components/ui/input';
 	import { Spinner } from '$lib/components/ui/spinner';
+	import * as Alert from '$lib/components/ui/alert';
+	import * as Table from '$lib/components/ui/table';
 	import { toast } from 'svelte-sonner';
 	import Refresh from '@lucide/svelte/icons/refresh-cw';
 	import Key from '@lucide/svelte/icons/key-round';
 	import { relayState } from '$lib/client/relay-state.svelte';
+	import { analyzeOAuthCapabilities, type TokenStatus } from '$lib/oauth-capabilities';
+	import CircleAlert from '@lucide/svelte/icons/circle-alert';
+	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
 	let token = $state(data.token),
@@ -44,7 +49,21 @@
 	);
 	const { form, enhance, submitting, tainted } = microsoft;
 	const changed = $derived(microsoft.isTainted($tainted));
-	const tokenPresent = $derived(token.ok === true);
+	const capabilities = $derived(
+		analyzeOAuthCapabilities(
+			{
+				...data.config,
+				ms365_smtp_user: $form.ms365_smtp_user,
+				oauth: {
+					tenant_id: $form.tenant_id,
+					client_id: $form.client_id,
+					auto_refresh_minutes: $form.auto_refresh_minutes
+				}
+			},
+			token as TokenStatus
+		)
+	);
+	const tokenPresent = $derived(capabilities.tokenPresent);
 	const microsoftConfigured = $derived(
 		Boolean($form.ms365_smtp_user && $form.tenant_id && $form.client_id)
 	);
@@ -77,8 +96,12 @@
 						: streamState === 'loading'
 							? 'CONNECTING'
 							: 'RETRYING'}</Badge
-			><Badge variant={tokenPresent ? 'secondary' : 'destructive'}
-				>{tokenPresent ? 'TOKEN DETECTED' : 'TOKEN MISSING'}</Badge
+			><Badge variant={capabilities.tokenReady ? 'secondary' : 'destructive'}
+				>{capabilities.tokenReady
+					? 'SMTP AUTH READY'
+					: tokenPresent
+						? 'TOKEN NEEDS ATTENTION'
+						: 'TOKEN MISSING'}</Badge
 			>
 		</div>
 	</header>
@@ -123,7 +146,36 @@
 					>Device authorization runs inside the relay container.</Card.Description
 				></Card.Header
 			><Card.Content class="stack"
-				><div class="action-row">
+				>{#if capabilities.configurationIssue}
+					<Alert.Root variant="destructive">
+						<CircleAlert />
+						<Alert.Title>Token does not match the saved application</Alert.Title>
+						<Alert.Description>{capabilities.configurationIssue}</Alert.Description>
+					</Alert.Root>
+				{/if}
+				{#if capabilities.identityMismatch}
+					<Alert.Root>
+						<CircleAlert />
+						<Alert.Title>Delegated mailbox permissions require verification</Alert.Title>
+						<Alert.Description
+							>The token belongs to {token.identity}, while SMTP authenticates as {$form.ms365_smtp_user}.
+							This can be valid for delegated or shared mailbox access, but the token user needs the
+							required Exchange mailbox and Send As rights. Confirm with a delivery test.</Alert.Description
+						>
+					</Alert.Root>
+				{/if}
+				{#each token.issues || [] as issue}
+					<Alert.Root variant={issue.severity === 'error' ? 'destructive' : 'default'}>
+						<CircleAlert />
+						<Alert.Title
+							>{issue.severity === 'error'
+								? 'Authorization incomplete'
+								: 'Authorization warning'}</Alert.Title
+						>
+						<Alert.Description>{issue.message}</Alert.Description>
+					</Alert.Root>
+				{/each}
+				<div class="action-row">
 					<ProgressiveForm method="POST" action="?/start">
 						{#snippet children(pending)}<input
 								type="hidden"
@@ -158,10 +210,60 @@
 						Save the mailbox, tenant, and application ID before starting authorization.
 					</p>{/if}
 				<div>
-					<p class="terminal-label">TOKEN STATUS</p>
-					<pre aria-live="polite">{JSON.stringify(token, null, 2) ||
-							'No token status available.'}</pre>
+					<p class="terminal-label">TOKEN CAPABILITIES</p>
+					<Table.Root>
+						<Table.Body>
+							<Table.Row
+								><Table.Cell>Credential</Table.Cell><Table.Cell
+									>{tokenPresent ? 'Detected' : 'Missing'}</Table.Cell
+								></Table.Row
+							>
+							<Table.Row
+								><Table.Cell>Flow</Table.Cell><Table.Cell
+									>{token.token_type || 'Unknown'}</Table.Cell
+								></Table.Row
+							>
+							<Table.Row
+								><Table.Cell>Authenticated identity</Table.Cell><Table.Cell
+									>{token.identity || 'Not reported'}</Table.Cell
+								></Table.Row
+							>
+							<Table.Row
+								><Table.Cell>Exchange audience</Table.Cell><Table.Cell
+									>{token.audience_ok === true
+										? 'Valid'
+										: token.audience_ok === false
+											? 'Wrong resource'
+											: 'Not reported'}</Table.Cell
+								></Table.Row
+							>
+							<Table.Row
+								><Table.Cell>SMTP.Send</Table.Cell><Table.Cell
+									>{token.smtp_scope_granted === true
+										? 'Granted'
+										: token.smtp_scope_granted === false
+											? 'Missing'
+											: 'Could not inspect'}</Table.Cell
+								></Table.Row
+							>
+							<Table.Row
+								><Table.Cell>Offline refresh</Table.Cell><Table.Cell
+									>{token.has_refresh_token ? 'Available' : 'Missing'}</Table.Cell
+								></Table.Row
+							>
+						</Table.Body>
+					</Table.Root>
 				</div>
+				<Alert.Root>
+					<CircleCheck />
+					<Alert.Title>Required Entra configuration</Alert.Title>
+					<Alert.Description
+						>Register a public client, enable device code flow, and grant the delegated Office 365
+						Exchange Online SMTP.Send permission. Device authorization also requests offline_access
+						for refresh tokens. Send As rights for additional sender addresses are configured
+						separately in Exchange.</Alert.Description
+					>
+				</Alert.Root>
 				<div>
 					<p class="terminal-label">DEVICE FLOW</p>
 					<pre aria-live="polite">{deviceLog || 'Device flow has not started.'}</pre>
