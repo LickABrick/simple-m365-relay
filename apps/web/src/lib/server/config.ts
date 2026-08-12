@@ -49,7 +49,7 @@ export async function saveConfig(config: RelayConfig): Promise<void> {
 
 export async function hasPendingChanges(config: RelayConfig): Promise<boolean> {
 	const hash = db.select({ hash: settings.appliedHash }).from(settings).get()?.hash;
-	return Boolean(hash) && hash !== stableHash(config);
+	return !hash || hash !== stableHash(config);
 }
 
 export async function markApplied(config: RelayConfig): Promise<void> {
