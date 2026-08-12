@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import sqlite3
 import os
 import subprocess
 import threading
@@ -123,7 +124,7 @@ def _delete_dovecot_user(login: str) -> None:
 
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
-CFG_JSON = DATA_DIR / "config" / "config.json"
+CFG_DB = DATA_DIR / "state" / "relay.db"
 DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
 TOKEN_REFRESH_LOG = DATA_DIR / "state" / "token_refresh.log"
 
@@ -133,8 +134,11 @@ SASL_XOAUTH2_CONFIG = os.environ.get("SASL_XOAUTH2_CONFIG", "/etc/sasl-xoauth2.c
 
 def load_cfg() -> dict:
     try:
-        if CFG_JSON.exists():
-            return json.loads(CFG_JSON.read_text(encoding="utf-8"))
+        if CFG_DB.exists():
+            with sqlite3.connect(f"file:{CFG_DB}?mode=ro", uri=True) as conn:
+                row = conn.execute("SELECT config FROM settings WHERE id = 1").fetchone()
+            if row:
+                return json.loads(row[0])
     except Exception:
         pass
     return {}
@@ -295,7 +299,7 @@ def _render_args(outdir: str) -> list[str]:
         "python3",
         "/opt/ms365-relay/postfix/render.py",
         "--config",
-        str(CFG_JSON),
+        str(CFG_DB),
         "--outdir",
         outdir,
         "--token-dir",

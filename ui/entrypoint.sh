@@ -1,11 +1,14 @@
 #!/bin/sh
 set -eu
 
-# Non-root runtime. /data permissions are prepared by the postfix container.
-export PYTHONDONTWRITEBYTECODE=1
-export XDG_CACHE_HOME=/tmp
+export HOST="${UI_BIND:-0.0.0.0}"
+export PORT="${UI_PORT:-8000}"
+export HOST_HEADER="${HOST_HEADER:-host}"
 
-BIND="${UI_BIND:-0.0.0.0}"
-PORT="${UI_PORT:-8000}"
+# Named volumes begin root-owned. Prepare only the paths the UI owns, then
+# permanently drop privileges before loading application code.
+mkdir -p "${DATA_DIR:-/data}/state"
+chown 10001:10001 "${DATA_DIR:-/data}/state"
+chmod 0700 "${DATA_DIR:-/data}/state"
 
-exec uvicorn app.main:app --host "$BIND" --port "$PORT"
+exec gosu 10001:10001 node /opt/ms365-relay/build

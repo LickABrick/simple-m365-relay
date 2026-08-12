@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import sqlite3
 import subprocess
 from pathlib import Path
 
@@ -152,8 +153,15 @@ def main():
     ap.add_argument("--tls-key", required=True)
     args = ap.parse_args()
 
-    with open(args.config, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
+    if args.config.endswith(".db"):
+        with sqlite3.connect(f"file:{args.config}?mode=ro", uri=True) as conn:
+            row = conn.execute("SELECT config FROM settings WHERE id = 1").fetchone()
+        if not row:
+            raise RuntimeError("SQLite settings row is missing")
+        cfg = json.loads(row[0])
+    else:
+        with open(args.config, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
 
     hostname = os.environ.get("RELAY_HOSTNAME", cfg.get("hostname", "relay.local"))
     domain = os.environ.get("RELAY_DOMAIN", cfg.get("domain", "local"))

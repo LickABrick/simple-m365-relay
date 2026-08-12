@@ -3,6 +3,7 @@ set -eu
 
 DATA_DIR=/data
 CFG_JSON="$DATA_DIR/config/config.json"
+CFG_DB="$DATA_DIR/state/relay.db"
 CERT_PATH="${RELAY_TLS_CERT_PATH:-/data/certs/tls.crt}"
 KEY_PATH="${RELAY_TLS_KEY_PATH:-/data/certs/tls.key}"
 CN="${RELAY_TLS_SELF_SIGNED_CN:-${RELAY_HOSTNAME:-relay.local}}"
@@ -23,34 +24,7 @@ for p in "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/sasl"; do
   chmod -R u+rwX "$p" 2>/dev/null || true
 done
 
-# Create default config if missing
-if [ ! -f "$CFG_JSON" ]; then
-  cat > "$CFG_JSON" <<'EOF'
-{
-  "hostname": "relay.local",
-  "domain": "local",
-  "mynetworks": ["127.0.0.0/8"],
-
-  "relayhost": "[smtp.office365.com]:587",
-  "ms365_smtp_user": "",
-  "tls": {
-    "smtpd_25": "may",
-    "smtpd_587": "encrypt"
-  },
-
-  "oauth": {
-    "tenant_id": "",
-    "client_id": "",
-    "auto_refresh_minutes": 30
-  },
-
-  "allowed_from": {},
-  "default_from": {}
-}
-EOF
-fi
-
-# Ensure the UI can always update this file (covers upgrades from older versions).
+# Preserve and expose a legacy config for the UI's one-time SQLite import.
 if [ -f "$CFG_JSON" ]; then
   chown "$UI_UID:$UI_GID" "$CFG_JSON" 2>/dev/null || true
   chmod 600 "$CFG_JSON" 2>/dev/null || true
@@ -131,9 +105,17 @@ chown dovecot:dovecot "$DATA_DIR/sasl/users" || true
 # Start dovecot (auth only)
 dovecot -F &
 
+# The UI owns schema migrations and legacy import. Wait for its first migration
+# before rendering Postfix configuration from the shared database.
+waited=0
+until python3 -c "import sqlite3; db=sqlite3.connect('file:$CFG_DB?mode=ro', uri=True); row=db.execute('select config from settings where id=1').fetchone(); raise SystemExit(0 if row else 1)" 2>/dev/null; do
+  if [ "$waited" -ge 60 ]; then echo "[startup] SQLite database was not initialized within 60 seconds" >&2; exit 1; fi
+  sleep 1; waited=$((waited + 1))
+done
+
 # Render postfix config
 python3 /opt/ms365-relay/postfix/render.py \
-  --config "$CFG_JSON" \
+  --config "$CFG_DB" \
   --outdir /etc/postfix \
   --token-dir "$DATA_DIR/tokens" \
   --tls-cert "$CERT_PATH" \
@@ -143,22 +125,18 @@ python3 /opt/ms365-relay/postfix/render.py \
 # Prefer app config.json, fallback to env.
 # Match https://std.rocks/relay-ms365-oauth.html : client_secret may be empty but MUST exist.
 _cfg_client_id=$(python3 - <<'PY'
-import json
-from pathlib import Path
-p=Path('/data/config/config.json')
+import json, sqlite3
 try:
-  cfg=json.loads(p.read_text())
+  with sqlite3.connect('file:/data/state/relay.db?mode=ro', uri=True) as db: cfg=json.loads(db.execute('select config from settings where id=1').fetchone()[0])
   print((cfg.get('oauth') or {}).get('client_id','') or '')
 except Exception:
   print('')
 PY
 )
 _cfg_tenant_id=$(python3 - <<'PY'
-import json
-from pathlib import Path
-p=Path('/data/config/config.json')
+import json, sqlite3
 try:
-  cfg=json.loads(p.read_text())
+  with sqlite3.connect('file:/data/state/relay.db?mode=ro', uri=True) as db: cfg=json.loads(db.execute('select config from settings where id=1').fetchone()[0])
   print((cfg.get('oauth') or {}).get('tenant_id','') or '')
 except Exception:
   print('')

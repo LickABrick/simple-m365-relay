@@ -82,6 +82,7 @@ services:
     environment:
       UI_BIND: ${UI_BIND:-0.0.0.0}
       UI_PORT: ${UI_PORT:-8000}
+      ORIGIN: ${UI_ORIGIN:-http://localhost:8000}
       UI_BASE_URL: ${UI_BASE_URL:-}
       # If behind a TLS-terminating reverse proxy, you likely want:
       #   FORCE_SECURE_COOKIES=1 and TRUST_PROXY_HEADERS=1
@@ -93,6 +94,7 @@ services:
       CONTROL_TOKEN: ${CONTROL_TOKEN:-}
       RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
       DATA_DIR: ${DATA_DIR:-/data}
+      BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-12M}
 
       # Display + token expiry parsing (same as postfix)
       RELAYHOST: ${RELAYHOST:-[smtp.office365.com]:587}
@@ -104,7 +106,7 @@ services:
       - simple-m365-relay-data:/data
     depends_on:
       postfix:
-        condition: service_healthy
+        condition: service_started
 
 volumes:
   # Keep the underlying Docker volume name to preserve existing data

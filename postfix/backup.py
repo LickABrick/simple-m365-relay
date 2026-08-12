@@ -2,7 +2,7 @@
 """Backup import/export helpers (Postfix container side).
 
 We export/import ONLY:
-- /data/config/config.json
+- the SQLite-backed relay configuration (portable JSON inside the archive)
 - /data/sasl/users  (Dovecot passwd-file SMTP AUTH users)
 
 We intentionally do NOT include:
@@ -24,6 +24,7 @@ import base64
 import datetime as dt
 import io
 import json
+import sqlite3
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -45,21 +46,28 @@ ALLOWED_NAMES = {
 
 
 def export_bundle(data_dir: Path) -> Tuple[bytes, Dict[str, Any]]:
-    cfg_path = data_dir / "config" / "config.json"
+    db_path = data_dir / "state" / "relay.db"
     users_path = data_dir / "sasl" / "users"
+
+    cfg_bytes = None
+    if db_path.exists():
+        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as conn:
+            row = conn.execute("SELECT config FROM settings WHERE id = 1").fetchone()
+        if row:
+            cfg_bytes = (json.dumps(json.loads(row[0]), indent=2, sort_keys=True) + "\n").encode("utf-8")
 
     meta: Dict[str, Any] = {
         "format": "simple-m365-relay-backup",
-        "version": 1,
+        "version": 2,
         "created_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "includes": {"config": bool(cfg_path.exists()), "smtp_auth_users": bool(users_path.exists())},
+        "includes": {"config": bool(cfg_bytes), "smtp_auth_users": bool(users_path.exists())},
     }
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
         z.writestr("meta.json", json.dumps(meta, indent=2, sort_keys=True) + "\n")
-        if cfg_path.exists():
-            z.writestr("config/config.json", cfg_path.read_bytes())
+        if cfg_bytes:
+            z.writestr("config/config.json", cfg_bytes)
         if users_path.exists():
             z.writestr("sasl/users", users_path.read_bytes())
 
@@ -142,13 +150,12 @@ def import_bundle(data_dir: Path, zip_bytes: bytes) -> Dict[str, Any]:
     if info.get("has_legacy_sasldb") and users_bytes is None:
         raise ValueError("Legacy sasldb2 backups cannot be imported after the Dovecot migration; recreate SMTP AUTH users in the UI.")
 
-    # Write config.json atomically-ish
+    # Import v1/v2 portable JSON configuration into the canonical SQLite row.
     if cfg_bytes:
-        cfg_path = data_dir / "config" / "config.json"
-        cfg_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cfg_path.with_name(cfg_path.name + ".tmp")
-        tmp.write_bytes(cfg_bytes)
-        tmp.replace(cfg_path)
+        db_path = data_dir / "state" / "relay.db"
+        with sqlite3.connect(db_path, timeout=10) as conn:
+            conn.execute("UPDATE settings SET config = ?, updated_at = ? WHERE id = 1", (json.dumps(info["config_obj"], separators=(",", ":")), int(dt.datetime.now(dt.timezone.utc).timestamp())))
+            conn.commit()
 
     # Write the Dovecot passwd-file atomically. It contains plaintext SMTP AUTH
     # passwords by design, so never leave it group/world-readable during import.
