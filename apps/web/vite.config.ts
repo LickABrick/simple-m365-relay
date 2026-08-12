@@ -3,7 +3,7 @@ import { defineConfig } from 'vitest/config';
 import adapter from '@sveltejs/adapter-node';
 import { sveltekit } from '@sveltejs/kit/vite';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
 	plugins: [
 		tailwindcss(),
 		sveltekit({
@@ -20,7 +20,7 @@ export default defineConfig({
 					'script-src': ['self'],
 					'style-src': ['self', 'unsafe-inline'],
 					'img-src': ['self', 'data:'],
-					'connect-src': ['self'],
+					'connect-src': command === 'serve' ? ['self', 'ws:'] : ['self'],
 					'font-src': ['self'],
 					'frame-ancestors': ['none'],
 					'form-action': ['self'],
@@ -43,4 +43,4 @@ export default defineConfig({
 			}
 		]
 	}
-});
+}));
