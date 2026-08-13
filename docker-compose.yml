@@ -34,7 +34,7 @@ services:
     expose:
       - "18080"
     healthcheck:
-      test: ["CMD-SHELL", "postfix status >/dev/null 2>&1 && doveadm service status auth >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "grep -qx master /proc/1/comm && doveadm service status auth >/dev/null 2>&1"]
       start_period: 15s
       interval: 30s
       timeout: 10s

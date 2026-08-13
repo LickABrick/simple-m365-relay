@@ -21,12 +21,14 @@
 	let queueEntries = $derived(parseQueue(queue));
 	let initialRefreshPending = $derived(streamState === 'loading');
 	let filtered = $derived(
-		parseLog(logs).filter(
-			(entry) =>
-				(!query ||
-					`${entry.service} ${entry.message}`.toLowerCase().includes(query.toLowerCase())) &&
-				(!problemsOnly || entry.severity !== 'info')
-		)
+		parseLog(logs)
+			.filter(
+				(entry) =>
+					(!query ||
+						`${entry.service} ${entry.message}`.toLowerCase().includes(query.toLowerCase())) &&
+					(!problemsOnly || entry.severity !== 'info')
+			)
+			.reverse()
 	);
 	onMount(() =>
 		connectLiveStream<{ queue: string; logs: string }>({
@@ -113,7 +115,8 @@
 		<Card.Header>
 			<Card.Title>Mail log</Card.Title>
 			<Card.Description
-				>Known token material is redacted by the relay control service.</Card.Description
+				>Newest entries appear first. Known token material is redacted by the relay control
+				service.</Card.Description
 			>
 		</Card.Header>
 		<Card.Content class="stack">
