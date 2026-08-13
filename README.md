@@ -58,7 +58,7 @@ Open <http://localhost:8000>, create the single administrator, and follow onboar
 ```yaml
 services:
   postfix:
-    image: ghcr.io/lickabrick/simple-m365-relay-postfix:2.0.0-rc.1
+    image: ghcr.io/lickabrick/simple-m365-relay-postfix:2.0.0-rc.2
     container_name: simple-m365-relay-postfix
     restart: unless-stopped
     ports:
@@ -76,7 +76,7 @@ services:
       - "18080"
 
   ui:
-    image: ghcr.io/lickabrick/simple-m365-relay-ui:2.0.0-rc.1
+    image: ghcr.io/lickabrick/simple-m365-relay-ui:2.0.0-rc.2
     container_name: simple-m365-relay-ui
     restart: unless-stopped
     ports:

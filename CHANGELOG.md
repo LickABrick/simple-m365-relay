@@ -4,6 +4,17 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [2.0.0-rc.2] - 2026-08-13
+
+### Security and reliability
+
+- Hardened privileged backup import against symlink attacks and added strict configuration validation.
+- Enforced authenticated outbound SMTP TLS by default and TLS-only SMTP AUTH on port 25, with explicit compatibility overrides for legacy deployments.
+- Replaced plaintext SMTP password storage with Argon2id; existing credentials migrate automatically.
+- Added administrator session revocation, password-change throttling, account-aware login throttling, and authenticated initial setup.
+- Improved OAuth input validation and log redaction, made relay control concurrent, and preflight Postfix configuration before reload.
+- Pinned the relay base image, Python dependencies, and verified sasl-xoauth2 source archive.
+
 ## [2.0.0-rc.1] - 2026-08-12
 
 > This is a major control-plane and persistence rewrite. Back up `/data` and review the v1 upgrade guide before deploying.
@@ -249,6 +260,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[2.0.0-rc.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.2
 [2.0.0-rc.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.1
 [1.1.4-rc.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.4-rc.1
 [1.1.3]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.3
