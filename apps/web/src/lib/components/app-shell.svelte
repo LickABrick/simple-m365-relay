@@ -2,7 +2,6 @@
 	import { page } from '$app/state';
 	import { enhance } from '$app/forms';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Separator } from '$lib/components/ui/separator';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import { onMount } from 'svelte';
@@ -144,10 +143,7 @@
 						aria-current={active(link.href) ? 'page' : undefined}
 						onclick={() => (mobileOpen = false)}
 					>
-						<link.icon /><span>{link.label}</span
-						>{#if hasPendingChanges && link.href === '/settings/relay'}<Badge variant="secondary"
-								>UNAPPLIED</Badge
-							>{/if}
+						<link.icon /><span>{link.label}</span>
 					</a>
 				{/each}
 			</div>
