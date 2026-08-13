@@ -13,6 +13,7 @@ def test_testmail_disables_delivery_status_notifications(monkeypatch):
         return SimpleNamespace(returncode=0, stdout="queued as 9ABCD12345")
 
     monkeypatch.setattr(control.subprocess, "run", run)
+    monkeypatch.setattr(control.uuid, "uuid4", lambda: SimpleNamespace(hex="abc123"))
 
     output = control.send_test_mail(
         "recipient@example.com", "sender@example.com", "Test", "Body"
@@ -20,14 +21,14 @@ def test_testmail_disables_delivery_status_notifications(monkeypatch):
 
     assert captured["args"] == [
         "/usr/sbin/sendmail",
-        "-v",
         "-N",
         "never",
         "-t",
         "-f",
         "sender@example.com",
     ]
-    assert output == "queued as 9ABCD12345"
+    assert "Message-ID: <relay-test-abc123@simple-m365-relay.local>" in captured["kwargs"]["input"]
+    assert output == "message-id=<relay-test-abc123@simple-m365-relay.local>"
 
 
 def test_mail_log_reads_persistent_data_file(tmp_path, monkeypatch):
@@ -67,3 +68,24 @@ def test_delivery_evidence_correlates_sendmail_queue_id(monkeypatch):
     assert evidence["queue_id"] == "9ABCD12345"
     assert evidence["state"] == "sent"
     assert evidence["in_queue"] is False
+
+
+def test_delivery_evidence_correlates_generated_message_id(monkeypatch):
+    monkeypatch.setattr(control, "sh", lambda *_args, **_kwargs: "Mail queue is empty")
+    monkeypatch.setattr(
+        control,
+        "mail_log",
+        lambda *_args: "\n".join(
+            [
+                "Aug 13 postfix/cleanup[42]: 9ABCD12345: message-id=<relay-test-abc@simple-m365-relay.local>",
+                "Aug 13 postfix/smtp[43]: 9ABCD12345: status=sent (250 accepted)",
+            ]
+        ),
+    )
+
+    evidence = control.delivery_evidence(
+        "message-id=<relay-test-abc@simple-m365-relay.local>", max_wait_seconds=1
+    )
+
+    assert evidence["queue_id"] == "9ABCD12345"
+    assert evidence["state"] == "sent"

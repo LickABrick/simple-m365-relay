@@ -6,6 +6,7 @@ import re
 import subprocess
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import socketserver
 from pathlib import Path
@@ -354,19 +355,20 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         if "\n" in v or "\r" in v:
             raise ValueError("invalid header value")
 
+    message_id = f"relay-test-{uuid.uuid4().hex}@simple-m365-relay.local"
     msg = (
         f"From: {from_addr}\n"
         f"To: {to_addr}\n"
         f"Subject: {subject}\n"
+        f"Message-ID: <{message_id}>\n"
         "MIME-Version: 1.0\n"
         "Content-Type: text/plain; charset=UTF-8\n"
         "\n"
         f"{body}\n"
     )
 
-    # Use -v to surface queue id / immediate SMTP dialogue where available.
     p = subprocess.run(
-        ["/usr/sbin/sendmail", "-v", "-N", "never", "-t", "-f", from_addr],
+        ["/usr/sbin/sendmail", "-N", "never", "-t", "-f", from_addr],
         input=msg,
         text=True,
         stdout=subprocess.PIPE,
@@ -377,7 +379,7 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
         return f"sendmail exit {p.returncode}\n" + out
     # NOTE: returncode=0 only means the message was accepted/queued locally,
     # not that it has been delivered to Microsoft 365.
-    return out or "queued"
+    return f"message-id=<{message_id}>"
 
 
 def delivery_evidence(sendmail_output: str, max_wait_seconds: int = 6) -> dict:
@@ -385,14 +387,25 @@ def delivery_evidence(sendmail_output: str, max_wait_seconds: int = 6) -> dict:
     match = re.search(r"queued as\s+([A-Z0-9]{5,})", sendmail_output or "", re.I)
     if not match:
         match = re.search(r"\b([A-F0-9]{5,}):", sendmail_output or "", re.I)
-    if not match:
-        return {"queue_id": None, "state": "accepted", "in_queue": None, "line": ""}
-    queue_id = match.group(1).upper()
+    queue_id = match.group(1).upper() if match else None
+    message_id_match = re.search(r"message-id=<([^>]+)>", sendmail_output or "", re.I)
+    message_id = message_id_match.group(1) if message_id_match else None
     state, line, in_queue = "unknown", "", None
     for attempt in range(max_wait_seconds):
+        log = mail_log(300)
+        if not queue_id and message_id:
+            correlation = re.search(
+                rf"\b([A-F0-9]{{5,}}): message-id=<{re.escape(message_id)}>", log, re.I
+            )
+            if correlation:
+                queue_id = correlation.group(1).upper()
+        if not queue_id:
+            if attempt < max_wait_seconds - 1:
+                time.sleep(1)
+            continue
         queue = sh(["mailq"], check=False)
         in_queue = queue_id in queue.upper()
-        matches = [item for item in mail_log(300).splitlines() if queue_id in item.upper()]
+        matches = [item for item in log.splitlines() if queue_id in item.upper()]
         if matches:
             line = _redact_sensitive(matches[-1])
             lowered = line.lower()
@@ -404,6 +417,8 @@ def delivery_evidence(sendmail_output: str, max_wait_seconds: int = 6) -> dict:
         if state in ("sent", "bounced", "rejected"): break
         if in_queue and state in ("unknown", "seen"): state = "queued"
         if attempt < max_wait_seconds - 1: time.sleep(1)
+    if not queue_id:
+        return {"queue_id": None, "state": "accepted", "in_queue": None, "line": ""}
     return {"queue_id": queue_id, "state": state, "in_queue": in_queue, "line": line}
 
 
