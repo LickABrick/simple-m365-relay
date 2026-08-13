@@ -4,6 +4,7 @@
 	import * as Card from '$lib/components/ui/card';
 	import Check from '@lucide/svelte/icons/check';
 	import Arrow from '@lucide/svelte/icons/arrow-right';
+	import ArchiveRestore from '@lucide/svelte/icons/archive-restore';
 	let { data } = $props();
 </script>
 
@@ -15,6 +16,20 @@
 			Six focused checks. Progress is derived from saved state, so you can leave and continue later.
 		</p>
 	</header>
+	<Card.Root>
+		<Card.Header>
+			<Card.Title>Already have a relay backup?</Card.Title>
+			<Card.Description>
+				Import an existing v1 or v2 backup instead of entering the relay configuration and SMTP
+				clients again. You can return here afterward to review readiness and finish setup.
+			</Card.Description>
+		</Card.Header>
+		<Card.Footer>
+			<Button href="/recovery" variant="outline"
+				><ArchiveRestore data-icon="inline-start" />Import existing backup</Button
+			>
+		</Card.Footer>
+	</Card.Root>
 	<section class="onboarding-index">
 		{#each data.steps as step, index}<a href={step.href}
 				><span class="step-index">0{index + 1}</span>

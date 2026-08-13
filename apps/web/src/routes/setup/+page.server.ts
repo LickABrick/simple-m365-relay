@@ -36,6 +36,6 @@ export const actions: Actions = {
 			form.data.username,
 			url.protocol === 'https:' || process.env.FORCE_SECURE_COOKIES === '1'
 		);
-		redirect(303, '/');
+		redirect(303, '/onboarding');
 	}
 };
