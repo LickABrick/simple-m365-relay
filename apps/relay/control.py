@@ -366,7 +366,7 @@ def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str
 
     # Use -v to surface queue id / immediate SMTP dialogue where available.
     p = subprocess.run(
-        ["/usr/sbin/sendmail", "-v", "-t", "-f", from_addr],
+        ["/usr/sbin/sendmail", "-v", "-N", "never", "-t", "-f", from_addr],
         input=msg,
         text=True,
         stdout=subprocess.PIPE,

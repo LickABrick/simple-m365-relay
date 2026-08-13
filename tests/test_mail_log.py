@@ -1,6 +1,33 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from apps.relay import control
+
+
+def test_testmail_disables_delivery_status_notifications(monkeypatch):
+    captured = {}
+
+    def run(args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return SimpleNamespace(returncode=0, stdout="queued as 9ABCD12345")
+
+    monkeypatch.setattr(control.subprocess, "run", run)
+
+    output = control.send_test_mail(
+        "recipient@example.com", "sender@example.com", "Test", "Body"
+    )
+
+    assert captured["args"] == [
+        "/usr/sbin/sendmail",
+        "-v",
+        "-N",
+        "never",
+        "-t",
+        "-f",
+        "sender@example.com",
+    ]
+    assert output == "queued as 9ABCD12345"
 
 
 def test_mail_log_reads_persistent_data_file(tmp_path, monkeypatch):
