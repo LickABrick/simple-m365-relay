@@ -27,6 +27,17 @@
 		deviceLog = $state(data.deviceLog),
 		refreshLog = $state(data.refreshLog),
 		streamState = $state<LiveState>('loading');
+	let deviceFlowStarting = $state(false);
+	let deviceFlowLog: HTMLDivElement;
+	let deviceLogAtStart = $state('');
+	let refreshRequested = $state(false);
+	let refreshLogAtStart = $state('');
+	const deviceFlowWaiting = $derived(deviceFlowStarting && deviceLog === deviceLogAtStart);
+	const startConfirmed = () => {
+		deviceLogAtStart = deviceLog;
+		deviceFlowStarting = true;
+		queueMicrotask(() => deviceFlowLog?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+	};
 	const microsoft = superForm(
 		untrack(() => data.microsoftForm),
 		{
@@ -70,6 +81,8 @@
 		connectLiveStream<{ token: Record<string, unknown>; deviceLog: string; refreshLog: string }>({
 			url: '/api/live?scope=microsoft',
 			ondata: (next) => {
+				if (deviceFlowStarting && next.deviceLog !== deviceLogAtStart) deviceFlowStarting = false;
+				if (refreshRequested && next.refreshLog !== refreshLogAtStart) refreshRequested = false;
 				token = next.token;
 				deviceLog = next.deviceLog;
 				refreshLog = next.refreshLog;
@@ -175,7 +188,7 @@
 					</Alert.Root>
 				{/each}
 				<div class="action-row">
-					<ProgressiveForm method="POST" action="?/start">
+					<ProgressiveForm method="POST" action="?/start" onsucceeded={startConfirmed}>
 						{#snippet children(pending)}<input
 								type="hidden"
 								name="csrf"
@@ -188,7 +201,14 @@
 									/>{/if}{pending ? 'Starting…' : 'Start device flow'}</Button
 							>{/snippet}
 					</ProgressiveForm>
-					<ProgressiveForm method="POST" action="?/refresh">
+					<ProgressiveForm
+						method="POST"
+						action="?/refresh"
+						onsucceeded={() => {
+							refreshLogAtStart = refreshLog;
+							refreshRequested = true;
+						}}
+					>
 						{#snippet children(pending)}<input
 								type="hidden"
 								name="csrf"
@@ -203,6 +223,24 @@
 							>{/snippet}
 					</ProgressiveForm>
 				</div>
+				{#if deviceFlowWaiting}
+					<Alert.Root>
+						<Spinner />
+						<Alert.Title>Device flow started</Alert.Title>
+						<Alert.Description
+							>Waiting for Microsoft to return the sign-in URL and device code. This panel updates
+							automatically.</Alert.Description
+						>
+					</Alert.Root>
+				{:else if refreshRequested}
+					<Alert.Root>
+						<Spinner />
+						<Alert.Title>Refresh requested</Alert.Title>
+						<Alert.Description
+							>Waiting for the relay to report the refreshed credential state.</Alert.Description
+						>
+					</Alert.Root>
+				{/if}
 				{#if !relayState.available}<p class="telemetry-note">
 						Credential actions are unavailable while the relay is offline.
 					</p>{:else if !microsoftConfigured}<p class="telemetry-note">
@@ -263,13 +301,19 @@
 						separately in Exchange.</Alert.Description
 					>
 				</Alert.Root>
-				<div>
+				<div bind:this={deviceFlowLog}>
 					<p class="terminal-label">DEVICE FLOW</p>
-					<pre aria-live="polite">{deviceLog || 'Device flow has not started.'}</pre>
+					<pre aria-live="polite">{deviceLog ||
+							(streamState === 'loading'
+								? 'Loading the latest device-flow log…'
+								: 'Device flow has not started.')}</pre>
 				</div>
 				<div>
 					<p class="terminal-label">REFRESH LOG</p>
-					<pre aria-live="polite">{refreshLog || 'No refresh events recorded.'}</pre>
+					<pre aria-live="polite">{refreshLog ||
+							(streamState === 'loading'
+								? 'Loading the latest refresh log…'
+								: 'No refresh events recorded.')}</pre>
 				</div></Card.Content
 			></Card.Root
 		>

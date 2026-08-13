@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { hash, verify } from '@node-rs/argon2';
+import { eq } from 'drizzle-orm';
 import type { Cookies } from '@sveltejs/kit';
 import { ensureSecret } from './files';
 import { db } from './database';
@@ -34,6 +35,19 @@ export async function authenticate(username: string, password: string): Promise<
 	} catch {
 		return false;
 	}
+}
+
+export async function changeAdminPassword(
+	username: string,
+	currentPassword: string,
+	password: string
+): Promise<boolean> {
+	if (!(await authenticate(username, currentPassword))) return false;
+	db.update(administrators)
+		.set({ passwordHash: await hash(password) })
+		.where(eq(administrators.username, username))
+		.run();
+	return true;
 }
 
 export function validatePassword(password: string): string | null {

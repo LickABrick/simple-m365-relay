@@ -9,6 +9,7 @@
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 	import CircleAlert from '@lucide/svelte/icons/circle-alert';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
+	import Check from '@lucide/svelte/icons/check';
 	import { analyzeOAuthCapabilities } from '$lib/oauth-capabilities';
 	let { data } = $props();
 	// svelte-ignore state_referenced_locally
@@ -20,13 +21,30 @@
 		users: data.users
 	});
 	let streamState = $state<LiveState>('loading');
-	onMount(() =>
-		connectLiveStream<typeof live>({
+	let acknowledgedProblems = $state<string[]>([]);
+	const problemKey = (problem: (typeof live.problems)[number]) =>
+		JSON.stringify([problem.source, problem.severity, problem.context, problem.message]);
+	const newProblems = $derived(
+		live.problems.filter((problem) => !acknowledgedProblems.includes(problemKey(problem)))
+	);
+	const acknowledgeProblems = () => {
+		acknowledgedProblems = live.problems.map(problemKey);
+		localStorage.setItem('sm365r.acknowledged-problems', JSON.stringify(acknowledgedProblems));
+	};
+	onMount(() => {
+		try {
+			acknowledgedProblems = JSON.parse(
+				localStorage.getItem('sm365r.acknowledged-problems') || '[]'
+			);
+		} catch {
+			acknowledgedProblems = [];
+		}
+		return connectLiveStream<typeof live>({
 			url: '/api/live',
 			ondata: (next) => (live = next),
 			onstate: (state) => (streamState = state)
-		})
-	);
+		});
+	});
 	const queueCount = $derived(
 		live.queue.includes('Mail queue is empty')
 			? 0
@@ -88,14 +106,18 @@
 				></Alert.Action
 			></Alert.Root
 		>{/if}
-	{#if live.problems.length}<Alert.Root variant="destructive"
+	{#if newProblems.length}<Alert.Root variant="destructive"
 			><CircleAlert /><Alert.Title
-				>{live.problems.length} operational {live.problems.length === 1 ? 'problem' : 'problems'} detected</Alert.Title
-			><Alert.Description>{live.problems[0].context}: {live.problems[0].message}</Alert.Description
+				>{newProblems.length} new operational {newProblems.length === 1 ? 'problem' : 'problems'} detected</Alert.Title
+			><Alert.Description>{newProblems[0].context}: {newProblems[0].message}</Alert.Description
 			><Alert.Action
-				><Button href="/activity?problems=1" size="sm" variant="outline"
-					>Inspect activity<ArrowRight data-icon="inline-end" /></Button
-				></Alert.Action
+				><div class="action-row">
+					<Button href="/activity?problems=1" size="sm" variant="outline"
+						>Inspect activity<ArrowRight data-icon="inline-end" /></Button
+					><Button type="button" size="sm" variant="outline" onclick={acknowledgeProblems}
+						><Check data-icon="inline-start" />Acknowledge current</Button
+					>
+				</div></Alert.Action
 			></Alert.Root
 		>{/if}
 	{#if data.update.updateAvailable}<Alert.Root

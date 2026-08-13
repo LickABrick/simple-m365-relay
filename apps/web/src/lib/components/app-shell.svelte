@@ -21,6 +21,7 @@
 	import Send from '@lucide/svelte/icons/send';
 	import Settings from '@lucide/svelte/icons/settings';
 	import Users from '@lucide/svelte/icons/users';
+	import UserRoundCog from '@lucide/svelte/icons/user-round-cog';
 	import ArrowRight from '@lucide/svelte/icons/arrow-right';
 
 	let { children, user, version, csrf, relayAvailable, readiness, pendingChanges } = $props();
@@ -67,7 +68,10 @@
 		},
 		{
 			label: 'System',
-			links: [{ href: '/recovery', label: 'Recovery', icon: ArchiveRestore }]
+			links: [
+				{ href: '/account', label: 'Admin account', icon: UserRoundCog },
+				{ href: '/recovery', label: 'Recovery', icon: ArchiveRestore }
+			]
 		}
 	];
 	const active = (href: string) =>

@@ -30,11 +30,15 @@
 
 	// svelte-ignore state_referenced_locally
 	const { value: fieldValue } = formFieldProxy<T, U, string>(form, name);
+	// svelte-ignore state_referenced_locally
+	const posted = form.posted;
+	let touched = $state(false);
 </script>
 
 <FormField {form} {name}>
 	{#snippet children({ errors })}
-		<Field.Field data-invalid={Boolean(errors?.length)}>
+		{@const showErrors = Boolean(errors?.length) && (touched || $posted)}
+		<Field.Field data-invalid={showErrors}>
 			<Control>
 				{#snippet children({ props })}
 					<Label><Field.FieldLabel>{label}</Field.FieldLabel></Label>
@@ -44,15 +48,18 @@
 						{autocomplete}
 						{autofocus}
 						{required}
-						aria-invalid={Boolean(errors?.length)}
+						aria-invalid={showErrors}
+						onblur={() => (touched = true)}
 						bind:value={$fieldValue}
 					/>
 				{/snippet}
 			</Control>
 			{#if description}<Field.FieldDescription>{description}</Field.FieldDescription>{/if}
-			<FieldErrors>
-				{#snippet children()}<Field.FieldError>{errors}</Field.FieldError>{/snippet}
-			</FieldErrors>
+			{#if showErrors}
+				<FieldErrors>
+					{#snippet children()}<Field.FieldError>{errors}</Field.FieldError>{/snippet}
+				</FieldErrors>
+			{/if}
 		</Field.Field>
 	{/snippet}
 </FormField>

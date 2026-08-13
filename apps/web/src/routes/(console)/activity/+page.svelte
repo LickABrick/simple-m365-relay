@@ -19,6 +19,7 @@
 		query = $state(''),
 		problemsOnly = $state(page.url.searchParams.get('problems') === '1');
 	let queueEntries = $derived(parseQueue(queue));
+	let initialRefreshPending = $derived(streamState === 'loading');
 	let filtered = $derived(
 		parseLog(logs).filter(
 			(entry) =>
@@ -101,6 +102,8 @@
 						{/each}
 					</Table.Body>
 				</Table.Root>
+			{:else if initialRefreshPending}
+				<p class="empty-log" aria-live="polite">Loading the latest queue state…</p>
 			{:else}
 				<p class="empty-log">Mail queue is empty.</p>
 			{/if}
@@ -143,7 +146,9 @@
 						{/if}
 					</article>
 				{:else}
-					<p class="empty-log">No matching log entries.</p>
+					<p class="empty-log">
+						{initialRefreshPending ? 'Loading the latest mail log…' : 'No matching log entries.'}
+					</p>
 				{/each}
 			</div>
 		</Card.Content>

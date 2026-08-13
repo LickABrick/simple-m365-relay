@@ -22,6 +22,17 @@ export const setupSchema = z
 		message: 'The passwords do not match.',
 		path: ['confirm']
 	});
+export const changePasswordSchema = z
+	.object({
+		csrf: z.string().min(1),
+		currentPassword: z.string().min(1, 'Enter your current password.'),
+		password: strongPassword,
+		confirm: z.string()
+	})
+	.refine((value) => value.password === value.confirm, {
+		message: 'The passwords do not match.',
+		path: ['confirm']
+	});
 export const configSchema = z.object({
 	csrf: z.string().min(1),
 	hostname: z.string().trim().min(1).max(253),
