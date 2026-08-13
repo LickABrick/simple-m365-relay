@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { hash, verify } from '@node-rs/argon2';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Cookies } from '@sveltejs/kit';
 import { ensureSecret } from './files';
 import { db } from './database';
@@ -8,7 +8,7 @@ import { administrators } from './schema';
 export const sessionCookie = 'sm365r_session_v2';
 const maxAge = 60 * 60 * 24 * 7;
 
-type Session = { username: string; csrf: string; expires: number };
+type Session = { username: string; csrf: string; expires: number; version: number };
 
 const encode = (value: Buffer | string) => Buffer.from(value).toString('base64url');
 
@@ -22,6 +22,7 @@ export async function createAdmin(username: string, password: string): Promise<v
 			id: 1,
 			username,
 			passwordHash: await hash(password),
+			sessionVersion: 1,
 			createdAt: Math.floor(Date.now() / 1000)
 		})
 		.run();
@@ -44,7 +45,10 @@ export async function changeAdminPassword(
 ): Promise<boolean> {
 	if (!(await authenticate(username, currentPassword))) return false;
 	db.update(administrators)
-		.set({ passwordHash: await hash(password) })
+		.set({
+			passwordHash: await hash(password),
+			sessionVersion: sql`${administrators.sessionVersion} + 1`
+		})
 		.where(eq(administrators.username, username))
 		.run();
 	return true;
@@ -64,10 +68,13 @@ export async function issueSession(
 	username: string,
 	secure: boolean
 ): Promise<void> {
+	const admin = db.select().from(administrators).where(eq(administrators.username, username)).get();
+	if (!admin) throw new Error('Administrator account is unavailable.');
 	const payload: Session = {
 		username,
 		csrf: randomBytes(24).toString('base64url'),
-		expires: Date.now() + maxAge * 1000
+		expires: Date.now() + maxAge * 1000,
+		version: admin.sessionVersion
 	};
 	const body = encode(JSON.stringify(payload));
 	const signature = createHmac('sha256', await ensureSecret())
@@ -99,7 +106,13 @@ export async function readSession(cookies: Cookies): Promise<Session | null> {
 	if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) return null;
 	try {
 		const session = JSON.parse(Buffer.from(body, 'base64url').toString()) as Session;
-		return session.username && session.csrf && session.expires > Date.now() ? session : null;
+		if (!session.username || !session.csrf || session.expires <= Date.now()) return null;
+		const admin = db
+			.select()
+			.from(administrators)
+			.where(eq(administrators.username, session.username))
+			.get();
+		return admin && session.version === admin.sessionVersion ? session : null;
 	} catch {
 		return null;
 	}

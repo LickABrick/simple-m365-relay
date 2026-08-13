@@ -4,6 +4,7 @@ export const administrators = sqliteTable('administrators', {
 	id: integer('id').primaryKey().default(1),
 	username: text('username').notNull().unique(),
 	passwordHash: text('password_hash').notNull(),
+	sessionVersion: integer('session_version').notNull().default(1),
 	createdAt: integer('created_at').notNull()
 });
 export const settings = sqliteTable('settings', {

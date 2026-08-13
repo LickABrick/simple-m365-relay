@@ -25,6 +25,9 @@ import datetime as dt
 import io
 import json
 import sqlite3
+import os
+import re
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, Tuple
@@ -43,6 +46,84 @@ ALLOWED_NAMES = {
     # Read-only compatibility with pre-Dovecot backup bundles.
     "sasl/sasldb2": MAX_USERS_BYTES,
 }
+
+GUID = re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$", re.I)
+
+
+def validate_config(config: Any) -> Dict[str, Any]:
+    if not isinstance(config, dict):
+        raise ValueError("config/config.json must be a JSON object")
+    allowed = {"hostname", "domain", "mynetworks", "relayhost", "ms365_smtp_user", "tls", "oauth", "allowed_from", "default_from", "onboarding_complete"}
+    unknown = set(config) - allowed
+    if unknown:
+        raise ValueError(f"Unknown configuration fields: {', '.join(sorted(unknown))}")
+    def clean(value: Any, name: str, maximum: int = 512) -> str:
+        if not isinstance(value, str) or not value.strip() or len(value) > maximum or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError(f"Invalid {name}")
+        return value.strip()
+    for key in ("hostname", "domain", "relayhost"):
+        if key in config:
+            clean(config[key], key)
+    networks = config.get("mynetworks", ["127.0.0.0/8"])
+    if not isinstance(networks, list) or not networks or any(not isinstance(v, str) or not re.fullmatch(r"[0-9a-fA-F:./]+", v) for v in networks):
+        raise ValueError("Invalid mynetworks")
+    user = config.get("ms365_smtp_user", "")
+    if not isinstance(user, str) or any(ord(c) < 32 or ord(c) == 127 for c in user):
+        raise ValueError("Invalid ms365_smtp_user")
+    tls = config.get("tls", {})
+    if not isinstance(tls, dict) or set(tls) - {"smtpd_25", "smtpd_587", "smtp_out"} or any(v not in {"none", "may", "encrypt", "verify", "secure"} for v in tls.values()):
+        raise ValueError("Invalid TLS configuration")
+    oauth = config.get("oauth", {})
+    if not isinstance(oauth, dict) or set(oauth) - {"tenant_id", "client_id", "auto_refresh_minutes"}:
+        raise ValueError("Invalid OAuth configuration")
+    for key in ("tenant_id", "client_id"):
+        value = oauth.get(key, "")
+        if value and (not isinstance(value, str) or not GUID.fullmatch(value)):
+            raise ValueError(f"Invalid OAuth {key}")
+    refresh = oauth.get("auto_refresh_minutes", 30)
+    if not isinstance(refresh, int) or not 0 <= refresh <= 1440:
+        raise ValueError("Invalid OAuth refresh interval")
+    allowed_from = config.get("allowed_from", {})
+    default_from = config.get("default_from", {})
+    safe_token = re.compile(r"^[^\s/\\\x00-\x1f\x7f]+$")
+    if not isinstance(allowed_from, dict) or any(
+        not isinstance(login, str)
+        or not safe_token.fullmatch(login)
+        or not isinstance(addresses, list)
+        or any(not isinstance(address, str) or not safe_token.fullmatch(address) for address in addresses)
+        for login, addresses in allowed_from.items()
+    ):
+        raise ValueError("Invalid allowed_from")
+    if not isinstance(default_from, dict) or any(
+        not isinstance(login, str)
+        or not safe_token.fullmatch(login)
+        or not isinstance(address, str)
+        or not safe_token.fullmatch(address)
+        for login, address in default_from.items()
+    ):
+        raise ValueError("Invalid default_from")
+    if "onboarding_complete" in config and not isinstance(config["onboarding_complete"], bool):
+        raise ValueError("Invalid onboarding_complete")
+    return config
+
+
+def normalize_users(data: bytes) -> bytes:
+    output = []
+    for line in data.decode("utf-8").splitlines():
+        if not line.strip():
+            continue
+        if ":" not in line:
+            raise ValueError("Invalid SMTP user record")
+        login, verifier = line.split(":", 1)
+        if not re.fullmatch(r"[A-Za-z0-9._%+@-]{1,254}", login):
+            raise ValueError("Invalid SMTP user login")
+        if verifier.startswith("{PLAIN}"):
+            password = verifier.removeprefix("{PLAIN}")
+            verifier = subprocess.run(["doveadm", "pw", "-s", "ARGON2ID", "-p", password], check=True, text=True, stdout=subprocess.PIPE).stdout.strip()
+        if not verifier.startswith("{ARGON2ID}"):
+            raise ValueError("Unsupported SMTP password verifier")
+        output.append(f"{login}:{verifier}\n")
+    return "".join(output).encode("utf-8")
 
 
 def export_bundle(data_dir: Path) -> Tuple[bytes, Dict[str, Any]]:
@@ -128,8 +209,7 @@ def validate_and_extract_bundle(zip_bytes: bytes) -> Dict[str, Any]:
             cfg_obj = json.loads(cfg_raw.decode("utf-8"))
         except Exception:
             raise ValueError("config/config.json is not valid JSON")
-        if not isinstance(cfg_obj, dict):
-            raise ValueError("config/config.json must be a JSON object")
+        cfg_obj = validate_config(cfg_obj)
 
     return {
         "meta": meta,
@@ -162,10 +242,20 @@ def import_bundle(data_dir: Path, zip_bytes: bytes) -> Dict[str, Any]:
     if users_bytes is not None:
         users_path = data_dir / "sasl" / "users"
         users_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = users_path.with_name(users_path.name + ".tmp")
-        tmp.write_bytes(users_bytes)
-        tmp.chmod(0o600)
-        tmp.replace(users_path)
+        users_bytes = normalize_users(users_bytes)
+        tmp = users_path.with_name(f".{users_path.name}.import-{os.getpid()}")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(users_bytes)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, users_path)
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     return {
         "ok": True,

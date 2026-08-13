@@ -18,7 +18,7 @@ chown -R postfix:postfix "$DATA_DIR/tokens" 2>/dev/null || true
 UI_UID=${UI_UID:-10001}
 UI_GID=${UI_GID:-10001}
 
-for p in "$DATA_DIR/config" "$DATA_DIR/state" "$DATA_DIR/sasl"; do
+for p in "$DATA_DIR/config" "$DATA_DIR/state"; do
   mkdir -p "$p" || true
   chown -R "$UI_UID:$UI_GID" "$p" 2>/dev/null || true
   chmod -R u+rwX "$p" 2>/dev/null || true
@@ -56,7 +56,7 @@ listen = *
 EOF
 
 cat > /etc/dovecot/conf.d/10-auth.conf <<'EOF'
-# Dovecot 2.4+: allow AUTH PLAIN/LOGIN without requiring TLS on the connection.
+# Postfix listeners decide when AUTH is advertised; port 25 and submission require TLS for AUTH.
 auth_allow_cleartext = yes
 
 auth_mechanisms = plain login
@@ -67,7 +67,7 @@ cat > /etc/dovecot/conf.d/auth-passwdfile.conf.ext <<'EOF'
 # passwd-file user store: /data/sasl/users
 # (Dovecot 2.4+ syntax)
 passdb passwd-file {
-  default_password_scheme = PLAIN
+  default_password_scheme = ARGON2ID
   auth_username_format = %{user}
   passwd_file_path = /data/sasl/users
 }
@@ -126,44 +126,8 @@ python3 /opt/ms365-relay/relay/render.py \
   --tls-cert "$CERT_PATH" \
   --tls-key "$KEY_PATH"
 
-# Render sasl-xoauth2 config (used by the sasl-xoauth2 plugin for token refresh)
-# Prefer the SQLite-backed application configuration, then fall back to env.
-# Match https://std.rocks/relay-ms365-oauth.html : client_secret may be empty but MUST exist.
-_cfg_client_id=$(python3 - <<'PY'
-import json, sqlite3
-try:
-  with sqlite3.connect('file:/data/state/relay.db?mode=ro', uri=True) as db: cfg=json.loads(db.execute('select config from settings where id=1').fetchone()[0])
-  print((cfg.get('oauth') or {}).get('client_id','') or '')
-except Exception:
-  print('')
-PY
-)
-_cfg_tenant_id=$(python3 - <<'PY'
-import json, sqlite3
-try:
-  with sqlite3.connect('file:/data/state/relay.db?mode=ro', uri=True) as db: cfg=json.loads(db.execute('select config from settings where id=1').fetchone()[0])
-  print((cfg.get('oauth') or {}).get('tenant_id','') or '')
-except Exception:
-  print('')
-PY
-)
-client_id="${_cfg_client_id:-${MS365_CLIENT_ID:-}}"
-tenant_id="${_cfg_tenant_id:-${MS365_TENANT_ID:-}}"
-
-if [ -n "${client_id:-}" ] && [ -n "${tenant_id:-}" ]; then
-  cat > /etc/sasl-xoauth2.conf <<EOF
-{
-  "client_id": "${client_id}",
-  "client_secret": "",
-  "token_endpoint": "https://login.microsoftonline.com/${tenant_id}/oauth2/v2.0/token",
-  "log_full_trace_on_failure": "${OAUTH_LOG_FULL_TRACE:-no}",
-  "log_to_syslog_on_failure": "${OAUTH_LOG_TO_SYSLOG:-yes}"
-}
-EOF
-fi
-
 # Ensure postfix dirs
-postfix check || true
+postfix check
 
 # Start syslog to file
 # Debian ships a default /etc/syslog.conf whose facility routes override BusyBox's

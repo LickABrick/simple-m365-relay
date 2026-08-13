@@ -93,6 +93,7 @@ postlog   unix-dgram n       -       n       -       1       postlogd
 
 smtp      inet  n       -       n       -       -       smtpd
   -o smtpd_tls_security_level={tls_25}
+  -o smtpd_tls_auth_only=yes
 
 pickup    unix  n       -       n       60      1       pickup
 cleanup   unix  n       -       n       -       0       cleanup
@@ -179,14 +180,14 @@ def main():
 
     def _tls_level(v: str, default: str) -> str:
         vv = str(v or "").strip().lower()
-        if vv in ("none", "may", "encrypt"):
+        if vv in ("none", "may", "encrypt", "verify", "secure"):
             return vv
         return default
 
     tls_cfg = cfg.get("tls") or {}
     tls_25 = _tls_level(tls_cfg.get("smtpd_25") or os.environ.get("RELAY_SMTPD_TLS_LEVEL_25"), "may")
     tls_587 = _tls_level(tls_cfg.get("smtpd_587") or os.environ.get("RELAY_SMTPD_TLS_LEVEL_587"), "encrypt")
-    tls_out = _tls_level(tls_cfg.get("smtp_out") or os.environ.get("RELAY_SMTP_TLS_SECURITY_LEVEL"), "encrypt")
+    tls_out = _tls_level(tls_cfg.get("smtp_out") or os.environ.get("RELAY_SMTP_TLS_SECURITY_LEVEL"), "secure")
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -198,6 +199,17 @@ def main():
     oauth = (cfg or {}).get("oauth") or {}
     tenant_id = str(oauth.get("tenant_id") or os.environ.get("MS365_TENANT_ID") or "").strip()
     client_id = str(oauth.get("client_id") or os.environ.get("MS365_CLIENT_ID") or "").strip()
+
+    import re as _re
+    # Entra object IDs use the GUID text shape, but are not guaranteed to
+    # carry RFC 4122 version/variant bits.
+    guid = _re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$", _re.I)
+    if tenant_id and not guid.fullmatch(tenant_id):
+        raise ValueError("tenant_id must be a canonical GUID")
+    if client_id and not guid.fullmatch(client_id):
+        raise ValueError("client_id must be a canonical GUID")
+    if ms365_user and tls_out not in ("verify", "secure") and os.environ.get("ALLOW_INSECURE_OUTBOUND_SMTP", "0") != "1":
+        raise ValueError("OAuth relay requires authenticated outbound TLS; set smtp_out=secure or explicitly opt into ALLOW_INSECURE_OUTBOUND_SMTP=1")
 
     if ms365_user:
         outbound_sasl_block = "\n".join(
@@ -229,7 +241,8 @@ def main():
     # (The sasl-xoauth2 plugin reads this file at runtime.)
     sx_path = os.environ.get("SASL_XOAUTH2_CONFIG", "/etc/sasl-xoauth2.conf")
     try:
-        sxp = Path(sx_path)
+        # Validation renders must not mutate the live OAuth plugin config.
+        sxp = Path(sx_path) if outdir == Path("/etc/postfix") else outdir / "sasl-xoauth2.conf"
         if tenant_id and client_id:
             cfg_obj = {
                 "client_id": client_id,

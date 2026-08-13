@@ -80,7 +80,7 @@ def _validate_password(pw: str) -> str:
 
 
 def _write_dovecot_user(login: str, password: str) -> None:
-    # Dovecot passwd-file format: user:{PLAIN}password
+    # Store a salted, one-way verifier; SMTP AUTH PLAIN does not require plaintext storage.
     p = _dovecot_users_path()
     p.parent.mkdir(parents=True, exist_ok=True)
 
@@ -94,7 +94,16 @@ def _write_dovecot_user(login: str, password: str) -> None:
     login2 = _validate_login(login)
     pw2 = _validate_password(password)
 
-    users[login2] = f"{{PLAIN}}{pw2}"
+    hashed = subprocess.run(
+        ["doveadm", "pw", "-s", "ARGON2ID", "-p", pw2],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ).stdout.strip()
+    if not hashed.startswith("{ARGON2ID}"):
+        raise RuntimeError("Dovecot did not produce an ARGON2ID verifier")
+    users[login2] = hashed
 
     out = "".join(f"{u}:{rest}\n" for u, rest in sorted(users.items()))
     tmp = p.with_suffix(".tmp")
@@ -102,6 +111,38 @@ def _write_dovecot_user(login: str, password: str) -> None:
     _ensure_dovecot_readable(tmp)
     tmp.replace(p)
     _ensure_dovecot_readable(p)
+
+
+def _migrate_plain_dovecot_users() -> None:
+    """One-time migration for credentials created by older releases."""
+    p = _dovecot_users_path()
+    if not p.exists():
+        return
+    changed = False
+    migrated: list[str] = []
+    for line in p.read_text(encoding="utf-8", errors="strict").splitlines():
+        if not line.strip():
+            continue
+        if ":" not in line:
+            raise RuntimeError("Invalid SMTP credential record")
+        login, verifier = line.split(":", 1)
+        _validate_login(login)
+        if verifier.startswith("{PLAIN}"):
+            verifier = subprocess.run(
+                ["doveadm", "pw", "-s", "ARGON2ID", "-p", verifier.removeprefix("{PLAIN}")],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            ).stdout.strip()
+            changed = True
+        migrated.append(f"{login}:{verifier}\n")
+    if changed:
+        tmp = p.with_suffix(".migrate")
+        tmp.write_text("".join(migrated), encoding="utf-8")
+        _ensure_dovecot_readable(tmp)
+        tmp.replace(p)
+        _ensure_dovecot_readable(p)
 
 
 def _delete_dovecot_user(login: str) -> None:
@@ -278,7 +319,9 @@ def _redact_sensitive(text: str) -> str:
     # redact jwt-ish tokens
     t = re.sub(r"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b", "[REDACTED_JWT]", t)
     # redact common fields
-    t = re.sub(r"(?i)(refresh_token|access_token|id_token|authorization)\s*[:=]\s*[^\s\"']+", r"\1=[REDACTED]", t)
+    t = re.sub(r'(?i)("?(?:refresh_token|access_token|id_token)"?\s*[:=]\s*)["\']?[^"\'\s,&}]+["\']?', r'\1"[REDACTED]"', t)
+    t = re.sub(r"(?i)(authorization\s*:\s*bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[REDACTED]", t)
+    t = re.sub(r"(?i)((?:refresh_token|access_token|id_token)=)[^&\s]+", r"\1[REDACTED]", t)
     # NOTE: do NOT redact device codes here. The UI needs the device code to complete sign-in.
     # Device codes are short-lived and only shown to authenticated admins.
     return t
@@ -325,8 +368,13 @@ def _render_args(outdir: str) -> list[str]:
 
 
 def render_and_reload() -> str:
-    out = sh(_render_args("/etc/postfix"))
-    out2 = sh(["postfix", "reload"], check=False)
+    # Validate all generated files and maps in isolation before touching the
+    # live Postfix directory. This prevents malformed settings from leaving a
+    # partially rendered runtime configuration behind.
+    render_validate_only()
+    out = sh(_render_args("/etc/postfix"), check=True)
+    sh(["postfix", "check"], check=True)
+    out2 = sh(["postfix", "reload"], check=True)
     return (out + "\n" + out2).strip()
 
 
@@ -340,7 +388,7 @@ def render_validate_only() -> str:
 
     d = tempfile.mkdtemp(prefix="ms365-relay-validate-")
     try:
-        out = sh(_render_args(d), check=False)
+        out = sh(_render_args(d), check=True)
         return (out or "ok").strip() or "ok"
     finally:
         try:
@@ -885,6 +933,10 @@ def start_device_flow_background() -> None:
 
 
 class H(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(10)
+
     # When served over a unix socket, BaseHTTPRequestHandler's default
     # logging tries to index client_address[0], which breaks.
     def address_string(self) -> str:  # pragma: no cover
@@ -1105,7 +1157,16 @@ class _UnixHTTPServer(socketserver.UnixStreamServer, HTTPServer):
     allow_reuse_address = True
 
 
+class _ThreadingUnixHTTPServer(socketserver.ThreadingMixIn, _UnixHTTPServer):
+    daemon_threads = True
+
+
+class _ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
 def main():
+    _migrate_plain_dovecot_users()
     # Bootstrap the shared credential before accepting requests. On a fresh
     # volume the UI must be able to read this file in order to make its first
     # authenticated control request.
@@ -1122,7 +1183,7 @@ def main():
         except Exception:
             pass
         sock.parent.mkdir(parents=True, exist_ok=True)
-        httpd = _UnixHTTPServer(str(sock), H)
+        httpd = _ThreadingUnixHTTPServer(str(sock), H)
         # Make the socket usable by the non-root UI container (uid/gid 10001).
         try:
             import os as _os
@@ -1139,7 +1200,7 @@ def main():
             except Exception:
                 pass
     else:
-        httpd = HTTPServer((BIND, PORT), H)
+        httpd = _ThreadingHTTPServer((BIND, PORT), H)
 
     httpd.serve_forever()
 

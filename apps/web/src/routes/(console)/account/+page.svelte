@@ -42,7 +42,9 @@
 	<Card.Root>
 		<Card.Header>
 			<Card.Title>Change password</Card.Title>
-			<Card.Description>Your active session remains signed in after the change.</Card.Description>
+			<Card.Description
+				>Changing the password revokes every existing session and signs this browser in again.</Card.Description
+			>
 		</Card.Header>
 		<Card.Content>
 			<form method="POST" use:enhance>

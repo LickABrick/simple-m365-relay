@@ -29,6 +29,7 @@ services:
       # Reduce chance of secrets in logs by default
       OAUTH_LOG_FULL_TRACE: ${OAUTH_LOG_FULL_TRACE:-no}
       OAUTH_LOG_TO_SYSLOG: ${OAUTH_LOG_TO_SYSLOG:-yes}
+      ALLOW_INSECURE_OUTBOUND_SMTP: ${ALLOW_INSECURE_OUTBOUND_SMTP:-0}
     volumes:
       - simple-m365-relay-data:/data
     expose:
@@ -86,6 +87,8 @@ services:
       CONTROL_TOKEN: ${CONTROL_TOKEN:-}
       DATA_DIR: ${DATA_DIR:-/data}
       BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-12M}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      ALLOW_UNAUTHENTICATED_SETUP: ${ALLOW_UNAUTHENTICATED_SETUP:-0}
     volumes:
       - simple-m365-relay-data:/data
     depends_on:

@@ -36,7 +36,18 @@
 		><Card.Content>
 			<form method="POST" use:enhance>
 				<Field.FieldGroup
-					><FormTextField
+					>{#if data.bootstrapRequired}<FormTextField
+							form={setup}
+							name="bootstrapToken"
+							label="Setup token"
+							type="password"
+							autocomplete="one-time-code"
+							description="Set SETUP_TOKEN in the UI container before first launch."
+						/>{:else}<input
+							type="hidden"
+							name="bootstrapToken"
+							bind:value={$form.bootstrapToken}
+						/>{/if}<FormTextField
 						form={setup}
 						name="username"
 						label="Username"
@@ -57,7 +68,11 @@
 					/>
 					<Button
 						type="submit"
-						disabled={$submitting || !$form.username || !$form.password || !$form.confirm}
+						disabled={$submitting ||
+							(data.bootstrapRequired && !$form.bootstrapToken) ||
+							!$form.username ||
+							!$form.password ||
+							!$form.confirm}
 						>{#if $submitting}<Spinner data-icon="inline-start" />{:else}<ShieldCheck
 								data-icon="inline-start"
 							/>{/if}{$submitting ? 'Creating…' : 'Create administrator'}</Button

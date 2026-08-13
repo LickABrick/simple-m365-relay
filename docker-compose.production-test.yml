@@ -23,6 +23,7 @@ services:
       CONTROL_TOKEN: ""
       OAUTH_LOG_FULL_TRACE: "no"
       OAUTH_LOG_TO_SYSLOG: "yes"
+      ALLOW_INSECURE_OUTBOUND_SMTP: "0"
     volumes:
       - production-test-data:/data
     expose:
@@ -69,6 +70,7 @@ services:
       CONTROL_TOKEN: ""
       DATA_DIR: /data
       BODY_SIZE_LIMIT: 12M
+      SETUP_TOKEN: production-test-local-only
     volumes:
       - production-test-data:/data
     depends_on:

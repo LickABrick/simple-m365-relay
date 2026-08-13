@@ -12,12 +12,19 @@ export const strongPassword = z
 	.regex(/[A-Z]/, 'Include an upper-case letter.')
 	.regex(/\d/, 'Include a number.')
 	.regex(/[^A-Za-z0-9]/, 'Include a symbol.');
+export const entraGuid = z
+	.string()
+	.trim()
+	.regex(
+		/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i,
+		'Enter a canonical Microsoft Entra GUID.'
+	);
 export const loginSchema = z.object({
 	username,
 	password: z.string().min(1, 'Enter your password.')
 });
 export const setupSchema = z
-	.object({ username, password: strongPassword, confirm: z.string() })
+	.object({ bootstrapToken: z.string(), username, password: strongPassword, confirm: z.string() })
 	.refine((value) => value.password === value.confirm, {
 		message: 'The passwords do not match.',
 		path: ['confirm']
@@ -42,8 +49,8 @@ export const configSchema = z.object({
 	ms365_smtp_user: z.union([z.literal(''), z.email()]),
 	tls_25: z.enum(['none', 'may', 'encrypt']),
 	tls_587: z.enum(['none', 'may', 'encrypt']),
-	tenant_id: z.string().trim().max(128),
-	client_id: z.string().trim().max(128),
+	tenant_id: z.union([z.literal(''), entraGuid]),
+	client_id: z.union([z.literal(''), entraGuid]),
 	auto_refresh_minutes: z.coerce.number().int().min(0).max(1440)
 });
 export const relaySettingsSchema = z.object({
@@ -61,8 +68,8 @@ export const networkSettingsSchema = z.object({
 export const microsoftSettingsSchema = z.object({
 	csrf: z.string().min(1),
 	ms365_smtp_user: z.email('Enter the licensed Microsoft 365 mailbox.'),
-	tenant_id: z.string().trim().min(1).max(128),
-	client_id: z.string().trim().min(1).max(128),
+	tenant_id: entraGuid,
+	client_id: entraGuid,
 	auto_refresh_minutes: z.coerce.number().int().min(1).max(1440)
 });
 export const smtpClientSchema = z.object({
