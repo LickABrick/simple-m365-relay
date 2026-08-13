@@ -87,6 +87,8 @@ services:
       CONTROL_TOKEN: ${CONTROL_TOKEN:-}
       DATA_DIR: ${DATA_DIR:-/data}
       BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-12M}
+      # Optional. When empty, the UI generates /data/state/setup.token and
+      # prints it to `docker compose logs ui` until setup succeeds.
       SETUP_TOKEN: ${SETUP_TOKEN:-}
       ALLOW_UNAUTHENTICATED_SETUP: ${ALLOW_UNAUTHENTICATED_SETUP:-0}
     volumes:

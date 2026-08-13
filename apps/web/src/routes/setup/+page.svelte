@@ -31,18 +31,36 @@
 	<Card.Root class="auth-card"
 		><Card.Header
 			><Card.Title>Administrator setup</Card.Title><Card.Description
-				>This account controls relay identities, trusted networks, and OAuth.</Card.Description
+				>This account controls relay identities, trusted networks, and OAuth. A one-time token
+				protects first-run setup.</Card.Description
 			></Card.Header
 		><Card.Content>
 			<form method="POST" use:enhance>
 				<Field.FieldGroup
-					>{#if data.bootstrapRequired}<FormTextField
+					>{#if data.bootstrapRequired}<div class="rounded-md border bg-muted/40 p-3 text-sm">
+							{#if data.setupTokenSource === 'generated'}
+								<p>
+									A secure token was generated automatically. Retrieve it from the UI container
+									logs with <code>docker compose logs ui</code>.
+								</p>
+							{:else if data.setupTokenSource === 'environment'}
+								<p>
+									Use the value configured as <code>SETUP_TOKEN</code> in the UI container
+									environment.
+								</p>
+							{:else}
+								<p>
+									No setup token is available. Restart the UI container to generate one, or set
+									<code>SETUP_TOKEN</code> explicitly.
+								</p>
+							{/if}
+						</div><FormTextField
 							form={setup}
 							name="bootstrapToken"
 							label="Setup token"
 							type="password"
 							autocomplete="one-time-code"
-							description="Set SETUP_TOKEN in the UI container before first launch."
+							description="This token is only needed to create the first administrator."
 						/>{:else}<input
 							type="hidden"
 							name="bootstrapToken"

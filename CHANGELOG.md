@@ -12,6 +12,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - Enforced authenticated outbound SMTP TLS by default and TLS-only SMTP AUTH on port 25, with explicit compatibility overrides for legacy deployments.
 - Replaced plaintext SMTP password storage with Argon2id; existing credentials migrate automatically.
 - Added administrator session revocation, password-change throttling, account-aware login throttling, and authenticated initial setup.
+- Generate a secure first-run setup token by default, expose retrieval instructions in the setup UI, and remove the generated token after use.
 - Improved OAuth input validation and log redaction, made relay control concurrent, and preflight Postfix configuration before reload.
 - Pinned the relay base image, Python dependencies, and verified sasl-xoauth2 source archive.
 

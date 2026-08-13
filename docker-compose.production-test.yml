@@ -70,7 +70,7 @@ services:
       CONTROL_TOKEN: ""
       DATA_DIR: /data
       BODY_SIZE_LIMIT: 12M
-      SETUP_TOKEN: production-test-local-only
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
     volumes:
       - production-test-data:/data
     depends_on:

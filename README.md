@@ -51,7 +51,21 @@ cp env.example .env
 docker compose up -d --build
 ```
 
-Open <http://localhost:8000>, create the single administrator, and follow onboarding. The UI binds to loopback by default. Put it behind an authenticated HTTPS reverse proxy for remote access; do not expose it directly to the internet.
+Retrieve the automatically generated first-run token, then open <http://localhost:8000>
+and create the single administrator:
+
+```bash
+docker compose logs ui
+```
+
+Look for `First-run administrator setup token`. The token is stored at
+`/data/state/setup.token`, repeated in the UI logs while setup remains incomplete, and
+deleted after the administrator is created. The UI binds to loopback by default. Put it
+behind an authenticated HTTPS reverse proxy for remote access; do not expose it directly
+to the internet.
+
+To provide your own token, set `SETUP_TOKEN` in `.env` before first startup. Generate one
+safely with `openssl rand -base64 32`.
 
 ### Use published images
 
@@ -161,6 +175,7 @@ The shared `/data` volume contains:
 - `/data/state/relay.db`—SQLite settings, applied snapshot, and administrator.
 - `/data/state/secret.key`—session-signing key.
 - `/data/state/control.token`—UI-to-relay API credential when not supplied by environment.
+- `/data/state/setup.token`—automatically generated first-run token; removed after administrator setup.
 - `/data/sasl/users`—Dovecot SMTP client password file.
 - `/data/tokens/`—OAuth token files, owned by Postfix.
 - `/data/certs/`—relay TLS certificate and key.
@@ -214,6 +229,7 @@ The CLI does not apply relay configuration; use the reviewed UI workflow or the 
 ## Security model
 
 - The control plane has one administrator and rate-limited login attempts.
+- Initial administrator creation requires an explicit or automatically generated one-time setup token.
 - Sessions are signed, HTTP-only, SameSite=Strict cookies with CSRF protection on mutations.
 - The production UI runs non-root with a read-only root filesystem and dropped capabilities after volume initialization.
 - The relay control API is internal-only and authenticated by a shared token.
