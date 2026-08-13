@@ -8,6 +8,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
 ### Security and reliability
 
+- Record first-run and imported settings as the initial applied baseline, avoiding a false unapplied-changes warning immediately after setup.
 - Hardened privileged backup import against symlink attacks and added strict configuration validation.
 - Enforced authenticated outbound SMTP TLS by default and TLS-only SMTP AUTH on port 25, with explicit compatibility overrides for legacy deployments.
 - Replaced plaintext SMTP password storage with Argon2id; existing credentials migrate automatically.

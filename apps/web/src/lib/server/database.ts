@@ -84,12 +84,31 @@ export async function initializeDatabase(): Promise<void> {
 		} catch {
 			/* absent */
 		}
+		// The relay waits for this first settings row and renders it before
+		// starting Postfix. When no older applied snapshot exists, this exact
+		// initial/imported configuration is therefore the running baseline—not a
+		// pending administrator edit.
+		if (!appliedConfig) appliedConfig = config;
 		sqlite
 			.prepare(
 				'insert into settings (id, config, applied_hash, applied_config, updated_at) values (1, ?, ?, ?, ?)'
 			)
 			.run(config, appliedHash, appliedConfig, now);
 	}
+	// RC.2 installations created before the initial-baseline fix can already
+	// have an administrator but no snapshot. Backfill only when the settings
+	// predate that administrator, proving they have not been edited after setup.
+	sqlite
+		.prepare(
+			`update settings
+			 set applied_config = config
+			 where applied_config is null
+			   and exists (
+			     select 1 from administrators
+			     where administrators.created_at > settings.updated_at
+			   )`
+		)
+		.run();
 	try {
 		readFileSync(join(dataDir, 'config', 'config.json'));
 		console.warn('[migration] Legacy config.json detected after SQLite import; it can be deleted.');
