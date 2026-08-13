@@ -2,8 +2,10 @@
 import json
 import sqlite3
 import os
+import re
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import socketserver
 from pathlib import Path
@@ -401,7 +403,7 @@ def delivery_evidence(sendmail_output: str, max_wait_seconds: int = 6) -> dict:
             else: state = "seen"
         if state in ("sent", "bounced", "rejected"): break
         if in_queue and state in ("unknown", "seen"): state = "queued"
-        if attempt < max_wait_seconds - 1: _time.sleep(1)
+        if attempt < max_wait_seconds - 1: time.sleep(1)
     return {"queue_id": queue_id, "state": state, "in_queue": in_queue, "line": line}
 
 
