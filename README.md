@@ -72,7 +72,7 @@ safely with `openssl rand -base64 32`.
 ```yaml
 services:
   postfix:
-    image: ghcr.io/lickabrick/simple-m365-relay-postfix:2.0.1
+    image: ghcr.io/lickabrick/simple-m365-relay-postfix:2.0.2
     container_name: simple-m365-relay-postfix
     restart: unless-stopped
     ports:
@@ -90,7 +90,7 @@ services:
       - "18080"
 
   ui:
-    image: ghcr.io/lickabrick/simple-m365-relay-ui:2.0.1
+    image: ghcr.io/lickabrick/simple-m365-relay-ui:2.0.2
     container_name: simple-m365-relay-ui
     restart: unless-stopped
     ports:

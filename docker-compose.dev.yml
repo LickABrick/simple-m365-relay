@@ -77,7 +77,7 @@ services:
       AUTO_TOKEN_REFRESH_MINUTES: ${AUTO_TOKEN_REFRESH_MINUTES:-30}
 
       # UI-only metadata
-      APP_VERSION: ${APP_VERSION:-2.0.1-dev}
+      APP_VERSION: ${APP_VERSION:-2.0.2-dev}
       APP_GITHUB_REPO: ${APP_GITHUB_REPO:-LickABrick/simple-m365-relay}
     volumes:
       - simple-m365-relay-dev-data:/data

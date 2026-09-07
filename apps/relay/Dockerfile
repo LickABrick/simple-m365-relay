@@ -24,7 +24,11 @@ RUN set -eux; \
   mkdir -p build; cd build; \
   cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_INSTALL_SYSCONFDIR=/etc; \
   make -j"$(nproc)"; \
-  make install
+  make install; \
+  multiarch="$(gcc -print-multiarch)"; \
+  mkdir -p /out; \
+  cp -a "/usr/lib/${multiarch}/sasl2" /out/sasl2; \
+  cp -a "/usr/lib/${multiarch}/sasl-xoauth2" /out/sasl-xoauth2
 
 ############################
 # Runtime: postfix relay (Debian 12)
@@ -55,11 +59,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && mkdir -p /data \
   && rm -rf /var/lib/apt/lists/*
 
-# XOAUTH2 plugin + tool (Debian installs into /usr/lib/x86_64-linux-gnu)
-COPY --from=builder /usr/lib/x86_64-linux-gnu/sasl2/ /usr/lib/x86_64-linux-gnu/sasl2/
+# XOAUTH2 plugin + tool. Stage architecture-specific build output under
+# architecture-neutral paths, then install it into Debian's runtime triplet.
+ARG TARGETARCH
+COPY --from=builder /out/sasl2/ /tmp/sasl2/
+COPY --from=builder /out/sasl-xoauth2/ /tmp/sasl-xoauth2/
 COPY --from=builder /usr/bin/sasl-xoauth2-tool /usr/bin/sasl-xoauth2-tool
-COPY --from=builder /usr/lib/x86_64-linux-gnu/sasl-xoauth2/ /usr/lib/x86_64-linux-gnu/sasl-xoauth2/
 COPY --from=builder /etc/sasl-xoauth2.conf /etc/sasl-xoauth2.conf
+RUN set -eux; \
+  case "$TARGETARCH" in \
+    amd64) multiarch=x86_64-linux-gnu ;; \
+    arm64) multiarch=aarch64-linux-gnu ;; \
+    *) echo "Unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
+  esac; \
+  mkdir -p "/usr/lib/${multiarch}/sasl2" "/usr/lib/${multiarch}/sasl-xoauth2"; \
+  cp -a /tmp/sasl2/. "/usr/lib/${multiarch}/sasl2/"; \
+  cp -a /tmp/sasl-xoauth2/. "/usr/lib/${multiarch}/sasl-xoauth2/"; \
+  rm -rf /tmp/sasl2 /tmp/sasl-xoauth2
 
 WORKDIR /opt/ms365-relay
 COPY apps/relay/render.py /opt/ms365-relay/relay/render.py

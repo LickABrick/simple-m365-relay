@@ -4,6 +4,14 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [2.0.2] - 2026-09-07
+
+### Fixed
+
+- Build the XOAUTH2 SASL plugin into the correct Debian multiarch library path on both amd64 and arm64.
+- Lock the native Rolldown arm64 binding explicitly so clean cross-platform npm installs include the required build module.
+- Add an explicit multi-platform input for manual pre-publication release builds.
+
 ## [2.0.1] - 2026-09-07
 
 ### Fixed
@@ -281,6 +289,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[2.0.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.2
 [2.0.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.1
 [2.0.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0
 [2.0.0-rc.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.2

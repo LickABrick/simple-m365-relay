@@ -1,7 +1,7 @@
 {
 	"name": "@simple-m365-relay/web",
 	"private": true,
-	"version": "2.0.1",
+	"version": "2.0.2",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
@@ -51,6 +51,9 @@
 		"typescript-eslint": "^8.60.1",
 		"vite": "^8.0.16",
 		"vitest": "^4.1.8"
+	},
+	"optionalDependencies": {
+		"@rolldown/binding-linux-arm64-gnu": "1.2.4"
 	},
 	"dependencies": {
 		"@node-rs/argon2": "^2.0.2",

@@ -15,7 +15,7 @@ export const load: LayoutServerLoad = async ({ locals }) => {
 	return {
 		user: locals.user,
 		csrf: locals.csrf,
-		version: process.env.APP_VERSION || '2.0.1',
+		version: process.env.APP_VERSION || '2.0.2',
 		relayAvailable: health.ok,
 		readiness: evaluateReadiness(config, {
 			tokenPresent: token['ok'] === true,

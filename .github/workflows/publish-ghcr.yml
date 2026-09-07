@@ -14,6 +14,11 @@ on:
         required: false
         default: false
         type: boolean
+      platforms:
+        description: "Comma-separated target platforms"
+        required: false
+        default: "linux/amd64,linux/arm64"
+        type: string
 
 permissions:
   contents: read
