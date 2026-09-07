@@ -3,7 +3,7 @@
 ############################
 # Builder: build sasl-xoauth2 (Debian/glibc)
 ############################
-FROM debian:13-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258 AS builder
+FROM debian:13-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS builder
 
 ARG SASL_XOAUTH2_VERSION=0.25
 ARG SASL_XOAUTH2_SHA256=65acb6343f873529373e806da6d48863f222f3ea04959c5acc30d5543c79fbeb
@@ -33,7 +33,7 @@ RUN set -eux; \
 ############################
 # Runtime: postfix relay (Debian 12)
 ############################
-FROM debian:13-slim@sha256:3a39a0592364683e6bab97937b72cad5a8fa6dcbbee90edb3bb48c7f8e94f258
+FROM debian:13-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 
 ENV DEBIAN_FRONTEND=noninteractive
 
