@@ -40,13 +40,12 @@
 					>{#if data.bootstrapRequired}<div class="rounded-md border bg-muted/40 p-3 text-sm">
 							{#if data.setupTokenSource === 'generated'}
 								<p>
-									A secure token was generated automatically. Retrieve it from the UI container
-									logs with <code>docker compose logs ui</code>.
+									A secure token was generated automatically. Retrieve it from the UI container logs
+									with <code>docker compose logs ui</code>.
 								</p>
 							{:else if data.setupTokenSource === 'environment'}
 								<p>
-									Use the value configured as <code>SETUP_TOKEN</code> in the UI container
-									environment.
+									Use the value configured as <code>SETUP_TOKEN</code> in the UI container environment.
 								</p>
 							{:else}
 								<p>
@@ -54,7 +53,8 @@
 									<code>SETUP_TOKEN</code> explicitly.
 								</p>
 							{/if}
-						</div><FormTextField
+						</div>
+						<FormTextField
 							form={setup}
 							name="bootstrapToken"
 							label="Setup token"

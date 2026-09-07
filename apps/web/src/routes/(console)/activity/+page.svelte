@@ -115,8 +115,7 @@
 		<Card.Header>
 			<Card.Title>Mail log</Card.Title>
 			<Card.Description
-				>Newest entries appear first. Known token material is redacted by the relay control
-				service.</Card.Description
+				>Newest entries appear first. Known token material is redacted by the relay control service.</Card.Description
 			>
 		</Card.Header>
 		<Card.Content class="stack">

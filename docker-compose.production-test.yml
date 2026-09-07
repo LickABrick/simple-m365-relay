@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: apps/relay/Dockerfile
-    image: simple-m365-relay-postfix:2.0.0-rc.2-local
+    image: simple-m365-relay-postfix:2.0.0-local
     restart: unless-stopped
     ports:
       - "127.0.0.1:2526:25"
@@ -40,9 +40,9 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        APP_VERSION: 2.0.0-rc.2-local
+        APP_VERSION: 2.0.0-local
         APP_GITHUB_REPO: LickABrick/simple-m365-relay
-    image: simple-m365-relay-ui:2.0.0-rc.2-local
+    image: simple-m365-relay-ui:2.0.0-local
     restart: unless-stopped
     ports:
       - "127.0.0.1:8020:8000"

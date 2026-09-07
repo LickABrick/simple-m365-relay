@@ -4,6 +4,18 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [2.0.0] - 2026-09-07
+
+### Fixed
+
+- Allow multiple authenticated SMTP users to share one envelope sender by rendering a single Postfix LMDB key with all authorized logins ([#40](https://github.com/LickABrick/simple-m365-relay/issues/40)).
+- Restore a clean release gate by formatting the two Svelte files that failed the repository lint command and removing tests for the deleted v1 Python web application.
+
+### Changed
+
+- Promote the v2 release-candidate line to the first general v2 release.
+- Update package, image, diagnostics, and example Compose version metadata to `2.0.0`.
+
 ## [2.0.0-rc.2] - 2026-08-13
 
 ### Security and reliability
@@ -263,6 +275,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[2.0.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0
 [2.0.0-rc.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.2
 [2.0.0-rc.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.1
 [1.1.4-rc.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.4-rc.1

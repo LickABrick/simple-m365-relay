@@ -2,7 +2,7 @@ import importlib
 
 
 def test_main_bootstraps_control_token_before_serving(monkeypatch):
-    import postfix.control as control
+    import apps.relay.control as control
 
     importlib.reload(control)
     events = []
@@ -23,7 +23,7 @@ def test_main_bootstraps_control_token_before_serving(monkeypatch):
 
     monkeypatch.setattr(control, "_get_control_token", lambda: events.append("token") or "secret")
     monkeypatch.setattr(control.threading, "Thread", FakeThread)
-    monkeypatch.setattr(control, "HTTPServer", FakeServer)
+    monkeypatch.setattr(control, "_ThreadingHTTPServer", FakeServer)
     monkeypatch.setattr(control, "SOCKET_PATH", "")
 
     control.main()

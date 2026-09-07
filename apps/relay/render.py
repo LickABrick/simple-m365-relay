@@ -145,6 +145,40 @@ def postmap(path: Path):
     subprocess.check_call(["postmap", f"lmdb:{path}"])
 
 
+def _safe_map_token(value: object) -> str:
+    token = str(value or "").strip()
+    if (
+        not token
+        or _has_ctl(token)
+        or any(ch.isspace() for ch in token)
+        or "/" in token
+        or "\\" in token
+    ):
+        raise ValueError("invalid map token")
+    return token
+
+
+def render_sender_login_map(allowed_from: object) -> str:
+    """Render one LMDB key per sender with all authorized SMTP logins."""
+    if not isinstance(allowed_from, dict):
+        raise ValueError("allowed_from must be a mapping")
+
+    senders: dict[str, list[str]] = {}
+    for raw_login, from_list in allowed_from.items():
+        login = _safe_map_token(raw_login)
+        if not isinstance(from_list, list):
+            raise ValueError("allowed_from address lists must be lists")
+        for raw_address in from_list:
+            address = _safe_map_token(raw_address).lower()
+            authorized_logins = senders.setdefault(address, [])
+            if login not in authorized_logins:
+                authorized_logins.append(login)
+
+    return "".join(
+        f"{address} {','.join(logins)}\n" for address, logins in senders.items()
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
@@ -276,26 +310,13 @@ def main():
         os.chmod(sasl_passwd, 0o600)
         postmap(sasl_passwd)
 
-    # Sender login map (envelope sender -> sasl login)
+    # Sender login map (envelope sender -> comma-separated sasl logins)
+    # LMDB map keys are unique, so users sharing an address must be aggregated.
     allowed_from = cfg.get("allowed_from", {}) or {}
-    lines = []
-
-    def _safe_map_token(s: str) -> str:
-        s = str(s or "").strip()
-        if not s or _has_ctl(s) or any(ch.isspace() for ch in s) or "/" in s or "\\" in s:
-            raise ValueError("invalid map token")
-        return s
-
-    # allowed_from can be {"user": ["from1", "from2"]}
-    for login, from_list in allowed_from.items():
-        login = _safe_map_token(login)
-        for addr in from_list or []:
-            addr = _safe_map_token(str(addr).strip().lower())
-            if addr:
-                lines.append(f"{addr} {login}\n")
-
     sender_login_maps = outdir / "sender_login_maps"
-    sender_login_maps.write_text("".join(lines), encoding="utf-8")
+    sender_login_maps.write_text(
+        render_sender_login_map(allowed_from), encoding="utf-8"
+    )
     postmap(sender_login_maps)
 
     # Sender canonical map: rewrite DSN-ish senders to the MS365 identity.

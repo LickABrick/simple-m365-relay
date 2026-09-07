@@ -5,7 +5,7 @@ import time
 
 
 def test_runtime_mailbox_overrides_bootstrap_environment(monkeypatch):
-    import postfix.control as control
+    import apps.relay.control as control
 
     importlib.reload(control)
     monkeypatch.setenv("MS365_SMTP_USER", "bootstrap@example.com")
@@ -14,7 +14,7 @@ def test_runtime_mailbox_overrides_bootstrap_environment(monkeypatch):
 
 
 def test_environment_is_used_as_headless_fallback(monkeypatch):
-    import postfix.control as control
+    import apps.relay.control as control
 
     importlib.reload(control)
     monkeypatch.setenv("MS365_SMTP_USER", "bootstrap@example.com")
@@ -28,7 +28,7 @@ def _jwt(claims):
 
 
 def test_delegated_smtp_token_capabilities_are_reported_without_secrets():
-    import postfix.control as control
+    import apps.relay.control as control
 
     data = {
         "access_token": _jwt({
@@ -48,7 +48,7 @@ def test_delegated_smtp_token_capabilities_are_reported_without_secrets():
 
 
 def test_missing_smtp_scope_is_an_actionable_error():
-    import postfix.control as control
+    import apps.relay.control as control
 
     data = {
         "access_token": _jwt({"aud": "https://outlook.office365.com", "scp": "User.Read"}),
