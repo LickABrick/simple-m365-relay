@@ -47,7 +47,7 @@ export const compareVersions = (leftValue: string, rightValue: string): number =
 
 export async function getUpdateStatus(): Promise<UpdateStatus> {
 	if (cache && cache.expires > Date.now()) return cache.value;
-	const currentVersion = process.env.APP_VERSION || '2.0.0';
+	const currentVersion = process.env.APP_VERSION || '2.0.1';
 	const repository = process.env.APP_GITHUB_REPO || 'LickABrick/simple-m365-relay';
 	const url = `https://github.com/${repository}/releases/latest`;
 	let value: UpdateStatus = cache?.value || {

@@ -10,7 +10,7 @@ RUN npm run build --workspace @simple-m365-relay/web
 
 FROM node:24.18.0-bookworm-slim
 
-ARG APP_VERSION=2.0.0
+ARG APP_VERSION=2.0.1
 ARG APP_GITHUB_REPO=LickABrick/simple-m365-relay
 ENV APP_VERSION="$APP_VERSION" \
     APP_GITHUB_REPO="$APP_GITHUB_REPO" \

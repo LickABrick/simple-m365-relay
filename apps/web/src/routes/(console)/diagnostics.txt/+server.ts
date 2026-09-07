@@ -27,7 +27,7 @@ export const GET: RequestHandler = async ({ locals }) => {
 		}
 	};
 	return new Response(
-		`# Simple M365 Relay diagnostics\nversion=${process.env.APP_VERSION || '2.0.0'}\npending=${await hasPendingChanges(config)}\nhealth=${JSON.stringify(health)}\ntoken=${JSON.stringify(token)}\n\n## config\n${JSON.stringify(redacted, null, 2)}\n\n## queue\n${queue.mailq}\n\n## recent log\n${log.maillog}\n`,
+		`# Simple M365 Relay diagnostics\nversion=${process.env.APP_VERSION || '2.0.1'}\npending=${await hasPendingChanges(config)}\nhealth=${JSON.stringify(health)}\ntoken=${JSON.stringify(token)}\n\n## config\n${JSON.stringify(redacted, null, 2)}\n\n## queue\n${queue.mailq}\n\n## recent log\n${log.maillog}\n`,
 		{
 			headers: {
 				'Content-Type': 'text/plain; charset=utf-8',

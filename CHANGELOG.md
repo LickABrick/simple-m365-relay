@@ -4,6 +4,12 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [2.0.1] - 2026-09-07
+
+### Fixed
+
+- Publish both `linux/amd64` and `linux/arm64` images for release events; v2.0.0 unintentionally published amd64-only manifests because the workflow did not pass its platform selection to Buildx.
+
 ## [2.0.0] - 2026-09-07
 
 ### Fixed
@@ -275,6 +281,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[2.0.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.1
 [2.0.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0
 [2.0.0-rc.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.2
 [2.0.0-rc.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.1
