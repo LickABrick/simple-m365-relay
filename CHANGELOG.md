@@ -4,9 +4,122 @@ All notable changes to **Simple M365 Relay** will be documented in this file.
 
 This project follows **Semantic Versioning** (SemVer): https://semver.org/
 
+## [2.0.1] - 2026-09-07
+
+### Fixed
+
+- Publish both `linux/amd64` and `linux/arm64` images for release events; v2.0.0 unintentionally published amd64-only manifests because the workflow did not pass its platform selection to Buildx.
+
+## [2.0.0] - 2026-09-07
+
+### Fixed
+
+- Allow multiple authenticated SMTP users to share one envelope sender by rendering a single Postfix LMDB key with all authorized logins ([#40](https://github.com/LickABrick/simple-m365-relay/issues/40)).
+- Restore a clean release gate by formatting the two Svelte files that failed the repository lint command and removing tests for the deleted v1 Python web application.
+
+### Changed
+
+- Promote the v2 release-candidate line to the first general v2 release.
+- Update package, image, diagnostics, and example Compose version metadata to `2.0.0`.
+
+## [2.0.0-rc.2] - 2026-08-13
+
+### Security and reliability
+
+- Record first-run and imported settings as the initial applied baseline, avoiding a false unapplied-changes warning immediately after setup.
+- Hardened privileged backup import against symlink attacks and added strict configuration validation.
+- Enforced authenticated outbound SMTP TLS by default and TLS-only SMTP AUTH on port 25, with explicit compatibility overrides for legacy deployments.
+- Replaced plaintext SMTP password storage with Argon2id; existing credentials migrate automatically.
+- Added administrator session revocation, password-change throttling, account-aware login throttling, and authenticated initial setup.
+- Generate a secure first-run setup token by default, expose retrieval instructions in the setup UI, and remove the generated token after use.
+- Send newly created administrators directly to onboarding and surface backup import as an alternate first-run path.
+- Improved OAuth input validation and log redaction, made relay control concurrent, and preflight Postfix configuration before reload.
+- Pinned the relay base image, Python dependencies, and verified sasl-xoauth2 source archive.
+
+## [2.0.0-rc.1] - 2026-08-12
+
+> This is a major control-plane and persistence rewrite. Back up `/data` and review the v1 upgrade guide before deploying.
+
+### Architecture
+
+- Replaced the FastAPI/Jinja control plane with a server-rendered SvelteKit application using shadcn-svelte, Formsnap, sveltekit-superforms, Zod, and progressively enhanced actions.
+- Split the source tree into independently built `apps/web` and `apps/relay` images while retaining one shared data volume and authenticated internal control API.
+- Moved configuration, applied-state snapshots, and the administrator into SQLite with Drizzle-managed migrations that run automatically at startup.
+- Added one-time import of legacy `config.json`, administrator state, and applied snapshots. A warning identifies the obsolete JSON file after successful import.
+
+### Operator experience
+
+- Redesigned the control plane into dedicated overview, activity, delivery, relay, network/TLS, SMTP clients, sender policy, Microsoft OAuth, and recovery routes.
+- Added global readiness checks and onboarding prompts in the overview and sidebar when required configuration, users, senders, or OAuth credentials are missing.
+- Added live server-sent updates for relay health, readiness, queue, mail logs, token status, device flow, and refresh activity.
+- Added structured queue/log rendering, filters, overview error surfacing, and actionable formatting for known Exchange Online authentication failures.
+- Added pending-change indicators, git-style saved-versus-running configuration review, dry-run validation, and a primary **Validate & apply** workflow.
+- Added a favicon and refreshed responsive, accessible terminal-style UI.
+
+### Microsoft 365 and delivery
+
+- Added safe OAuth capability inspection for token type, delegated identity, audience, tenant/client match, `SMTP.Send`, refresh-token availability, and expiry without exposing token material.
+- Added sender/readiness guidance for authenticated-identity mismatches and Exchange **Send As** requirements.
+- Clarified that delivery uses modern OAuth/XOAUTH2 over SMTP AUTH, not Microsoft Graph.
+- Improved delivery tests and live result polling against queue-specific log evidence.
+
+### Reliability and security
+
+- Fixed progressive form action responses, client-side dirty-state handling, save/reset synchronization, and relay-host persistence.
+- Fixed CSP nonce propagation for SvelteKit hydration and development WebSocket behavior.
+- Hardened login, CSRF-protected actions, signed sessions, configuration validation, backup import, token/log redaction, and container privileges.
+- Persist Postfix logs at `/data/log/maillog`, retain compatibility with older `/var/log/mail.log` images, and expose live logs through the control API.
+- Preserve Postfix's root-owned spool boundary while granting Dovecot only the private socket ownership it requires.
+- Added production-like Compose testing and expanded unit, security, migration, and markup regression coverage.
+
+### Upgrade notes
+
+- Upgrade both images together and keep the existing `/data` volume.
+- Version 2 sessions are intentionally incompatible; create or sign in to the migrated administrator after startup.
+- Review imported configuration, complete readiness checks, and run **Validate & apply**.
+- Delete `/data/config/config.json` only after verifying the SQLite migration.
+- Pre-release images are version-tagged and do not update `latest`.
+
+## [1.1.4-rc.2] - 2026-05-04
+
+> ⚠️ **This release was generated by an AI agent — review carefully before deploying.**
+
+### Security
+
+- **Container hardening**: retain `no-new-privileges` for Postfix and the stricter non-root/read-only/capability-free profile for the UI. Postfix cannot use that UI profile because it must generate configuration and run privilege-separated mail services.
+- **File permission hardening**: `update_check.json` written with `0600` after write.
+- **Silent failure logging**: chown/chmod failures in the control API now log warnings instead of silent pass.
+- **Web hardening**: setup/login now fail closed when the CSRF cookie is absent, CSRF comparisons are constant-time, inline scripts use CSP nonces, and additional browser security headers are set.
+- **Safer exposure default**: the bundled Compose file binds the admin UI to loopback unless `UI_HOST_BIND` is explicitly changed.
+
+### Fixed
+
+- **Backup import (control API)**: fix `from backup import` to support both relative and bare import styles, enabling the container entrypoint to work correctly.
+- **OAuth token refresh retry**: faster retry (60s cap) after transient failures, reducing downtime windows.
+- **Compose healthchecks**: remove the duplicate UI healthcheck key and attach Postfix/Dovecot checks to the correct service.
+- **Dovecot backups**: export and import the active `sasl/users` password file instead of the obsolete Cyrus `sasldb2` database.
+- **Current FastAPI/Starlette compatibility**: use request-first template rendering and package-relative asset paths.
+- **Stored XSS prevention**: construct refreshed identity options with DOM text nodes instead of interpolated HTML.
+
+### Quality
+
+- **Config validation module**: `app/config.py` now owns `validate_cfg_obj` (moved from `app/backup.py`), clarifying module responsibilities.
+- **Dovecot passwd-file ownership**: SMTP AUTH user file chown/chmod failures now log warnings for visibility.
+- **Reproducible UI builds**: direct Python runtime dependencies are version-pinned in `requirements-ui.txt`.
+- **Accessibility**: restore visible keyboard focus and prevent page-level horizontal overflow.
+
+### Added
+
+- **Postfix healthcheck**: docker-compose.yml now includes a `postfix status` healthcheck so the container is marked unhealthy if Postfix fails to start.
+- **Dev compose variants**: `docker-compose.dev.rc.8001.yml` and `docker-compose.soak.8002.yml` for local soak/RC testing.
+- **Analysis documentation**: `ANALYSIS.md` documents the full code review findings.
+
+---
+
 ## [1.1.4-rc.1] - 2026-02-27
 
 ### Fixed
+
 - Postfix container: Dovecot 2.4 (Debian 13) config compatibility (version pins + passwd-file auth syntax).
 - CI: fix GHCR publish workflow YAML (remove accidental merge conflict markers).
 
@@ -15,6 +128,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 ## [1.1.3] - 2026-02-23
 
 ### Added
+
 - Update-available badge (stable releases only; ignores prereleases).
 - Discard saved changes (restore last applied config snapshot).
 - Test Mail: best-effort queue-id extraction + delivery verification.
@@ -23,9 +137,11 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UI container healthcheck via public `/healthz` endpoint (compose example + default compose healthcheck).
 
 ### Fixed
+
 - Startup robustness: dashboard/diagnostics are best-effort if the control API/socket isn’t ready yet.
 
 ### Security
+
 - Stored XSS hardening: strict SMTP AUTH username validation in the control plane + remove inline `onclick` handlers.
 - Config file permissions: enforce `0600` on `/data/config/config.json` after UI writes.
 - GitHub Actions hardening: validate `workflow_dispatch` version input.
@@ -35,6 +151,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 ## [1.1.2] - 2026-02-20
 
 ### Fixed
+
 - Inbound SMTP AUTH reliability: switch to Dovecot SASL (passwd-file) (issue #11).
 - Healthcheck endpoint: make `/healthz` public (issue #12).
 - OAuth apply: render `/etc/sasl-xoauth2.conf` on apply/reload so onboarding OAuth settings work without container restart.
@@ -44,6 +161,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - UX: clearer validation error when Allowed From is submitted without a From address (instead of raw 422 JSON).
 
 ### Added
+
 - Dev outbound testing harness: `docker-compose.dev.mailhog.yml` (MailHog + smtpclient).
 
 ---
@@ -51,16 +169,19 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 ## [1.1.2-rc.5] - 2026-02-20
 
 ### Fixed
+
 - UX: clearer validation error when Allowed From is submitted without a From address (instead of raw 422 JSON).
 
 ## [1.1.2-rc.4] - 2026-02-20
 
 ### Fixed
+
 - UI: Apply/Validate buttons no longer get stuck disabled after AJAX apply/validate.
 
 ## [1.1.2-rc.3] - 2026-02-20
 
 ### Fixed
+
 - OAuth apply: render `/etc/sasl-xoauth2.conf` on apply/reload so onboarding OAuth settings work without container restart.
 - Token device flow: flush Postfix queue after successful token creation (reduces “stuck until restart” reports).
 - Test Mail: allow blank From (fallback to configured MS365 identity) and normalize confusing sendmail DSN output to `queued`.
@@ -68,11 +189,13 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 ## [1.1.2-rc.2] - 2026-02-19
 
 ### Fixed
+
 - UI: multi-line placeholder for Allowed From textarea now uses `&#10;` to avoid leading whitespace on line 2.
 
 ## [1.1.2-rc.1] - 2026-02-19
 
 ### Fixed
+
 - Inbound SMTP AUTH reliability: switch from Cyrus SASL/sasldb2 to Dovecot SASL (passwd-file) (issue #11).
 - Healthcheck endpoint: make `/healthz` public (no auth redirect) (issue #12).
 - Test Mail: apply config before sending + improved reporting semantics to avoid false OK (issue #8).
@@ -81,6 +204,7 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 ## [1.1.1] - 2026-02-18
 
 ### Fixed
+
 - Fix onboarding refresh loop in some fresh installs where the UI could not read `/data/state/control.token` and the control API returned 403:
   - Control token file permissions are now UI-readable (`0640`, group 10001) and self-heal on existing volumes.
   - `/api/status` is best-effort for control API calls (no 500 crash → no loop).
@@ -88,15 +212,18 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 ## [1.1.0] - 2026-02-11
 
 ### Added
+
 - Onboarding: “Quick start import” in Step 1 (imports backup bundle of saved settings + SMTP AUTH users).
 - Backup import hardening: ZIP allowlist + size limits (UI + postfix control API).
 - Dashboard UX: live “Next auto-refresh” countdown for OAuth token refresh.
 
 ### Changed
+
 - Backup export download is now **POST + CSRF** (instead of GET) to mitigate CSRF.
 - Postfix control API bind default is Docker-friendly (do not publish to host).
 
 ### Fixed
+
 - OAuth token refresh writes are now atomic/locked and expiry handling is monotonic.
 - Token file ownership/perms are corrected so Postfix can read refreshed tokens.
 - SMTP AUTH users list no longer shows sasldb error output as fake users.
@@ -104,30 +231,36 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - Mail log is redacted (UI + control API).
 
 ### Security
+
 - Control API maillog output redaction.
 - TLS level inputs validated/allowlisted to prevent config injection.
 
 ## [1.0.2] - 2026-02-07
 
 ### Fixed
+
 - More robust Postfix/UI startup for existing volumes: enforce UI write permissions on `/data/config/config.json` on every postfix startup.
 - Avoid misleading "Session expired" UX caused by transient `/api/status` failures; `/api/status` is now best-effort and always returns JSON.
 
 ### Docs
+
 - README GHCR compose example uses `POSTFIX_CONTROL_URL=http://postfix:18080` (recommended).
 
 ## [1.0.1] - 2026-02-06
 
 ### Fixed
+
 - Onboarding could enter a refresh/redirect loop when the session was missing/invalid (API endpoints now return 401 instead of redirecting to `/login`; frontend handles 401/403 consistently).
 - Fresh installs could hit a 500 when saving relay settings because `/data/config/config.json` was not writable by the non-root UI user (now chowned on initial creation).
 
 ### Added
+
 - `docker-compose.dev.yml`: standalone dev stack with separate volume and non-conflicting ports.
 
 ## [1.0.0] - 2026-02-06
 
 ### Added
+
 - Web UI with built-in admin auth, `/setup` first-run flow and an onboarding wizard.
 - OAuth device flow re-auth wizard (dashboard + onboarding) with step-based UX and clear success/error states.
 - Telegram/UX polish: copy-to-clipboard with fallback + feedback, robust session-expiry handling for AJAX.
@@ -140,12 +273,18 @@ This project follows **Semantic Versioning** (SemVer): https://semver.org/
 - GHCR publishing workflow via GitHub Actions (release-driven).
 
 ### Changed
+
 - UI assets are self-hosted (Tailwind built at image build-time, Lucide vendored) for supply-chain hardening.
 
 ### Security
+
 - UI container hardening defaults (non-root, read-only FS, no-new-privileges, cap-drop, tmpfs `/tmp`).
 - Token expiry derived via control API (UI container does not read token files directly).
 
+[2.0.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.1
+[2.0.0]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0
+[2.0.0-rc.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.2
+[2.0.0-rc.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v2.0.0-rc.1
 [1.1.4-rc.1]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.4-rc.1
 [1.1.3]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.3
 [1.1.2]: https://github.com/LickABrick/simple-m365-relay/releases/tag/v1.1.2

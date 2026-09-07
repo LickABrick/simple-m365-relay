@@ -28,10 +28,10 @@ jobs:
         include:
           - name: ui
             image_name: simple-m365-relay-ui
-            dockerfile: ui/Dockerfile
+            dockerfile: apps/web/Dockerfile
           - name: postfix
             image_name: simple-m365-relay-postfix
-            dockerfile: postfix/Dockerfile
+            dockerfile: apps/relay/Dockerfile
 
     steps:
       - name: Checkout
@@ -121,6 +121,7 @@ jobs:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
+          platforms: ${{ github.event_name == 'release' && 'linux/amd64,linux/arm64' || inputs.platforms }}
           tags: ${{ steps.tags.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |

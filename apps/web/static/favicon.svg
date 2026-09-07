@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Simple M365 Relay">
+	<rect width="64" height="64" fill="#0b101c" />
+	<path fill="#75e88f" d="M11 15h8l9 14 9-14h8v34h-8V28L28 42 19 28v21h-8V15Z" />
+	<path fill="#75e88f" d="m49 15 5 3-13 31-5-3 13-31Z" />
+</svg>

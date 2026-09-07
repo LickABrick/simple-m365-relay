@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+**/__pycache__
+**/*.pyc
+node_modules
+**/node_modules
+apps/web/.svelte-kit
+apps/web/build
+apps/web/.data
+.env*
+data

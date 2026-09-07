@@ -2,30 +2,19 @@ services:
   postfix:
     build:
       context: .
-      dockerfile: postfix/Dockerfile
+      dockerfile: apps/relay/Dockerfile
     container_name: simple-m365-relay-postfix
     restart: unless-stopped
     ports:
       - "25:25"
       - "587:587"
+    security_opt:
+      - no-new-privileges:true
     environment:
-      RELAY_HOSTNAME: ${RELAY_HOSTNAME:-relay.local}
-      RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
-      RELAY_MYNETWORKS: ${RELAY_MYNETWORKS:-127.0.0.0/8}
-
-      RELAY_SMTPD_TLS_LEVEL_25: ${RELAY_SMTPD_TLS_LEVEL_25:-may}
-      RELAY_SMTPD_TLS_LEVEL_587: ${RELAY_SMTPD_TLS_LEVEL_587:-encrypt}
-
       RELAY_TLS_GENERATE_SELF_SIGNED: ${RELAY_TLS_GENERATE_SELF_SIGNED:-true}
       RELAY_TLS_CERT_PATH: ${RELAY_TLS_CERT_PATH:-/data/certs/tls.crt}
       RELAY_TLS_KEY_PATH: ${RELAY_TLS_KEY_PATH:-/data/certs/tls.key}
       RELAY_TLS_SELF_SIGNED_CN: ${RELAY_TLS_SELF_SIGNED_CN:-relay.local}
-
-      RELAYHOST: ${RELAYHOST:-[smtp.office365.com]:587}
-      MS365_SMTP_USER: ${MS365_SMTP_USER:-postfix@example.com}
-
-      MS365_TENANT_ID: ${MS365_TENANT_ID:-}
-      MS365_CLIENT_ID: ${MS365_CLIENT_ID:-}
 
       CONTROL_BIND: ${CONTROL_BIND:-0.0.0.0}
       CONTROL_PORT: ${CONTROL_PORT:-18080}
@@ -37,25 +26,31 @@ services:
       # If unset, postfix generates /data/state/control.token and UI reads it from the shared volume.
       CONTROL_TOKEN: ${CONTROL_TOKEN:-}
 
-      # Background token refresh (uses existing refresh token)
-      AUTO_TOKEN_REFRESH_MINUTES: ${AUTO_TOKEN_REFRESH_MINUTES:-30}
-
       # Reduce chance of secrets in logs by default
       OAUTH_LOG_FULL_TRACE: ${OAUTH_LOG_FULL_TRACE:-no}
       OAUTH_LOG_TO_SYSLOG: ${OAUTH_LOG_TO_SYSLOG:-yes}
+      ALLOW_INSECURE_OUTBOUND_SMTP: ${ALLOW_INSECURE_OUTBOUND_SMTP:-0}
     volumes:
       - simple-m365-relay-data:/data
     expose:
       - "18080"
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qx master /proc/1/comm && doveadm service status auth >/dev/null 2>&1"]
+      start_period: 15s
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   ui:
     build:
       context: .
-      dockerfile: ui/Dockerfile
+      dockerfile: apps/web/Dockerfile
     container_name: simple-m365-relay-ui
     restart: unless-stopped
     ports:
-      - "8000:8000"  # put behind reverse proxy + basic auth
+      # Loopback-only by default. Set UI_HOST_BIND=0.0.0.0 only when a firewall
+      # or authenticated TLS reverse proxy protects the UI.
+      - "${UI_HOST_BIND:-127.0.0.1}:8000:8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -ILkfs --max-time 3 http://localhost:8000/healthz > /dev/null || exit 1"]
       start_period: 10s
@@ -66,12 +61,21 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The root entrypoint prepares the named volume and immediately drops to
+    # UID/GID 10001. Keep only the capabilities required for that bootstrap.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     read_only: true
     tmpfs:
       - /tmp
     environment:
       UI_BIND: ${UI_BIND:-0.0.0.0}
       UI_PORT: ${UI_PORT:-8000}
+      ORIGIN: ${UI_ORIGIN:-http://localhost:8000}
       UI_BASE_URL: ${UI_BASE_URL:-}
       # If behind a TLS-terminating reverse proxy, you likely want:
       #   FORCE_SECURE_COOKIES=1 and TRUST_PROXY_HEADERS=1
@@ -81,19 +85,17 @@ services:
       # If set, UI uses unix socket instead of TCP for control API.
       POSTFIX_CONTROL_SOCKET: ${POSTFIX_CONTROL_SOCKET:-}
       CONTROL_TOKEN: ${CONTROL_TOKEN:-}
-      RELAY_DOMAIN: ${RELAY_DOMAIN:-local}
       DATA_DIR: ${DATA_DIR:-/data}
-
-      # Display + token expiry parsing (same as postfix)
-      RELAYHOST: ${RELAYHOST:-[smtp.office365.com]:587}
-      MS365_SMTP_USER: ${MS365_SMTP_USER:-postfix@example.com}
-      MS365_TENANT_ID: ${MS365_TENANT_ID:-}
-      MS365_CLIENT_ID: ${MS365_CLIENT_ID:-}
-      AUTO_TOKEN_REFRESH_MINUTES: ${AUTO_TOKEN_REFRESH_MINUTES:-30}
+      BODY_SIZE_LIMIT: ${BODY_SIZE_LIMIT:-12M}
+      # Optional. When empty, the UI generates /data/state/setup.token and
+      # prints it to `docker compose logs ui` until setup succeeds.
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      ALLOW_UNAUTHENTICATED_SETUP: ${ALLOW_UNAUTHENTICATED_SETUP:-0}
     volumes:
       - simple-m365-relay-data:/data
     depends_on:
-      - postfix
+      postfix:
+        condition: service_started
 
 volumes:
   # Keep the underlying Docker volume name to preserve existing data

@@ -19,3 +19,8 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+node_modules/
+apps/*/node_modules/
+apps/*/.svelte-kit/
+apps/*/build/
+apps/*/.data/

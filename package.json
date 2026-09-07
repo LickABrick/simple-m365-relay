@@ -1,0 +1,12 @@
+{
+  "name": "simple-m365-relay",
+  "private": true,
+  "version": "2.0.1",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "build": "npm run build --workspace @simple-m365-relay/web",
+    "check": "npm run check --workspace @simple-m365-relay/web",
+    "lint": "npm run lint --workspace @simple-m365-relay/web",
+    "test": "npm run test:unit --workspace @simple-m365-relay/web -- --run"
+  }
+}

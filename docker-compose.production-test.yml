@@ -1,0 +1,90 @@
+name: simple-m365-relay-production-test
+
+services:
+  postfix:
+    build:
+      context: .
+      dockerfile: apps/relay/Dockerfile
+    image: simple-m365-relay-postfix:2.0.1-local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:2526:25"
+      - "127.0.0.1:1588:587"
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      RELAY_TLS_GENERATE_SELF_SIGNED: "true"
+      RELAY_TLS_CERT_PATH: /data/certs/tls.crt
+      RELAY_TLS_KEY_PATH: /data/certs/tls.key
+      RELAY_TLS_SELF_SIGNED_CN: relay.production-test.local
+      CONTROL_BIND: 0.0.0.0
+      CONTROL_PORT: "18080"
+      CONTROL_SOCKET: ""
+      CONTROL_TOKEN: ""
+      OAUTH_LOG_FULL_TRACE: "no"
+      OAUTH_LOG_TO_SYSLOG: "yes"
+      ALLOW_INSECURE_OUTBOUND_SMTP: "0"
+    volumes:
+      - production-test-data:/data
+    expose:
+      - "18080"
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qx master /proc/1/comm && doveadm service status auth >/dev/null 2>&1"]
+      start_period: 15s
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  ui:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        APP_VERSION: 2.0.1-local
+        APP_GITHUB_REPO: LickABrick/simple-m365-relay
+    image: simple-m365-relay-ui:2.0.1-local
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8020:8000"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The root entrypoint prepares the named volume and immediately drops to
+    # UID/GID 10001. Keep only the capabilities required for that bootstrap.
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      UI_BIND: 0.0.0.0
+      UI_PORT: "8000"
+      ORIGIN: http://localhost:8020
+      POSTFIX_CONTROL_URL: http://postfix:18080
+      POSTFIX_CONTROL_SOCKET: ""
+      CONTROL_TOKEN: ""
+      DATA_DIR: /data
+      BODY_SIZE_LIMIT: 12M
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+    volumes:
+      - production-test-data:/data
+    depends_on:
+      postfix:
+        # On a fresh volume the relay waits for the web app to initialize
+        # SQLite, so the web process must start before relay health is green.
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -ILkfs --max-time 3 http://localhost:8000/healthz >/dev/null || exit 1"]
+      start_period: 10s
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  production-test-data:
+    name: simple-m365-relay-production-test-data

@@ -1,0 +1,18 @@
+{
+  "project": "Simple M365 Relay",
+  "scope": "multi-page-app-rewrite",
+  "preserved": [
+    "relay configuration information architecture",
+    "single-administrator access model",
+    "blue operational accent",
+    "Postfix control-service ownership",
+    "existing config, auth, and backup data formats"
+  ],
+  "introduced": [
+    "SvelteKit SSR application shell",
+    "shadcn-svelte Nova components",
+    "Workbench app macrostructure",
+    "responsive sidebar navigation",
+    "semantic status and recovery messaging"
+  ]
+}

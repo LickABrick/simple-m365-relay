@@ -62,7 +62,7 @@
       "datasourceTemplate": "npm",
       "depNameTemplate": "tailwindcss",
       "managerFilePatterns": [
-        "/^ui/Dockerfile$/"
+        "/^apps/web/Dockerfile$/"
       ],
       "matchStrings": [
         "tailwindcss@(?<currentValue>\\d+\\.\\d+\\.\\d+)"

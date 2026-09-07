@@ -1,0 +1,1209 @@
+#!/usr/bin/env python3
+import json
+import sqlite3
+import os
+import re
+import subprocess
+import threading
+import time
+import uuid
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import socketserver
+from pathlib import Path
+
+# NOTE: control.py is executed as a script (not a package). Use a local import.
+# control.py is executed as a script (python /opt/ms365-relay/relay/control.py)
+# but also imported in tests via sys.path insertion.
+# Use a relative import first; fall back to bare name for the script context.
+try:
+    from .backup import b64d, b64e, export_bundle, import_bundle  # noqa: F401
+except ImportError:
+    # Container: running as __main__ with /opt/ms365-relay/postfix on sys.path
+    from backup import b64d, b64e, export_bundle, import_bundle  # noqa: F401
+
+
+def _dovecot_users_path() -> Path:
+    return DATA_DIR / "sasl" / "users"
+
+
+def _ensure_dovecot_readable(path: Path) -> None:
+    import logging
+    _log = logging.getLogger(__name__)
+
+    try:
+        import pwd, grp
+
+        duid = pwd.getpwnam("dovecot").pw_uid
+        dgid = grp.getgrnam("dovecot").gr_gid
+        os.chown(path, duid, dgid)
+    except Exception as e:
+        _log.warning("failed to chown dovecot user for %s: %s", path, e)
+
+    try:
+        os.chmod(path, 0o640)
+    except Exception as e:
+        _log.warning("failed to chmod %s: %s", path, e)
+
+
+def _has_ctl(s: str) -> bool:
+    return any((ord(ch) < 32) or (ord(ch) == 127) for ch in (s or ""))
+
+
+def _reject_ctl(s: str) -> str:
+    ss = str(s or "")
+    if _has_ctl(ss) or "\n" in ss or "\r" in ss or "\x00" in ss:
+        raise ValueError("invalid characters")
+    return ss
+
+
+def _validate_login(login: str) -> str:
+    import re
+
+    v = _reject_ctl(login).strip()
+    if not v or len(v) > 254:
+        raise ValueError("invalid login")
+    if re.search(r"\s", v):
+        raise ValueError("invalid login")
+    if not re.fullmatch(r"[A-Za-z0-9._%+\-@]+", v):
+        raise ValueError("invalid login")
+    return v
+
+
+def _validate_password(pw: str) -> str:
+    v = _reject_ctl(pw)
+    # Dovecot passwd-file is colon-separated. Keep it simple to avoid format ambiguity.
+    if ":" in v:
+        raise ValueError("invalid password")
+    if len(v) < 1 or len(v) > 200:
+        raise ValueError("invalid password")
+    return v
+
+
+def _write_dovecot_user(login: str, password: str) -> None:
+    # Store a salted, one-way verifier; SMTP AUTH PLAIN does not require plaintext storage.
+    p = _dovecot_users_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    users: dict[str, str] = {}
+    if p.exists():
+        for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if not ln.strip() or ":" not in ln:
+                continue
+            u, rest = ln.split(":", 1)
+            users[u.strip()] = rest.strip()
+    login2 = _validate_login(login)
+    pw2 = _validate_password(password)
+
+    hashed = subprocess.run(
+        ["doveadm", "pw", "-s", "ARGON2ID", "-p", pw2],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    ).stdout.strip()
+    if not hashed.startswith("{ARGON2ID}"):
+        raise RuntimeError("Dovecot did not produce an ARGON2ID verifier")
+    users[login2] = hashed
+
+    out = "".join(f"{u}:{rest}\n" for u, rest in sorted(users.items()))
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(out, encoding="utf-8")
+    _ensure_dovecot_readable(tmp)
+    tmp.replace(p)
+    _ensure_dovecot_readable(p)
+
+
+def _migrate_plain_dovecot_users() -> None:
+    """One-time migration for credentials created by older releases."""
+    p = _dovecot_users_path()
+    if not p.exists():
+        return
+    changed = False
+    migrated: list[str] = []
+    for line in p.read_text(encoding="utf-8", errors="strict").splitlines():
+        if not line.strip():
+            continue
+        if ":" not in line:
+            raise RuntimeError("Invalid SMTP credential record")
+        login, verifier = line.split(":", 1)
+        _validate_login(login)
+        if verifier.startswith("{PLAIN}"):
+            verifier = subprocess.run(
+                ["doveadm", "pw", "-s", "ARGON2ID", "-p", verifier.removeprefix("{PLAIN}")],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            ).stdout.strip()
+            changed = True
+        migrated.append(f"{login}:{verifier}\n")
+    if changed:
+        tmp = p.with_suffix(".migrate")
+        tmp.write_text("".join(migrated), encoding="utf-8")
+        _ensure_dovecot_readable(tmp)
+        tmp.replace(p)
+        _ensure_dovecot_readable(p)
+
+
+def _delete_dovecot_user(login: str) -> None:
+    login = _validate_login(login)
+    p = _dovecot_users_path()
+    if not p.exists():
+        return
+    users: dict[str, str] = {}
+    for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if not ln.strip() or ":" not in ln:
+            continue
+        u, rest = ln.split(":", 1)
+        u = u.strip()
+        if not u or u == login:
+            continue
+        users[u] = rest.strip()
+    out = "".join(f"{u}:{rest}\n" for u, rest in sorted(users.items()))
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(out, encoding="utf-8")
+    _ensure_dovecot_readable(tmp)
+    tmp.replace(p)
+    _ensure_dovecot_readable(p)
+
+
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
+CFG_DB = DATA_DIR / "state" / "relay.db"
+DEVICE_FLOW_LOG = DATA_DIR / "state" / "device_flow.log"
+TOKEN_REFRESH_LOG = DATA_DIR / "state" / "token_refresh.log"
+MAIL_LOG_PATH = Path(os.environ.get("MAIL_LOG_PATH", str(DATA_DIR / "log" / "maillog")))
+LEGACY_MAIL_LOG_PATH = Path("/var/log/mail.log")
+
+TEST_CONFIG = os.environ.get("SASL_XOAUTH2_TEST_CONFIG", "/usr/lib/x86_64-linux-gnu/sasl-xoauth2/test-config")
+SASL_XOAUTH2_CONFIG = os.environ.get("SASL_XOAUTH2_CONFIG", "/etc/sasl-xoauth2.conf")
+
+
+def load_cfg() -> dict:
+    try:
+        if CFG_DB.exists():
+            with sqlite3.connect(f"file:{CFG_DB}?mode=ro", uri=True) as conn:
+                row = conn.execute("SELECT config FROM settings WHERE id = 1").fetchone()
+            if row:
+                return json.loads(row[0])
+    except Exception:
+        pass
+    return {}
+
+
+def get_auto_refresh_minutes() -> int:
+    # prefer config.json; fallback to env
+    cfg = load_cfg()
+    try:
+        v = (cfg.get("oauth") or {}).get("auto_refresh_minutes", None)
+        if v is not None:
+            return max(0, int(v))
+    except Exception:
+        pass
+    try:
+        return max(0, int(os.environ.get("AUTO_TOKEN_REFRESH_MINUTES", "0") or "0"))
+    except Exception:
+        return 0
+
+# The control API must be reachable from the UI container (same docker network).
+# Default to 0.0.0.0 inside the container, but DO NOT publish the control port to the host.
+# If you need to restrict further, set CONTROL_BIND explicitly (e.g., 127.0.0.1 with a unix socket).
+BIND = os.environ.get("CONTROL_BIND", "0.0.0.0")
+PORT = int(os.environ.get("CONTROL_PORT", "18080"))
+SOCKET_PATH = os.environ.get("CONTROL_SOCKET", "")
+CONTROL_TOKEN_ENV = os.environ.get("CONTROL_TOKEN", "")
+CONTROL_TOKEN_FILE = DATA_DIR / "state" / "control.token"
+
+_device_lock = threading.Lock()
+_device_running = False
+
+_refresh_lock = threading.Lock()
+
+
+def _get_control_token() -> str:
+    """Return the shared control token.
+
+    Priority:
+      1) CONTROL_TOKEN env
+      2) /data/state/control.token (generated once if missing)
+
+    This token is used by the UI container to authenticate to this control API.
+    """
+    if CONTROL_TOKEN_ENV:
+        return CONTROL_TOKEN_ENV
+
+    try:
+        if CONTROL_TOKEN_FILE.exists():
+            v = (CONTROL_TOKEN_FILE.read_text(encoding="utf-8", errors="ignore") or "").strip()
+            if v:
+                # Best-effort: ensure perms are correct even for existing volumes.
+                try:
+                    import os as _os
+
+                    try:
+                        _os.chown(str(CONTROL_TOKEN_FILE), 0, 10001)
+                    except Exception:
+                        pass
+                    _os.chmod(str(CONTROL_TOKEN_FILE), 0o640)
+                except Exception:
+                    pass
+                return v
+    except Exception:
+        pass
+
+    # generate and persist a token
+    import secrets
+
+    tok = secrets.token_urlsafe(32)
+    try:
+        CONTROL_TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # best effort: avoid changing existing token
+        if not CONTROL_TOKEN_FILE.exists():
+            CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+        else:
+            v = (CONTROL_TOKEN_FILE.read_text(encoding="utf-8", errors="ignore") or "").strip()
+            if v:
+                return v
+            CONTROL_TOKEN_FILE.write_text(tok + "\n", encoding="utf-8")
+
+        # Best-effort: token file readable by UI container (gid 10001), not world-readable.
+        # UI runs as uid/gid 10001 and must read this token to call the control API.
+        try:
+            import os as _os
+
+            # group-read only; owner root (this process), group 10001 (UI)
+            try:
+                _os.chown(str(CONTROL_TOKEN_FILE), 0, 10001)
+            except Exception:
+                pass
+            _os.chmod(str(CONTROL_TOKEN_FILE), 0o640)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return tok
+
+
+def _timing_safe_eq(a: str, b: str) -> bool:
+    try:
+        import hmac
+
+        return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
+    except Exception:
+        return a == b
+
+
+def _safe_token_filename(user: str) -> str:
+    import re
+
+    u = (user or "").strip()
+    if not u:
+        return ""
+    u2 = re.sub(r"[^A-Za-z0-9_.@+\-]", "_", u)
+    while ".." in u2:
+        u2 = u2.replace("..", "__")
+    u2 = u2.strip("._-")
+    return u2[:128]
+
+
+def _token_path_for_user(user: str) -> str:
+    safe = _safe_token_filename(user)
+    if not safe:
+        return str(DATA_DIR / "tokens" / "token")
+    return str(DATA_DIR / "tokens" / safe)
+
+
+def _redact_sensitive(text: str) -> str:
+    import re
+
+    t = text or ""
+    # redact jwt-ish tokens
+    t = re.sub(r"\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b", "[REDACTED_JWT]", t)
+    # redact common fields
+    t = re.sub(r'(?i)("?(?:refresh_token|access_token|id_token)"?\s*[:=]\s*)["\']?[^"\'\s,&}]+["\']?', r'\1"[REDACTED]"', t)
+    t = re.sub(r"(?i)(authorization\s*:\s*bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[REDACTED]", t)
+    t = re.sub(r"(?i)((?:refresh_token|access_token|id_token)=)[^&\s]+", r"\1[REDACTED]", t)
+    # NOTE: do NOT redact device codes here. The UI needs the device code to complete sign-in.
+    # Device codes are short-lived and only shown to authenticated admins.
+    return t
+
+
+def sh(cmd, check=False):
+    return subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, check=check).stdout
+
+
+def tail(path: Path, n: int = 200) -> str:
+    if not path.exists():
+        return ""
+    try:
+        return sh(["tail", "-n", str(n), str(path)], check=False)
+    except Exception:
+        return path.read_text(encoding="utf-8", errors="ignore")[-8000:]
+
+
+def mail_log(n: int = 200) -> str:
+    """Read the persistent mail log, with a compatibility fallback for older images."""
+    output = tail(MAIL_LOG_PATH, n)
+    if output or DATA_DIR != Path("/data") or MAIL_LOG_PATH != DATA_DIR / "log" / "maillog":
+        return output
+    return tail(LEGACY_MAIL_LOG_PATH, n)
+
+
+def _render_args(outdir: str) -> list[str]:
+    cert = os.environ.get("RELAY_TLS_CERT_PATH", "/data/certs/tls.crt")
+    key = os.environ.get("RELAY_TLS_KEY_PATH", "/data/certs/tls.key")
+    return [
+        "python3",
+        "/opt/ms365-relay/relay/render.py",
+        "--config",
+        str(CFG_DB),
+        "--outdir",
+        outdir,
+        "--token-dir",
+        str(DATA_DIR / "tokens"),
+        "--tls-cert",
+        cert,
+        "--tls-key",
+        key,
+    ]
+
+
+def render_and_reload() -> str:
+    # Validate all generated files and maps in isolation before touching the
+    # live Postfix directory. This prevents malformed settings from leaving a
+    # partially rendered runtime configuration behind.
+    render_validate_only()
+    out = sh(_render_args("/etc/postfix"), check=True)
+    sh(["postfix", "check"], check=True)
+    out2 = sh(["postfix", "reload"], check=True)
+    return (out + "\n" + out2).strip()
+
+
+def render_validate_only() -> str:
+    """Render to a temporary directory to validate config.
+
+    Does not reload Postfix and does not touch /etc/postfix.
+    """
+    import tempfile
+    import shutil
+
+    d = tempfile.mkdtemp(prefix="ms365-relay-validate-")
+    try:
+        out = sh(_render_args(d), check=True)
+        return (out or "ok").strip() or "ok"
+    finally:
+        try:
+            shutil.rmtree(d, ignore_errors=True)
+        except Exception:
+            pass
+
+
+def send_test_mail(to_addr: str, from_addr: str, subject: str, body: str) -> str:
+    # Basic header-injection guard
+    for v in (to_addr, from_addr, subject):
+        if "\n" in v or "\r" in v:
+            raise ValueError("invalid header value")
+
+    message_id = f"relay-test-{uuid.uuid4().hex}@simple-m365-relay.local"
+    msg = (
+        f"From: {from_addr}\n"
+        f"To: {to_addr}\n"
+        f"Subject: {subject}\n"
+        f"Message-ID: <{message_id}>\n"
+        "MIME-Version: 1.0\n"
+        "Content-Type: text/plain; charset=UTF-8\n"
+        "\n"
+        f"{body}\n"
+    )
+
+    p = subprocess.run(
+        ["/usr/sbin/sendmail", "-N", "never", "-t", "-f", from_addr],
+        input=msg,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    out = (p.stdout or "").strip()
+    if p.returncode != 0:
+        return f"sendmail exit {p.returncode}\n" + out
+    # NOTE: returncode=0 only means the message was accepted/queued locally,
+    # not that it has been delivered to Microsoft 365.
+    return f"message-id=<{message_id}>"
+
+
+def delivery_evidence(sendmail_output: str, max_wait_seconds: int = 6) -> dict:
+    """Best-effort queue-id correlation against Postfix queue and log state."""
+    match = re.search(r"queued as\s+([A-Z0-9]{5,})", sendmail_output or "", re.I)
+    if not match:
+        match = re.search(r"\b([A-F0-9]{5,}):", sendmail_output or "", re.I)
+    queue_id = match.group(1).upper() if match else None
+    message_id_match = re.search(r"message-id=<([^>]+)>", sendmail_output or "", re.I)
+    message_id = message_id_match.group(1) if message_id_match else None
+    state, line, in_queue = "unknown", "", None
+    for attempt in range(max_wait_seconds):
+        log = mail_log(300)
+        if not queue_id and message_id:
+            correlation = re.search(
+                rf"\b([A-F0-9]{{5,}}): message-id=<{re.escape(message_id)}>", log, re.I
+            )
+            if correlation:
+                queue_id = correlation.group(1).upper()
+        if not queue_id:
+            if attempt < max_wait_seconds - 1:
+                time.sleep(1)
+            continue
+        queue = sh(["mailq"], check=False)
+        in_queue = queue_id in queue.upper()
+        matches = [item for item in log.splitlines() if queue_id in item.upper()]
+        if matches:
+            line = _redact_sensitive(matches[-1])
+            lowered = line.lower()
+            if "status=sent" in lowered: state = "sent"
+            elif "status=deferred" in lowered: state = "deferred"
+            elif "status=bounced" in lowered: state = "bounced"
+            elif "reject:" in lowered or "status=reject" in lowered: state = "rejected"
+            else: state = "seen"
+        if state in ("sent", "bounced", "rejected"): break
+        if in_queue and state in ("unknown", "seen"): state = "queued"
+        if attempt < max_wait_seconds - 1: time.sleep(1)
+    if not queue_id:
+        return {"queue_id": None, "state": "accepted", "in_queue": None, "line": ""}
+    return {"queue_id": queue_id, "state": state, "in_queue": in_queue, "line": line}
+
+
+def _append_log(path: Path, text: str, max_bytes: int = 200_000) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if path.exists() and path.stat().st_size > max_bytes:
+            # truncate older content
+            tail_txt = tail(path, 400)
+            path.write_text(tail_txt + "\n[truncated]\n", encoding="utf-8")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(text)
+            if not text.endswith("\n"):
+                f.write("\n")
+    except Exception:
+        pass
+
+
+def _jwt_claims_best_effort(jwt: str) -> dict:
+    try:
+        parts = (jwt or "").split(".")
+        if len(parts) < 2:
+            return {}
+        import base64
+
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        raw = base64.urlsafe_b64decode(payload.encode("utf-8"))
+        obj = json.loads(raw.decode("utf-8", errors="ignore"))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _jwt_exp_best_effort(jwt: str):
+    try:
+        exp = _jwt_claims_best_effort(jwt).get("exp")
+        return int(exp) if exp is not None else None
+    except Exception:
+        return None
+
+
+def _token_capabilities(data: dict, exp) -> dict:
+    """Return safe, best-effort diagnostics without exposing token material.
+
+    Access-token claims are diagnostic hints here, not cryptographic validation. Exchange
+    remains the authority when the token is used for SMTP AUTH.
+    """
+    import time as _time
+
+    claims = _jwt_claims_best_effort(str((data or {}).get("access_token") or ""))
+    raw_scope = str((data or {}).get("scope") or claims.get("scp") or "").strip()
+    scopes = sorted(set(part for part in raw_scope.split() if part))
+    roles_value = claims.get("roles") or []
+    roles = sorted(set(str(role) for role in roles_value)) if isinstance(roles_value, list) else []
+    token_type = "delegated" if scopes else ("application" if roles else "unknown")
+    smtp_scope_granted = (
+        any(scope.lower().rstrip("/").endswith("smtp.send") for scope in scopes)
+        if scopes
+        else None
+    )
+    audience = str(claims.get("aud") or "").strip()
+    valid_audiences = {
+        "https://outlook.office.com",
+        "https://outlook.office365.com",
+        "00000002-0000-0ff1-ce00-000000000000",
+    }
+    audience_ok = audience.lower().rstrip("/") in valid_audiences if audience else None
+    identity = str(
+        claims.get("preferred_username") or claims.get("upn") or claims.get("unique_name") or ""
+    ).strip()
+    tenant_id = str(claims.get("tid") or "").strip()
+    client_id = str(claims.get("azp") or claims.get("appid") or "").strip()
+    expired = bool(exp and int(exp) <= int(_time.time()))
+    has_refresh_token = bool(str((data or {}).get("refresh_token") or "").strip())
+    issues = []
+    if token_type == "application":
+        issues.append(
+            {
+                "code": "unsupported_token_type",
+                "severity": "error",
+                "message": "Application token detected; this relay uses delegated device authorization.",
+            }
+        )
+    elif token_type == "unknown":
+        issues.append(
+            {
+                "code": "scope_unverifiable",
+                "severity": "warning",
+                "message": "Token scopes could not be inspected. Reauthorize to obtain verifiable SMTP.Send consent.",
+            }
+        )
+    elif smtp_scope_granted is False:
+        issues.append(
+            {
+                "code": "missing_smtp_send",
+                "severity": "error",
+                "message": "Delegated SMTP.Send permission is missing.",
+            }
+        )
+    if audience_ok is False:
+        issues.append(
+            {
+                "code": "wrong_audience",
+                "severity": "error",
+                "message": "Token was issued for a resource other than Exchange Online.",
+            }
+        )
+    if expired:
+        issues.append({"code": "expired", "severity": "error", "message": "Access token is expired."})
+    if not has_refresh_token:
+        issues.append(
+            {
+                "code": "missing_refresh_token",
+                "severity": "error",
+                "message": "offline_access was not granted; no refresh token is available.",
+            }
+        )
+    smtp_ready = bool(
+        token_type == "delegated"
+        and smtp_scope_granted is True
+        and audience_ok is not False
+        and not expired
+        and has_refresh_token
+    )
+    return {
+        "token_type": token_type,
+        "scopes": scopes,
+        "roles": roles,
+        "smtp_scope_granted": smtp_scope_granted,
+        "audience": audience,
+        "audience_ok": audience_ok,
+        "identity": identity,
+        "tenant_id": tenant_id,
+        "client_id": client_id,
+        "has_refresh_token": has_refresh_token,
+        "expired": expired,
+        "smtp_ready": smtp_ready,
+        "issues": issues,
+    }
+
+
+def _ms365_user(cfg: dict) -> str:
+    u = str((cfg or {}).get("ms365_smtp_user") or "").strip()
+    if u:
+        return u
+    return (os.environ.get("MS365_SMTP_USER") or "").strip()
+
+
+def token_status() -> dict:
+    cfg = load_cfg()
+    user = _ms365_user(cfg)
+    if not user:
+        return {"ok": False, "error": "MS365_SMTP_USER_not_set"}
+    p = _token_path_for_user(user)
+    try:
+        txt = Path(p).read_text(encoding="utf-8")
+        data = json.loads(txt)
+    except Exception as e:
+        # we only return mtime as a last resort
+        try:
+            st = os.stat(p)
+            return {"ok": True, "token_exp_ts": int(st.st_mtime), "warning": "fallback_mtime"}
+        except Exception:
+            return {"ok": False, "error": f"cannot_read_token: {type(e).__name__}"}
+
+    # common field
+    exp = None
+    try:
+        exp0 = int(str(data.get("expiry", "") or 0))
+        if exp0 > 0:
+            exp = exp0
+    except Exception:
+        pass
+
+    if not exp:
+        jwt_exp = _jwt_exp_best_effort((data or {}).get("access_token", ""))
+        if jwt_exp:
+            exp = jwt_exp
+
+    if not exp:
+        # nested fields
+        def walk(obj):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    lk = str(k).lower()
+                    if lk in ("expires_on", "expiresat", "expires_at", "expireson", "expiry"):
+                        yield v
+                    yield from walk(v)
+            elif isinstance(obj, list):
+                for it in obj:
+                    yield from walk(it)
+
+        for v in walk(data):
+            try:
+                ts = int(str(v))
+                if ts > 10_000_000_000:
+                    ts //= 1000
+                if ts > 0:
+                    exp = ts
+                    break
+            except Exception:
+                pass
+
+    return {"ok": True, "token_exp_ts": exp, **_token_capabilities(data, exp)}
+
+
+def _fix_token_perms(path: str) -> None:
+    """Ensure the token file is readable by Postfix.
+
+    The control API runs as root and may create root-owned 0600 files.
+    Postfix processes typically run as the 'postfix' user, so we chown.
+    """
+    try:
+        import os as _os
+        import pwd
+        import grp
+
+        uid = pwd.getpwnam("postfix").pw_uid
+        gid = grp.getgrnam("postfix").gr_gid
+        _os.chown(path, uid, gid)
+        _os.chmod(path, 0o600)
+    except Exception:
+        pass
+
+
+def refresh_token() -> str:
+    """Refresh the OAuth token file in-place.
+
+    Notes:
+    - sasl-xoauth2-tool has a 'test-token-refresh' command, but it does not update
+      the token file. The UI expects a refresh to update expiry.
+    - We call the Entra token endpoint directly using the stored refresh_token.
+    - We serialize refreshes because an auto-refresh thread may run concurrently.
+
+    Token file format (what sasl-xoauth2-tool writes):
+      {"access_token": "...", "refresh_token": "...", "expiry": <epoch_seconds>}
+    """
+
+    import time as _time
+    import urllib.parse
+    import urllib.request
+    import urllib.error
+
+    with _refresh_lock:
+        cfg = load_cfg()
+        user = _ms365_user(cfg)
+        if not user:
+            return "Missing MS365_SMTP_USER"
+
+        tok_path = _token_path_for_user(user)
+        p = Path(tok_path)
+        if not p.exists():
+            return f"Token file not found: {tok_path}"
+
+        # Load OAuth app settings
+        cfg = load_cfg()
+        tenant = (cfg.get("oauth") or {}).get("tenant_id") or os.environ.get("MS365_TENANT_ID", "")
+        client_id = (cfg.get("oauth") or {}).get("client_id") or os.environ.get("MS365_CLIENT_ID", "")
+        tenant = str(tenant or "").strip()
+        client_id = str(client_id or "").strip()
+        if not (tenant and client_id):
+            return "Missing OAuth tenant_id/client_id (configure in UI or env)"
+
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            return "Token file unreadable (invalid JSON)"
+
+        rt = (data.get("refresh_token") or "").strip() if isinstance(data, dict) else ""
+        if not rt:
+            return "Token file missing refresh_token"
+
+        endpoint = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+
+        # Outlook/SMTP AUTH: use outlook resource default scope.
+        # Keep offline_access so a refresh_token continues to be issued.
+        scope = "https://outlook.office365.com/.default offline_access"
+
+        form = {
+            "client_id": client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": rt,
+            "scope": scope,
+        }
+
+        body = urllib.parse.urlencode(form).encode("utf-8")
+
+        try:
+            req = urllib.request.Request(endpoint, data=body, method="POST")
+            req.add_header("Content-Type", "application/x-www-form-urlencoded")
+            with urllib.request.urlopen(req, timeout=20) as r:
+                resp_raw = r.read().decode("utf-8", errors="ignore")
+                resp = json.loads(resp_raw)
+        except urllib.error.HTTPError as e:
+            # HTTPError contains a response body which often includes a useful JSON payload
+            # (error + error_description, e.g. invalid_grant). Surface it in the log.
+            err_body = ""
+            try:
+                err_body = e.read().decode("utf-8", errors="ignore")
+            except Exception:
+                err_body = ""
+
+            detail = ""
+            try:
+                obj = json.loads(err_body) if err_body else {}
+                if isinstance(obj, dict) and (obj.get("error") or obj.get("error_description")):
+                    ee = str(obj.get("error") or "").strip()
+                    ed = str(obj.get("error_description") or "").strip()
+                    if ee and ed:
+                        detail = f" ({ee}): {ed}"
+                    elif ee:
+                        detail = f" ({ee})"
+                    elif ed:
+                        detail = f": {ed}"
+            except Exception:
+                pass
+
+            out = f"Token refresh failed: HTTPError {getattr(e, 'code', '?')}: {getattr(e, 'reason', str(e))}{detail}"
+            if err_body:
+                out += f"\nResponse body: {err_body[:2000]}"
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
+            return out
+        except Exception as e:
+            out = f"Token refresh failed: {type(e).__name__}: {e}"
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
+            return out
+
+        at = (resp.get("access_token") or "").strip()
+        if not at:
+            out = "Token refresh failed: no access_token in response"
+            _append_log(
+                TOKEN_REFRESH_LOG,
+                f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(json.dumps(resp)[:1000])}\n",
+            )
+            return out
+
+        now = int(_time.time())
+        try:
+            expires_in = int(resp.get("expires_in") or 0)
+        except Exception:
+            expires_in = 0
+
+        # Safety buffer so UI doesn't show "expiring" immediately.
+        new_expiry = now + max(0, expires_in - 60) if expires_in else (now + 3600)
+
+        # Monotonic expiry: if multiple refreshes happen close together, don't allow expiry to go backwards.
+        try:
+            old_expiry = int((data or {}).get("expiry") or 0)
+        except Exception:
+            old_expiry = 0
+        expiry = max(old_expiry, int(new_expiry))
+
+        new = dict(data) if isinstance(data, dict) else {}
+        new["access_token"] = at
+        new["expiry"] = int(expiry)
+        if resp.get("scope"):
+            new["scope"] = resp.get("scope")
+        if resp.get("refresh_token"):
+            new["refresh_token"] = resp.get("refresh_token")
+
+        # Atomic-ish write
+        tmp = p.with_name(p.name + ".tmp")
+        try:
+            tmp.write_text(json.dumps(new, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            tmp.replace(p)
+            _fix_token_perms(str(p))
+        except Exception as e:
+            out = f"Token refresh failed: cannot write token file: {type(e).__name__}: {e}"
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return out
+
+        out = f"Token refresh succeeded. New expiry={expiry}"
+        _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] refresh_token\n{_redact_sensitive(out)}\n")
+        return out
+
+
+def _ensure_sasldb_ok() -> None:
+    """If /data/sasl/sasldb2 exists but is not a readable Berkeley DB for this image,
+    move it aside so saslpasswd2 can recreate it."""
+    db = DATA_DIR / "sasl" / "sasldb2"
+    if not db.exists():
+        return
+    try:
+        # If it's not a regular file, quarantine it.
+        if not db.is_file():
+            raise RuntimeError("not a file")
+        # If Cyrus can't read it, it's likely a format mismatch.
+        out = sh(["sasldblistusers2", "-f", str(db)], check=False)
+        if "unexpected file type" in out.lower() or "listusers failed" in out.lower() or "invalid" in out.lower():
+            raise RuntimeError(out.strip()[:200])
+    except Exception:
+        import time as _time
+
+        ts = int(_time.time())
+        try:
+            db.rename(db.with_name(f"sasldb2.bad.{ts}"))
+        except Exception:
+            try:
+                db.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def start_device_flow_background() -> None:
+    global _device_running
+    with _device_lock:
+        if _device_running:
+            return
+        _device_running = True
+
+    DEVICE_FLOW_LOG.parent.mkdir(parents=True, exist_ok=True)
+    DEVICE_FLOW_LOG.write_text("", encoding="utf-8")
+
+    def run():
+        global _device_running
+        try:
+            cfg = load_cfg()
+            tenant = (cfg.get("oauth") or {}).get("tenant_id") or os.environ.get("MS365_TENANT_ID", "")
+            client_id = (cfg.get("oauth") or {}).get("client_id") or os.environ.get("MS365_CLIENT_ID", "")
+            user = _ms365_user(cfg)
+            if not (tenant and client_id and user):
+                DEVICE_FLOW_LOG.write_text("Missing tenant_id/client_id (OAuth settings) or MS365_SMTP_USER\n", encoding="utf-8")
+                return
+            tok_path = _token_path_for_user(user)
+            Path(tok_path).parent.mkdir(parents=True, exist_ok=True)
+
+            cmd = [
+                "sasl-xoauth2-tool",
+                "get-token",
+                "outlook",
+                tok_path,
+                f"--client-id={client_id}",
+                "--use-device-flow",
+                f"--tenant={tenant}",
+            ]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            with open(DEVICE_FLOW_LOG, "a", encoding="utf-8") as f:
+                for line in proc.stdout or []:
+                    f.write(_redact_sensitive(line))
+                    f.flush()
+            proc.wait()
+            with open(DEVICE_FLOW_LOG, "a", encoding="utf-8") as f:
+                f.write(f"\n[exit {proc.returncode}]\n")
+
+            # If token was created/updated, ensure Postfix can read it.
+            # Also flush the queue so previously deferred messages retry immediately.
+            try:
+                if proc.returncode == 0 and Path(tok_path).exists():
+                    _fix_token_perms(tok_path)
+                    sh(["postqueue", "-f"], check=False)
+            except Exception:
+                pass
+        finally:
+            with _device_lock:
+                _device_running = False
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+class H(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(10)
+
+    # When served over a unix socket, BaseHTTPRequestHandler's default
+    # logging tries to index client_address[0], which breaks.
+    def address_string(self) -> str:  # pragma: no cover
+        try:
+            ca = getattr(self, "client_address", None)
+            if isinstance(ca, (tuple, list)) and ca:
+                return str(ca[0])
+        except Exception:
+            pass
+        return "local"
+
+    def _require_auth(self) -> bool:
+        # /health is intentionally unauthenticated for basic liveness checks.
+        if self.path == "/health":
+            return True
+
+        tok = _get_control_token()
+        hdr = (self.headers.get("X-Control-Token") or "").strip()
+        if not tok:
+            # Should never happen, but fail closed.
+            self._json(503, {"error": "control_token_unavailable"})
+            return False
+        if not hdr or not _timing_safe_eq(hdr, tok):
+            self._json(403, {"error": "forbidden"})
+            return False
+        return True
+
+    def _json(self, code, obj):
+        data = json.dumps(obj).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _read_json(self):
+        try:
+            ln = int(self.headers.get("Content-Length", "0"))
+        except Exception:
+            ln = 0
+        if ln <= 0:
+            return {}
+        raw = self.rfile.read(ln)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except Exception:
+            return {}
+
+    def do_GET(self):
+        if self.path == "/health":
+            return self._json(200, {"ok": True})
+        if not self._require_auth():
+            return
+        if self.path == "/mailq":
+            out = sh(["mailq"], check=False)
+            return self._json(200, {"mailq": out})
+        if self.path == "/maillog":
+            out = mail_log(200)
+            return self._json(200, {"maillog": _redact_sensitive(out)})
+        if self.path == "/device-flow-log":
+            return self._json(200, {"log": _redact_sensitive(tail(DEVICE_FLOW_LOG, 200))})
+        if self.path == "/token/status":
+            return self._json(200, token_status())
+        if self.path == "/token/refresh-log":
+            return self._json(200, {"log": _redact_sensitive(tail(TOKEN_REFRESH_LOG, 200))})
+        if self.path == "/users":
+            # Dovecot passwd-file users
+            p = _dovecot_users_path()
+            if not p.exists():
+                return self._json(200, {"users": ""})
+            users = []
+            for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if not ln.strip() or ":" not in ln:
+                    continue
+                u = ln.split(":", 1)[0].strip()
+                if u:
+                    users.append(u)
+            users = sorted(set(users))
+            return self._json(200, {"users": "\n".join(f"{u}: userPassword" for u in users)})
+        if self.path == "/backup/export":
+            blob, meta = export_bundle(DATA_DIR)
+            return self._json(200, {"ok": True, "format": "zip+b64", "zip_b64": b64e(blob), "meta": meta})
+        self._json(404, {"error": "not_found"})
+
+    def do_POST(self):
+        if not self._require_auth():
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "invalid_content_length"})
+        if content_length > 12 * 1024 * 1024:
+            return self._json(413, {"error": "request_body_too_large"})
+        if self.path == "/render-reload":
+            out = render_and_reload()
+            return self._json(200, {"output": out})
+        if self.path == "/render-validate":
+            out = render_validate_only()
+            return self._json(200, {"output": out})
+        if self.path == "/reload":
+            out = sh(["postfix", "reload"], check=False)
+            return self._json(200, {"output": out})
+        if self.path == "/token/start":
+            start_device_flow_background()
+            return self._json(200, {"ok": True})
+        if self.path == "/token/refresh":
+            out = refresh_token()
+            return self._json(200, {"output": out})
+        if self.path == "/users/add":
+            body = self._read_json()
+            login = (body.get("login") or "").strip()
+            pw = body.get("password") or ""
+            if not login or not pw:
+                return self._json(400, {"error": "missing login/password"})
+            try:
+                _write_dovecot_user(login, pw)
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {"output": "ok"})
+        if self.path == "/users/delete":
+            body = self._read_json()
+            login = (body.get("login") or "").strip()
+            if not login:
+                return self._json(400, {"error": "missing login"})
+            try:
+                _delete_dovecot_user(login)
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {"output": "ok"})
+        if self.path == "/testmail":
+            body = self._read_json()
+            to_addr = (body.get("to_addr") or "").strip()
+            from_addr = (body.get("from_addr") or "").strip()
+            subject = (body.get("subject") or "Test message").strip()
+            mail_body = body.get("body") or "Does it work?"
+            if not to_addr:
+                return self._json(400, {"error": "missing to_addr"})
+            if not from_addr:
+                # fallback to configured MS365 identity
+                cfg = load_cfg()
+                from_addr = _ms365_user(cfg)
+            if not from_addr:
+                return self._json(400, {"error": "missing from_addr (and no MS365_SMTP_USER configured)"})
+            try:
+                out = send_test_mail(to_addr, from_addr, subject, mail_body)
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, {"output": out, "delivery": delivery_evidence(out)})
+        if self.path == "/backup/import":
+            body = self._read_json()
+            zip_b64 = (body.get("zip_b64") or "").strip()
+            if not zip_b64:
+                return self._json(400, {"error": "missing zip_b64"})
+            try:
+                zip_bytes = b64d(zip_b64)
+            except Exception:
+                return self._json(400, {"error": "invalid base64"})
+            try:
+                res = import_bundle(DATA_DIR, zip_bytes)
+                if res.get("imported", {}).get("smtp_auth_users"):
+                    _ensure_dovecot_readable(_dovecot_users_path())
+            except Exception as e:
+                return self._json(400, {"error": str(e)})
+            return self._json(200, res)
+        self._json(404, {"error": "not_found"})
+
+
+def _auto_refresh_loop():
+    import time as _time
+
+    # Retry faster after a failed refresh (default 60s) so transient network
+    # outages do not require long manual wait/interaction.
+    try:
+        retry_after_fail_s = max(15, int(os.environ.get("AUTO_TOKEN_REFRESH_RETRY_SECONDS", "60") or "60"))
+    except Exception:
+        retry_after_fail_s = 60
+
+    next_run_at = 0.0
+
+    while True:
+        mins = get_auto_refresh_minutes()
+        if mins <= 0:
+            _time.sleep(5)
+            continue
+
+        now = _time.time()
+        if now < next_run_at:
+            _time.sleep(5)
+            continue
+
+        interval_s = max(60, int(mins * 60))
+
+        try:
+            out = str(refresh_token() or "")
+        except Exception as e:
+            _append_log(TOKEN_REFRESH_LOG, f"[{_time.strftime('%Y-%m-%d %H:%M:%S')}] auto-refresh error: {e}\n")
+            out = ""
+
+        next_run_at = now + _next_refresh_delay_seconds(out, interval_s, retry_after_fail_s)
+
+        _time.sleep(5)
+
+
+def _next_refresh_delay_seconds(refresh_output: str, interval_s: int, retry_after_fail_s: int) -> int:
+    """Return delay until next auto-refresh attempt.
+
+    - Success -> normal interval
+    - Failure/unknown -> faster retry (capped by normal interval)
+    """
+    ok = str(refresh_output or "").startswith("Token refresh succeeded")
+    if ok:
+        return max(1, int(interval_s))
+    return max(1, min(int(interval_s), int(retry_after_fail_s)))
+
+
+class _UnixHTTPServer(socketserver.UnixStreamServer, HTTPServer):
+    # allow immediate restart
+    allow_reuse_address = True
+
+
+class _ThreadingUnixHTTPServer(socketserver.ThreadingMixIn, _UnixHTTPServer):
+    daemon_threads = True
+
+
+class _ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+def main():
+    _migrate_plain_dovecot_users()
+    # Bootstrap the shared credential before accepting requests. On a fresh
+    # volume the UI must be able to read this file in order to make its first
+    # authenticated control request.
+    _get_control_token()
+
+    # always start loop; it self-disables when interval <= 0
+    threading.Thread(target=_auto_refresh_loop, daemon=True).start()
+
+    if SOCKET_PATH:
+        sock = Path(SOCKET_PATH)
+        try:
+            if sock.exists():
+                sock.unlink()
+        except Exception:
+            pass
+        sock.parent.mkdir(parents=True, exist_ok=True)
+        httpd = _ThreadingUnixHTTPServer(str(sock), H)
+        # Make the socket usable by the non-root UI container (uid/gid 10001).
+        try:
+            import os as _os
+
+            ui_uid = int(_os.environ.get("UI_UID", "10001"))
+            ui_gid = int(_os.environ.get("UI_GID", "10001"))
+            _os.chown(str(sock), ui_uid, ui_gid)
+            _os.chmod(str(sock), 0o660)
+        except Exception:
+            try:
+                import os as _os
+
+                _os.chmod(str(sock), 0o666)
+            except Exception:
+                pass
+    else:
+        httpd = _ThreadingHTTPServer((BIND, PORT), H)
+
+    httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
