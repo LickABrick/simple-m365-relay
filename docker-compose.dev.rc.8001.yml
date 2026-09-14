@@ -6,7 +6,7 @@
 
 services:
   postfix:
-    image: ghcr.io/lickabrick/simple-m365-relay-postfix:1.1.4-rc.1
+    image: ghcr.io/lickabrick/simple-m365-relay-postfix:2.0.0-rc.1
     container_name: simple-m365-relay-postfix-dev
     restart: unless-stopped
     ports:
@@ -44,7 +44,7 @@ services:
       - "18080"
 
   ui:
-    image: ghcr.io/lickabrick/simple-m365-relay-ui:1.1.4-rc.1
+    image: ghcr.io/lickabrick/simple-m365-relay-ui:2.0.0-rc.1
     container_name: simple-m365-relay-ui-dev
     restart: unless-stopped
     ports:
