@@ -1,76 +1,42 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "automerge": false,
-  "enabled": true,
   "extends": [
-    "config:recommended",
-    ":timezone(Europe/Amsterdam)",
+    "config:best-practices",
+    ":automergeMinor",
+    ":configMigration",
     ":dependencyDashboard",
-    ":prImmediately",
-    ":semanticCommits",
-    ":semanticCommitTypeAll(chore)",
+    ":enableVulnerabilityAlerts",
+    ":ignoreModulesAndTests",
+    ":label(dependencies)",
+    ":rebaseStalePrs",
+    ":separateMajorReleases",
+    ":timezone(UTC)",
+    "docker:pinDigests",
     "helpers:pinGitHubActionDigests"
   ],
-  "labels": [
-    "dependencies"
+  "baseBranchPatterns": [
+    "development"
   ],
-  "packageRules": [
-    {
-      "groupName": "all non-major updates",
-      "matchUpdateTypes": [
-        "minor",
-        "patch"
-      ]
-    },
-    {
-      "groupName": "major updates (separate)",
-      "matchUpdateTypes": [
-        "major"
-      ]
-    },
-    {
-      "groupName": "github actions",
-      "matchManagers": [
-        "github-actions"
-      ]
-    },
-    {
-      "groupName": "docker images",
-      "matchDatasources": [
-        "docker"
-      ]
-    }
-  ],
-  "prConcurrentLimit": 2,
-  "prHourlyLimit": 0,
-  "customManagers": [
-    {
-      "customType": "regex",
-      "datasourceTemplate": "github-releases",
-      "depNameTemplate": "tarickb/sasl-xoauth2",
-      "extractVersionTemplate": "^release-(?<version>.*)$",
-      "managerFilePatterns": [
-        "/^Dockerfile$/"
-      ],
-      "matchStrings": [
-        "ARG\\s+SASL_XOAUTH2_VERSION=(?<currentValue>\\S+)\\n"
-      ],
-      "versioningTemplate": "semver"
-    },
-    {
-      "customType": "regex",
-      "datasourceTemplate": "npm",
-      "depNameTemplate": "tailwindcss",
-      "managerFilePatterns": [
-        "/^apps/web/Dockerfile$/"
-      ],
-      "matchStrings": [
-        "tailwindcss@(?<currentValue>\\d+\\.\\d+\\.\\d+)"
-      ],
-      "versioningTemplate": "npm"
-    }
-  ],
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
+  "ignoreTests": true,
+  "commitBodyTable": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "extends": [
+      "schedule:daily"
+    ]
+  },
+  "minimumReleaseAge": "7 days",
+  "prConcurrentLimit": 15,
+  "prHourlyLimit": 2,
   "schedule": [
-    "before 07:00 on monday"
-  ]
+    "* 6 * * *"
+  ],
+  "dependencyDashboardOSVVulnerabilitySummary": "all",
+  "major": {
+    "dependencyDashboardApproval": true
+  },
+  "osvVulnerabilityAlerts": true,
+  "rangeStrategy": "bump"
 }
