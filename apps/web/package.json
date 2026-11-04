@@ -53,7 +53,7 @@
 		"vitest": "^4.1.8"
 	},
 	"optionalDependencies": {
-		"@rolldown/binding-linux-arm64-gnu": "1.2.4"
+		"@rolldown/binding-linux-arm64-gnu": "1.2.16"
 	},
 	"dependencies": {
 		"@node-rs/argon2": "^2.0.2",
