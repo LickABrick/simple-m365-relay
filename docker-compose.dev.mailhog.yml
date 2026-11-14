@@ -1,6 +1,6 @@
 services:
   mailhog:
-    image: mailhog/mailhog:v1.0.1
+    image: mailhog/mailhog:v1.0.1@sha256:8d76a3d4ffa32a3661311944007a415332c4bb855657f4f6c57996405c009bea
     container_name: simple-m365-relay-mailhog-dev
     restart: unless-stopped
     ports:
