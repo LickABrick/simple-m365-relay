@@ -33,7 +33,9 @@
   "schedule": [
     "* 6 * * *"
   ],
-  "dependencyDashboardOSVVulnerabilitySummary": "all",
+  "dependencyDashboard": {
+    "osvVulnerabilitySummary": "all"
+  },
   "major": {
     "dependencyDashboardApproval": true
   },
