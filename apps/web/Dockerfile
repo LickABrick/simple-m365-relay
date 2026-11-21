@@ -1,4 +1,4 @@
-FROM node:24.21.0-bookworm-slim AS build
+FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS build
 
 WORKDIR /opt/ms365-relay
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
@@ -8,7 +8,7 @@ RUN npm ci --workspace @simple-m365-relay/web --include-workspace-root --no-audi
 COPY apps/web/ ./apps/web/
 RUN npm run build --workspace @simple-m365-relay/web
 
-FROM node:24.21.0-bookworm-slim
+FROM node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 
 ARG APP_VERSION=2.0.2
 ARG APP_GITHUB_REPO=LickABrick/simple-m365-relay
