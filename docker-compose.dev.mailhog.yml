@@ -1,6 +1,6 @@
 services:
   mailhog:
-    image: mailhog/mailhog:v1.0.1
+    image: mailhog/mailhog:v1.0.1@sha256:8d76a3d4ffa32a3661311944007a415332c4bb855657f4f6c57996405c009bea
     container_name: simple-m365-relay-mailhog-dev
     restart: unless-stopped
     ports:
@@ -19,7 +19,7 @@ services:
       MS365_CLIENT_ID: ""
 
   smtpclient:
-    image: python:3.15-alpine
+    image: python:3.15-alpine@sha256:0f9552bb28711333da16915ec146f5e6bb44a7fdac9ced15dc17c2e0206346dd
     container_name: simple-m365-relay-smtpclient-dev
     command: ["sh","-lc","sleep infinity"]
     depends_on:
